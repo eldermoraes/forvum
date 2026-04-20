@@ -445,8 +445,9 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
 ### 7.1 Phase 1 — MVP (v0.1)
 
 - [ ] **M1 — Reactor bootstrap.**
-  - **Files:** `forvum/pom.xml` (parent), `forvum/forvum-bom/pom.xml`, `forvum/forvum-core/pom.xml`, `forvum/forvum-sdk/pom.xml`, `forvum/forvum-engine/pom.xml`, `forvum/forvum-app/pom.xml`, `.gitignore`, `.mvn/maven-compiler.config`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties`.
+  - **Files:** `forvum/pom.xml` (parent), `forvum/forvum-bom/pom.xml`, `forvum/forvum-core/pom.xml`, `forvum/forvum-sdk/pom.xml`, `forvum/forvum-engine/pom.xml`, `forvum/forvum-app/pom.xml`, `.gitignore`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties`.
   - **Note:** The Maven Wrapper (`mvnw`, `mvnw.cmd`, `.mvn/wrapper/`) is generated via `mvn wrapper:wrapper -Dmaven=3.9.14` and committed so contributors and CI invoke an identical Maven version — OSS convention for JVM projects and eliminates a source of "works on my machine" drift.
+  - **Note:** Compiler config (release=25, encoding=UTF-8) consolidated in parent pom.xml — no `.mvn/maven-compiler.config` needed.
   - **Deps:** locks Java 25 (`maven.compiler.release=25`), Quarkus 3.31.x platform BOM, Maven 3.9+.
   - **Verify:** `cd forvum && ./mvnw -N verify` succeeds on every module; `./mvnw -pl forvum-app -am package` produces `forvum-app/target/quarkus-app/quarkus-run.jar`.
   - **Commit:** `chore: bootstrap multi-module reactor`.

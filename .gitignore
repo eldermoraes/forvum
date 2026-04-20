@@ -1,0 +1,30 @@
+# Maven
+target/
+
+# Quarkus
+.quarkus/
+*-runner
+*-runner.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+.factorypath
+bin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local env
+.env
+.env.local
