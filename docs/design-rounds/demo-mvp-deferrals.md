@@ -128,6 +128,34 @@ explicit.
   triggers implementation first.
 - **Scope estimate:** full Group 4c design round + M8 milestone.
 
+### D8 — Raw langchain4j instead of Quarkiverse extensions
+- **ULTRAPLAN reference:** §2.4 specifies `forvum-provider-ollama` 
+  wraps `quarkus-langchain4j-ollama` (Quarkiverse extension).
+- **MVP shape:** forvum-app depends directly on 
+  `dev.langchain4j:langchain4j-ollama`, not the Quarkiverse 
+  extension. Quarkiverse LangChain4j 0.26.1 (latest on Maven 
+  Central as of Apr 2026) has a ChatMemoryProcessor build step 
+  incompatible with Quarkus 3.31.4's stricter runtime-config 
+  consumption rules, causing `mvn package` to fail. Raw 
+  langchain4j bypasses the Quarkiverse build step while still 
+  giving us `OllamaChatModel.builder()` — which is what 
+  `ChatModelFactory` uses anyway.
+- **Debt incurred:** No CDI wiring of `OllamaChatModel` as a bean 
+  (we build it manually). No Quarkus Dev UI integration for the 
+  model. No `@RegisterAiService` declarative API. Quarkiverse BOM 
+  is still imported for transitive version management of 
+  langchain4j core/ollama — the Quarkiverse compile-scope 
+  artifacts just aren't on classpath.
+- **Return trigger:** Quarkiverse publishes a version compatible 
+  with Quarkus 3.31+ (likely the 1.x line currently documented 
+  in their README but not yet on Maven Central as of Apr 2026); 
+  OR we downgrade Quarkus to 3.20.x; OR we commit to raw 
+  langchain4j long-term.
+- **Scope estimate:** Minor swap — replace `langchain4j-ollama` 
+  with `quarkus-langchain4j-ollama` in `forvum-app/pom.xml`, 
+  adjust `ChatModelFactory` to inject the CDI `ChatLanguageModel` 
+  bean if desired.
+
 ### D7 — No CAPR judging, no OpenTelemetry, no DevUI
 - **ULTRAPLAN reference:** §3.4 (OTel), §5.x (CAPR judge agent), 
   §6.x (DevUI extension).
