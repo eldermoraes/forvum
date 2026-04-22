@@ -21,6 +21,15 @@ import java.io.InputStreamReader;
 )
 public class ForvumCli implements Runnable {
 
+    private static final String BANNER = """
+            ███████╗ ██████╗ ██████╗ ██╗   ██╗██╗   ██╗███╗   ███╗
+            ██╔════╝██╔═══██╗██╔══██╗██║   ██║██║   ██║████╗ ████║
+            █████╗  ██║   ██║██████╔╝██║   ██║██║   ██║██╔████╔██║
+            ██╔══╝  ██║   ██║██╔══██╗╚██╗ ██╔╝██║   ██║██║╚██╔╝██║
+            ██║     ╚██████╔╝██║  ██║ ╚████╔╝ ╚██████╔╝██║ ╚═╝ ██║
+            ╚═╝      ╚═════╝ ╚═╝  ╚═╝  ╚═══╝   ╚═════╝ ╚═╝     ╚═╝
+            """;
+
     @CommandLine.Option(
         names = "--agent",
         defaultValue = "demo",
@@ -36,6 +45,9 @@ public class ForvumCli implements Runnable {
 
     @Override
     public void run() {
+        System.out.println();
+        System.out.println(BANNER);
+
         AgentSpec spec = specLoader.load(agentId);
         ChatLanguageModel chatModel = modelFactory.resolve(spec.primaryModel());
         SimpleAgent agent = new SimpleAgent(spec, chatModel);
