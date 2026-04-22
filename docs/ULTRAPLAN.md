@@ -113,7 +113,7 @@ The Maven split also delimits bounded contexts for contribution purposes: **Conf
 Java 25 LTS. We use its modern surface deliberately:
 
 - **Scoped Values** carry the current `AgentId` across virtual-thread continuations without the leakage issues of `ThreadLocal`. The custom `@AgentScoped` CDI context is backed by a `ScopedValue<AgentId>` set at request entry through `ScopedValue.callWhere(CURRENT_AGENT, id, body)`.
-- **Sealed interfaces** on every extension point (`ChannelProvider`, `ModelProvider`, `ToolProvider`, `MemoryProvider`) and on the event hierarchy (`AgentEvent permits TokenDelta, ToolInvoked, ToolResult, FallbackTriggered, Done, Error`). This gives exhaustive pattern matching in channels and compiler-enforced completeness in event handlers.
+- **Sealed interfaces** on every extension point (`ChannelProvider`, `ModelProvider`, `ToolProvider`, `MemoryProvider`) and on the event hierarchy (`AgentEvent permits TokenDelta, ToolInvoked, ToolResult, FallbackTriggered, Done, ErrorEvent`). This gives exhaustive pattern matching in channels and compiler-enforced completeness in event handlers.
 - **Records** for every DTO and value object. Records also minimize the GraalVM reflection surface, since each record has a documented canonical constructor.
 - **Pattern matching for switch** over sealed types in channel, router, and event-handling code paths, replacing visitor boilerplate.
 - **Virtual threads** as the default carrier for per-request work, so fanning out to sub-agents and tool calls is cheap and debuggable.
@@ -203,7 +203,7 @@ The entire user-editable surface sits under `$FORVUM_HOME`, which defaults to `~
 - **`plugins/`** is the runtime drop-in directory for third-party jars. It only works in the JVM fast-jar mode; the native binary cannot load new jars at runtime and instead requires a rebuild that depends on the plugin. This trade-off is documented in §6.3 and made explicit in user documentation.
 - **`state/forvum.sqlite`** is the single SQLite file. The engine opens it in WAL mode (`PRAGMA journal_mode=WAL`) for acceptable single-writer concurrency and enables `PRAGMA foreign_keys=ON` explicitly on every connection.
 
-### 4.2 SQLite schema (Flyway V1)
+### 4.2 SQLite schema (Flyway V1 + V2)
 
 The operational schema is managed as forward-only Flyway migrations under `forvum-engine/src/main/resources/db/migration/`. The V1 baseline defines seven tables that capture every piece of runtime state the agent needs to reason across turns and that operators need to audit or query for CAPR. Every table uses a generated primary key where appropriate and stores timestamps as milliseconds since epoch for simpler aggregation.
 
@@ -309,9 +309,695 @@ CREATE TABLE capr_events (
 CREATE INDEX idx_capr_agent ON capr_events(agent_id, created_at);
 ```
 
+```sql
+-- V2__add_turn_id.sql
+
+-- Shared turn identifier: UUID generated client-side at turn start, propagated
+-- via ScopedValue<UUID> inside @AgentScoped (see §4.3.1). Pre-MVP baseline:
+-- tables are empty at migration time. DEFAULT '' is required by SQLite because
+-- ALTER TABLE ADD COLUMN NOT NULL without DEFAULT fails even on empty tables.
+-- CHECK (turn_id != '') enforces the invariant at INSERT: a missing explicit
+-- turn_id triggers DEFAULT '' and then fails the CHECK.
+
+ALTER TABLE messages         ADD COLUMN turn_id TEXT NOT NULL DEFAULT '' CHECK (turn_id != '');
+ALTER TABLE tool_invocations ADD COLUMN turn_id TEXT NOT NULL DEFAULT '' CHECK (turn_id != '');
+ALTER TABLE provider_calls   ADD COLUMN turn_id TEXT NOT NULL DEFAULT '' CHECK (turn_id != '');
+
+CREATE INDEX idx_messages_turn   ON messages(turn_id);
+CREATE INDEX idx_tool_inv_turn   ON tool_invocations(turn_id);
+CREATE INDEX idx_prov_calls_turn ON provider_calls(turn_id);
+
+-- capr_events.turn_id semantics change from "= messages.id (INTEGER)" in V1 to
+-- "shared UUID (TEXT)" in V2. SQLite cannot ALTER COLUMN TYPE, so the table is
+-- recreated. Pre-MVP tables are empty, so no data migration is required.
+CREATE TABLE capr_events_new (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id   TEXT NOT NULL,
+  agent_id     TEXT NOT NULL,
+  turn_id      TEXT NOT NULL CHECK (turn_id != ''),   -- shared UUID; mirrors messages.turn_id / tool_invocations.turn_id / provider_calls.turn_id
+  passed       INTEGER NOT NULL,                       -- 0 or 1
+  judge_model  TEXT NOT NULL,
+  rationale    TEXT,
+  created_at   INTEGER NOT NULL
+);
+DROP TABLE capr_events;
+ALTER TABLE capr_events_new RENAME TO capr_events;
+CREATE INDEX idx_capr_agent ON capr_events(agent_id, created_at);
+CREATE INDEX idx_capr_turn  ON capr_events(turn_id);
+```
+
 The `provider_calls` table is deliberately denormalized — it stores the model name and provider as plain strings rather than a foreign key into a providers table — because CAPR queries aggregate over time windows and a string scan is cheaper than a join on a small dimension table. The `is_fallback = 1` flag on a call indicates that this call only happened because an earlier call in the fallback chain failed; querying `SELECT agent_id, COUNT(*) FROM provider_calls WHERE is_fallback = 1 GROUP BY agent_id` immediately surfaces agents whose primary model is unreliable.
 
-The `semantic_memory.embedding` column stores a raw `float32` vector as a BLOB. For the MVP we scan linearly (row counts in a single-user deployment are small); when the row count justifies it, we add a `vec0` virtual table via the `sqlite-vec` extension without changing the surrounding schema through a V2 migration. The engine never rewrites history — Flyway is locked forward-only and a CI check fails the build if any existing migration file is modified.
+The `semantic_memory.embedding` column stores a raw `float32` vector as a BLOB. For the MVP we scan linearly (row counts in a single-user deployment are small); when the row count justifies it, we add a `vec0` virtual table via the `sqlite-vec` extension in a later Flyway migration (V3 or later) without changing the surrounding schema. The engine never rewrites history — Flyway is locked forward-only and a CI check fails the build if any existing migration file is modified.
+
+### 4.3 Contract Specifications
+
+Core domain contracts that cross module boundaries are specified here to lock their shape before M2 writes the records. Each entry is treated as a frozen contract: deviations during implementation require amending this section first.
+
+#### 4.3.1 Turn identifier
+
+`turnId: java.util.UUID`. Every turn has a single UUID generated client-side at the *start* of the turn, before the user message is inserted into `messages`. It is propagated through the turn's execution via `ScopedValue<UUID> CURRENT_TURN` bound inside the `@AgentScoped` context (see §5.1). Every `AgentEvent` record carrying a `turnId` field (`Done`, `ErrorEvent`) uses this same UUID, and the same value is written to `messages.turn_id`, `tool_invocations.turn_id`, `provider_calls.turn_id`, and `capr_events.turn_id` (columns added in Flyway V2, see §4.2). This contract is consumed by M6 (`@AgentScoped` scope implementation); any deviation in M6 breaks structural correlation and replay.
+
+#### 4.3.2 AgentEvent hierarchy
+
+The `AgentEvent` hierarchy is a sealed interface with six permits, designed for exhaustive pattern-matching in channel, router, and persistence code paths (a `switch` over `AgentEvent` compiles without a `default` branch). Every event carries an `Instant timestamp()` recording the moment of creation (not emission). Channels subscribe to the event stream for rendering; persistence writers correlate events to `messages`, `tool_invocations`, `provider_calls`, and `capr_events` rows via the ids carried on the events themselves.
+
+```java
+// Module: forvum-core
+// Package: ai.forvum.core.event
+// Each top-level type below lives in its own .java file.
+// Forward reference to ModelRef resolves in §4.3.5.1 (Group 4a).
+
+package ai.forvum.core.event;
+
+import ai.forvum.core.InvocationStatus;  // §4.3.3 (Group 2)
+import ai.forvum.core.ModelRef;  // §4.3.5.1 (Group 4a)
+
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Events emitted by the agent runtime during a turn's execution.
+ *
+ * <p>{@link #timestamp()} is the time of event creation, not of emission
+ * or delivery to subscribers. Consumers monitoring end-to-end latency must
+ * use their own receipt timestamp.
+ */
+public sealed interface AgentEvent
+    permits TokenDelta, ToolInvoked, ToolResult, FallbackTriggered, Done, ErrorEvent {
+
+    Instant timestamp();
+}
+
+public record TokenDelta(Instant timestamp, String text, ModelRef model)
+    implements AgentEvent {}
+
+public record ToolInvoked(
+    Instant timestamp,
+    long invocationId,
+    String toolName,
+    String arguments
+) implements AgentEvent {}
+
+public record ToolResult(
+    Instant timestamp,
+    long invocationId,
+    String result,
+    InvocationStatus status,
+    long latencyMs
+) implements AgentEvent {}
+
+public record FallbackTriggered(
+    Instant timestamp,
+    ModelRef failed,
+    ModelRef next,
+    String reason
+) implements AgentEvent {}
+
+public record Done(
+    Instant timestamp,
+    UUID turnId,
+    String finalMessage
+) implements AgentEvent {}
+
+public record ErrorEvent(
+    Instant timestamp,
+    UUID turnId,
+    String code,
+    String message,
+    String exceptionClass,
+    String stackTraceText
+) implements AgentEvent {
+
+    public static ErrorEvent from(Instant timestamp, UUID turnId,
+                                  String code, String message, Throwable cause) {
+        return new ErrorEvent(
+            timestamp, turnId, code, message,
+            cause == null ? null : cause.getClass().getName(),
+            cause == null ? null : stackTraceToString(cause)
+        );
+    }
+
+    private static String stackTraceToString(Throwable t) {
+        StringWriter sw = new StringWriter();
+        t.printStackTrace(new PrintWriter(sw));
+        return sw.toString();
+    }
+}
+
+public final class FallbackReasons {
+    public static final String RATE_LIMIT   = "rate_limit";
+    public static final String TIMEOUT      = "timeout";
+    public static final String SERVER_ERROR = "server_error";
+    public static final String COST_BUDGET  = "cost_budget";
+
+    private FallbackReasons() {}
+}
+```
+
+**Type conventions and forward references:**
+
+- `turnId: java.util.UUID` — see §4.3.1.
+- `invocationId: long` — mirrors `tool_invocations.id` autoincrement; assigned by the engine at row INSERT before emitting `ToolInvoked`.
+- `InvocationStatus` (on `ToolResult`) — resolved in §4.3.3 (Group 2).
+- `ModelRef` (on `TokenDelta`, `FallbackTriggered`) — resolved in §4.3.5.1 (Group 4a).
+- `FallbackTriggered.reason` is a `String` populated from `FallbackReasons.*` constants only. Migration to a `FailureClass` enum is scheduled for M8 once the taxonomy stabilizes.
+
+#### 4.3.3 SQL-mirror enums (`role`, `event_type`, `status`)
+
+Three enums in `forvum-core` mirror the V1 CHECK constraints on `messages.role`, `episodic_memory.event_type`, and `tool_invocations.status`. Each enum encodes the DB-literal string explicitly via a `dbValue()` accessor and parses incoming JDBC values via `fromDbValue(String)`. Changing a CHECK constraint requires a coordinated update here *plus* a forward-only Flyway migration.
+
+```java
+// Module: forvum-core
+// Package: ai.forvum.core
+// Each enum below lives in its own .java file (Role.java, EventType.java,
+// InvocationStatus.java). Values and their DB-literal strings mirror the V1
+// CHECK constraints in §4.2 verbatim.
+
+package ai.forvum.core;
+
+public enum Role {
+    USER("user"),
+    ASSISTANT("assistant"),
+    SYSTEM("system"),
+    TOOL("tool");
+
+    private final String dbValue;
+    Role(String dbValue) { this.dbValue = dbValue; }
+    public String dbValue() { return dbValue; }
+
+    public static Role fromDbValue(String value) {
+        for (Role r : values()) if (r.dbValue.equals(value)) return r;
+        throw new IllegalStateException(
+            "Unknown role value from DB: '" + value + "'. Indicates schema drift "
+          + "or data corruption. Check Flyway migrations and DB integrity.");
+    }
+}
+
+public enum EventType {
+    OBSERVATION("observation"),
+    DECISION("decision"),
+    REFLECTION("reflection");
+
+    private final String dbValue;
+    EventType(String dbValue) { this.dbValue = dbValue; }
+    public String dbValue() { return dbValue; }
+
+    public static EventType fromDbValue(String value) {
+        for (EventType e : values()) if (e.dbValue.equals(value)) return e;
+        throw new IllegalStateException(
+            "Unknown event_type value from DB: '" + value + "'. Indicates schema drift "
+          + "or data corruption. Check Flyway migrations and DB integrity.");
+    }
+}
+
+public enum InvocationStatus {
+    OK("ok"),
+    ERROR("error"),
+    DENIED("denied");
+
+    private final String dbValue;
+    InvocationStatus(String dbValue) { this.dbValue = dbValue; }
+    public String dbValue() { return dbValue; }
+
+    public static InvocationStatus fromDbValue(String value) {
+        for (InvocationStatus s : values()) if (s.dbValue.equals(value)) return s;
+        throw new IllegalStateException(
+            "Unknown invocation status value from DB: '" + value + "'. Indicates schema drift "
+          + "or data corruption. Check Flyway migrations and DB integrity.");
+    }
+}
+```
+
+**Conventions and rationale:**
+
+- **Explicit `dbValue` pattern.** Each constant carries its DB-literal string in a private field; `dbValue()` exposes it to persistence adapters; `fromDbValue(String)` parses back from JDBC result sets. This decouples enum renames from the DB schema — Java constants can be refactored without breaking persisted rows.
+- **Unknown values throw `IllegalStateException`.** The expected source is the DB itself, whose V1 CHECK constraints prevent unknown values at INSERT. Encountering an unknown value at read time indicates schema drift or data corruption, not a caller mistake — `IllegalStateException` communicates that precisely and makes production-log triage unambiguous.
+- **Exception messages name the DB kind explicitly** (`role`, `event_type`, `invocation status`) and point operators at the two likely causes (Flyway migration drift, direct DB mutation) so the first log line of a symptom carries actionable triage information.
+- **Value order mirrors the V1 CHECK lists** for readability during review. Ordering is not load-bearing at runtime.
+- **One file per enum** in `ai.forvum.core` (`Role.java`, `EventType.java`, `InvocationStatus.java`). Each has an independent lifecycle: a future CHECK-constraint change touches only one file.
+- **`InvocationStatus` resolves the forward reference** declared by `ToolResult.status` in §4.3.2.
+- **Naming.** `InvocationStatus` maps 1:1 to `tool_invocations.status`. A less specific name was rejected because it would invite unrelated reuse across the domain as a general-purpose flag.
+
+#### 4.3.4 PermissionScope
+
+`PermissionScope` is a closed Java enum in `forvum-core` naming the capability classes that tools declare and the engine's `ToolExecutor` enforces before invoking a tool. Unlike the Group 2 SQL-mirror enums, it is not persisted as a typed column in V1 — a denied call surfaces only through `tool_invocations.status = 'denied'`. Serialization to JSON/YAML config (identity files, tool manifests) uses `name()` directly; parsing back into Java uses `fromName(String)`.
+
+```java
+// Module: forvum-core
+// Package: ai.forvum.core
+// Single .java file: PermissionScope.java
+
+package ai.forvum.core;
+
+/**
+ * Capability scopes that tools declare and the engine's ToolExecutor enforces
+ * before invoking a tool. A tool's required scope must be reachable from the
+ * agent's allowed-tools set (indirectly, via the tool's registration) or the
+ * call is refused with PermissionDeniedException and logged to
+ * {@code tool_invocations} with {@code status = 'denied'}.
+ *
+ * <p>Not persisted as a typed SQL column in V1 — denial outcome is captured
+ * only by {@code tool_invocations.status}. Serialization to JSON/YAML config
+ * uses {@link #name()} directly.
+ *
+ * <p>This enum is closed at compile time and grows at milestone boundaries.
+ * See project docs (docs/ULTRAPLAN.md §6). Plugins compiled against a given
+ * core version may only reference scopes present in that version.
+ */
+public enum PermissionScope {
+    FS_READ,
+    FS_WRITE;
+
+    /**
+     * Parses a string into a {@code PermissionScope}, throwing a contextual
+     * {@link IllegalStateException} on unknown input.
+     *
+     * <p>Preferred over {@link Enum#valueOf(Class, String)} because the
+     * built-in throws a generic {@link IllegalArgumentException} whose
+     * message (e.g., {@code "No enum constant ai.forvum.core.PermissionScope.FOO"})
+     * does not identify the likely cause (config drift, hand-edited manifest)
+     * or point an operator at where to look. This factory's
+     * {@code IllegalStateException} message names the suspect sources
+     * explicitly so a production log line carries actionable triage info.
+     *
+     * @param value the raw string from a config file or manifest
+     * @return the matching {@code PermissionScope}
+     * @throws IllegalStateException if {@code value} is {@code null} or does
+     *         not match any declared scope
+     */
+    public static PermissionScope fromName(String value) {
+        for (PermissionScope s : values()) if (s.name().equals(value)) return s;
+        throw new IllegalStateException(
+            "Unknown PermissionScope value: '" + value + "'. Indicates config drift "
+          + "or an invalid identity/tool manifest. Check files under $FORVUM_HOME.");
+    }
+}
+```
+
+**Conventions and rationale:**
+
+- **Closed at compile time, grows at milestone boundaries.** Java enums cannot be extended at runtime; plugins loaded from `plugins/` (JVM fast-jar mode) reference scopes by identifier, which forces a core-version bump whenever a plugin needs a new scope. This trade-off is deliberate — it keeps the authorization surface auditable in one file.
+- **Not persisted in SQL.** V1 has no `tool_invocations.permission_scope` column; denial records the outcome via `status = 'denied'` only. Any future requirement to query denials *by scope* should add the column via a forward-only Flyway migration rather than backfill via string matching on `result`.
+- **`fromName(String)` over `Enum.valueOf`.** The custom factory throws `IllegalStateException` with a contextual message ("config drift or invalid manifest, check $FORVUM_HOME"), which makes triage of a bad identity file immediate. `Enum.valueOf` throws `IllegalArgumentException` with a generic "No enum constant …" message and does not differentiate "caller bug" from "config-file corruption". See the JavaDoc on `fromName` for the full rationale.
+- **Serialization via `name()`.** No `dbValue` field and no `fromDbValue` — those belong to SQL-mirror enums (Group 2). Identity and tool-manifest parsers use `PermissionScope.fromName(...)`; emitters write `scope.name()`.
+- **Single file, `ai.forvum.core` package** (same package as the Group 2 enums). A permissions sub-package is deferred until a second type joins.
+- **`FS_READ` covers directory listing (`FsListTool`).** Granularity between content-read and metadata-list is not separated in MVP; if needed, `FS_LIST` would be added as a specialized scope in a future milestone.
+- **RBAC layer is orthogonal.** §6.3 line 825 ("`PermissionScope` extended to role-based sets; `identities/<id>.json` declares roles") adds a Phase 2 role → scope-set mapping above this enum, not inside it. The enum itself remains a flat list of capabilities.
+
+**Reserved future values:**
+
+| Scope (reserved name)  | Introduced in | Note |
+|------------------------|---------------|------|
+| WEB_BROWSE             | Phase 2 (§6)  | browser tool |
+| WEB_FETCH / WEB_SEARCH | bundled-web   | naming TBD in owning PR |
+| SHELL_EXEC             | Phase 2 (§6)  | sandboxed shell |
+
+These names are forward-reserved to avoid bikeshedding in the owning PR. Each will land in `PermissionScope.java` in the milestone that introduces its consuming tool module.
+
+#### 4.3.5 ModelRef, FallbackChain, CostBudget
+
+##### 4.3.5.1 `ModelRef`
+
+A `ModelRef` identifies a concrete LLM to invoke: a provider (which Quarkiverse extension handles the call) and a model (the specific string that provider understands). It is a value object, intentionally minimal, and is the glue between user-facing configuration (`agents/*.json`, `crons/*.json`), the provider resolution SPI (`ModelProvider.resolve(ModelRef) → ChatModel`), and the telemetry row (`provider_calls.provider` / `provider_calls.model`).
+
+```java
+// Module: forvum-core
+// Package: ai.forvum.core
+
+package ai.forvum.core;
+
+public record ModelRef(String provider, String model) {
+
+    public ModelRef {
+        if (provider == null || provider.isBlank()
+            || !provider.strip().equals(provider)) {
+            throw new IllegalStateException(
+                "ModelRef provider must be a non-blank token without "
+              + "leading/trailing whitespace. Got: '" + provider + "'. "
+              + "Check config file formatting.");
+        }
+        if (model == null || model.isBlank()
+            || !model.strip().equals(model)) {
+            throw new IllegalStateException(
+                "ModelRef model must be a non-blank token without "
+              + "leading/trailing whitespace. Got: '" + model + "'. "
+              + "Check config file formatting.");
+        }
+        provider = provider.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * Parse a {@code provider:model} spec string.
+     *
+     * <p>Splits on the FIRST colon only, so provider-specific model strings
+     * that themselves contain colons (e.g., Ollama tags like {@code qwen3:1.7b})
+     * survive the round-trip. Both sides must be non-blank and free of
+     * leading/trailing whitespace; provider is case-folded to lowercase.
+     *
+     * <p>Provider-only shorthand (e.g., {@code "ollama"} without a model) is
+     * NOT supported — see the convention note below.
+     *
+     * @throws IllegalStateException if {@code spec} is null, blank, has no
+     *         colon, or either side fails the canonical constructor checks.
+     */
+    public static ModelRef parse(String spec) {
+        if (spec == null || spec.isBlank()) {
+            throw new IllegalStateException(
+                "ModelRef spec must be non-blank. Check config file formatting.");
+        }
+        int colon = spec.indexOf(':');
+        if (colon < 0) {
+            throw new IllegalStateException(
+                "ModelRef spec must use 'provider:model' form; got: '" + spec
+              + "'. Provider-only shorthand is not supported — configuration "
+              + "files must specify both halves explicitly.");
+        }
+        String p = spec.substring(0, colon);
+        String m = spec.substring(colon + 1);
+        return new ModelRef(p, m);
+    }
+
+    @Override
+    public String toString() {
+        return provider + ":" + model;
+    }
+}
+```
+
+**Conventions:**
+
+- **SQL persistence decomposes to `(provider, model)` — two columns, not one combined string.** `provider_calls.provider` (TEXT NOT NULL) and `provider_calls.model` (TEXT NOT NULL) map 1:1 to the two record components. The denormalization exists specifically to make `provider_calls` queryable without parsing — "show me all failures of `anthropic`" stays a single indexable predicate. This is the fundamental reason `ModelRef` has two fields instead of one string.
+- **Format is `provider:model`, both halves required.** `ModelRef` does not support provider-only shorthand; configuration files (`agents/*.json`, `crons/*.json`) MUST specify the full `provider:model` form. A value like `"ollama"` alone fails at parse time — it does not silently pick a default model from the provider registry. If config-layer ergonomics ever requires shorthand, it would be added as syntactic sugar in the config parser (which owns its own defaults policy), not in the type — `ModelRef` stays honest about what it identifies.
+- **First-colon split is intentional.** Ollama tags (`qwen3:1.7b`, `llama3.2:1b`) and some vendor version strings use colons internally. The parser treats only the first colon as the delimiter and passes the rest through untouched.
+- **Equality invariants worth pinning in M2 tests:** `ModelRef.parse("ANTHROPIC:foo")` equals `ModelRef.parse("anthropic:foo")` (provider case-folds to lowercase in the canonical constructor); `ModelRef.parse("anthropic:Foo")` does NOT equal `ModelRef.parse("anthropic:foo")` (model is case-preserved because provider model identifiers are case-sensitive at the API level).
+- **Serialization roundtrip invariant:** for any valid `ModelRef` `ref`, `ModelRef.parse(ref.toString()).equals(ref)` holds. Config writers should use `toString()` when emitting to JSON/YAML; no separate serialization method is needed. (Together with the case-folding invariant above: input `"Ollama:foo"` parses, normalizes to `"ollama:foo"`, and roundtrips as `"ollama:foo"`.)
+- **Deferred to M7 (observability):** whether the OpenTelemetry span `forvum.llm.call` emits the model as a single `<provider>:<model>` string attribute (matching `ModelRef.toString()`) or as two separate attributes (`llm.provider` + `llm.model`). The type contract supports both — M7 picks based on OTel semantic-conventions prevailing at implementation time.
+- **Forward reference resolution.** The `ModelRef` forward reference declared in §4.3.2 (`TokenDelta.modelRef`, `FallbackTriggered.primary`, `FallbackTriggered.attempted`) resolves to this record.
+
+##### 4.3.5.2 `CostBudget` and related types
+
+A `CostBudget` declares a monetary (USD) and/or token cap bounding an agent's or cron's LLM spend over a scoped time window. It is a pure data record — caps and window are static configuration — paired with a read-side service, `BudgetMeter`, that reports current usage by aggregating over the `provider_calls` ledger (§4.2) on demand. Nothing is persisted on `CostBudget` itself; the ledger is authoritative. Per-dimension opt-in is expressed via nullability: `maxUsd = null` means "no USD cap", `maxTokens = null` means "no token cap", and both being null is rejected at construction time.
+
+All types in this subsection live in the `ai.forvum.core.budget` package of the `forvum-core` module, co-located with `ModelRef` (§4.3.5.1) at the module level but grouped into their own package to signal the budget surface as a discoverable unit. Two unchecked exceptions are declared alongside the records — `BudgetExhaustedException` (thrown by `FallbackChatModel` on a pre-call check, §5.4) and `SpawnConfigurationException` (thrown at spawn time when a `SessionWindow`-scoped parent budget would be silently inherited without a child-specific override, §5.5) — both caught by the engine and surfaced as terminal `Error` `AgentEvent`s (§4.3.2). `CostBudget` is distinct from `toolBudget` (§5.5 tool-loop count cap); the two caps coexist on each config independently.
+
+```java
+// Module: forvum-core
+// Package: ai.forvum.core.budget
+// Each top-level type below lives in its own .java file.
+
+package ai.forvum.core.budget;
+
+import java.math.BigDecimal;
+import java.time.ZoneId;
+import java.util.UUID;
+
+// -- Shape: the cap carrier --
+
+public record CostBudget(BigDecimal maxUsd, Long maxTokens, Window window) {
+    public CostBudget {
+        if (maxUsd == null && maxTokens == null) {
+            throw new IllegalStateException(
+                "CostBudget must declare at least one cap (maxUsd, "
+              + "maxTokens, or both). Both nulls indicates either a "
+              + "config-file error or a programmatic construction bug. "
+              + "Check agents/<id>.json or crons/<id>.json.");
+        }
+        if (maxUsd != null && maxUsd.signum() < 0) {
+            throw new IllegalStateException(
+                "CostBudget maxUsd must be non-negative. Got: " + maxUsd
+              + ". Negative caps are nonsensical — check config "
+              + "file formatting.");
+        }
+        if (maxTokens != null && maxTokens < 0) {
+            throw new IllegalStateException(
+                "CostBudget maxTokens must be non-negative. Got: " + maxTokens
+              + ". Negative caps are nonsensical — check config "
+              + "file formatting.");
+        }
+        if (window == null) {
+            throw new IllegalStateException(
+                "CostBudget window must be non-null. Every budget "
+              + "requires an explicit time window (DayWindow or "
+              + "SessionWindow). Check agents/<id>.json or "
+              + "crons/<id>.json — if the timezone field was the "
+              + "only window-related config, the config parser "
+              + "must still construct a DayWindow with resolved "
+              + "ZoneId before building CostBudget.");
+        }
+    }
+}
+
+// -- Scope and timing --
+
+/**
+ * Scope + time window over which a {@link CostBudget} is aggregated.
+ *
+ * <p><b>Marker interface with scope data carried by permits.</b>
+ * This interface declares no methods. Each permit carries the scope
+ * data relevant to its granularity ({@link ZoneId} for
+ * {@link DayWindow}; {@code sessionId + agentId} for
+ * {@link SessionWindow}). Consumers that must derive a persistence
+ * query from a {@code Window} pattern-match on the permit type via
+ * exhaustive {@code switch} — see {@link BudgetMeter} implementations
+ * in the M5 persistence layer (§5.x) for the canonical pattern.
+ *
+ * <p><b>Extensibility contract.</b> Adding a new permit to this
+ * sealed interface is a source-compatible change for code that only
+ * constructs or passes {@code Window} values. Consumers that
+ * pattern-match on permits via exhaustive {@code switch} will fail
+ * compilation until the new permit is handled — this is the intended
+ * surfacing mechanism for new cost-window policies.
+ */
+public sealed interface Window permits DayWindow, SessionWindow {
+}
+
+public record DayWindow(ZoneId tz) implements Window {
+    public DayWindow {
+        if (tz == null) {
+            throw new IllegalStateException(
+                "DayWindow tz must be non-null. Config-parse boundary "
+              + "substitutes ZoneId.systemDefault() when the \"timezone\" "
+              + "field is absent from agents/<id>.json or crons/<id>.json, "
+              + "so a null reaching this constructor indicates a wiring bug.");
+        }
+    }
+}
+
+public record SessionWindow(String sessionId, String agentId) implements Window {
+    public SessionWindow {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalStateException(
+                "SessionWindow sessionId must be non-null and non-blank. "
+              + "Got: '" + sessionId + "'. This indicates the session "
+              + "context was not propagated at construction time.");
+        }
+        if (agentId == null || agentId.isBlank()) {
+            throw new IllegalStateException(
+                "SessionWindow agentId must be non-null and non-blank. "
+              + "Got: '" + agentId + "'. Check agent resolution before "
+              + "constructing.");
+        }
+    }
+}
+
+// -- Read-side --
+
+/**
+ * Read-side service for querying a {@link CostBudget}'s
+ * current usage.
+ *
+ * <p>Implementations aggregate over {@code provider_calls}
+ * (§4.2) scoped by the budget's {@link Window} to produce
+ * an atomic {@link Usage} snapshot in a single SQL trip.
+ * The default implementation lives in the M5 persistence
+ * layer (§5.x); this interface ships only the contract.
+ *
+ * <p>Safe to inject as a singleton CDI bean; no per-call
+ * state.
+ */
+public interface BudgetMeter {
+    Usage usage(CostBudget budget);
+}
+
+/**
+ * Atomic snapshot of a {@link CostBudget}'s current usage, produced
+ * by a single {@code SUM()} trip over {@code provider_calls} and
+ * consumed jointly by the enforcement path and observability layers.
+ *
+ * <p><b>Atomicity.</b> All four fields derive from the same SQL
+ * aggregation; no caller should recompute any field from the others.
+ * The snapshot is a point-in-time read — subsequent calls can return
+ * different values as concurrent turns advance the ledger.
+ *
+ * <p><b>Biconditional invariant.</b> The canonical constructor
+ * enforces {@code cause != null} if and only if
+ * {@code exhausted == true}. A violation throws
+ * {@link IllegalStateException} and names which side of the
+ * biconditional was broken (see constructor source).
+ */
+public record Usage(
+    Spend spent,              // already consumed (usd + tokens)
+    Spend remaining,          // headroom; individual dimensions may be
+                              // null when the matching cap on CostBudget
+                              // is null (opt-out per Decision 1)
+    boolean exhausted,        // any non-null cap reached
+    ExhaustionCause cause     // null iff exhausted == false
+) {
+    public Usage {
+        if (spent == null) {
+            throw new IllegalStateException(
+                "Usage spent must be non-null. Construct via BudgetMeter "
+              + "or test fixtures — a null here indicates a programmatic "
+              + "construction bug.");
+        }
+        if (remaining == null) {
+            throw new IllegalStateException(
+                "Usage remaining must be non-null. Individual dimensions "
+              + "inside the Spend may be null (opt-out), but the Spend "
+              + "record itself must be present.");
+        }
+        if (exhausted && cause == null) {
+            throw new IllegalStateException(
+                "Usage cause must accompany exhausted=true. Either the "
+              + "ExhaustionCause was lost between BudgetMeter query and "
+              + "Usage construction, or the exhausted flag was set "
+              + "without computing cause. Check BudgetMeter output.");
+        }
+        if (!exhausted && cause != null) {
+            throw new IllegalStateException(
+                "Usage cause must be null when exhausted=false. A non-null "
+              + "cause paired with exhausted=false indicates a caller "
+              + "populated cause without flipping the exhausted flag.");
+        }
+    }
+}
+
+public record Spend(BigDecimal usd, Long tokens) {
+    public Spend {
+        if (usd != null && usd.signum() < 0) {
+            throw new IllegalStateException(
+                "Spend usd must be null or non-negative. Got: " + usd
+              + ". Negative values indicate either a ledger accounting "
+              + "bug or an arithmetic underflow in BudgetMeter.");
+        }
+        if (tokens != null && tokens < 0) {
+            throw new IllegalStateException(
+                "Spend tokens must be null or non-negative. Got: " + tokens
+              + ". Negative values indicate either a ledger accounting "
+              + "bug or an arithmetic underflow in BudgetMeter.");
+        }
+    }
+}
+
+public enum ExhaustionCause {
+    USD_CAP_HIT,
+    TOKEN_CAP_HIT,
+    BOTH_CAPS_HIT
+}
+
+// -- Failure signals --
+
+/**
+ * Thrown by {@code FallbackChatModel.chat(...)} when a pre-call
+ * {@link BudgetMeter#usage(CostBudget)} check returns
+ * {@code exhausted == true}. The exception short-circuits the
+ * fallback chain for cost-driven exhaustion — no further links are
+ * attempted, in contrast with retry-class {@code FallbackReasons}
+ * (see §5.4) — and is caught by the engine layer, which surfaces it
+ * as a terminal {@code Error} {@link ai.forvum.core.event.AgentEvent}
+ * with {@code code = "budget_exhausted"} plus {@code cause} and
+ * {@code turnId} attributes.
+ *
+ * <p>Unchecked because the only legitimate catcher is the engine
+ * layer; intermediate layers should not declare {@code throws}.
+ */
+public final class BudgetExhaustedException extends RuntimeException {
+    private final ExhaustionCause cause;
+    private final UUID turnId;
+
+    public BudgetExhaustedException(ExhaustionCause cause, UUID turnId) {
+        super("Budget exhausted: " + cause + " in turn " + turnId);
+        this.cause = cause;
+        this.turnId = turnId;
+    }
+
+    public ExhaustionCause cause() { return cause; }
+    public UUID turnId() { return turnId; }
+}
+
+/**
+ * Thrown at spawn time when a parent agent's
+ * {@link CostBudget} carries a {@link SessionWindow} and
+ * the spawn request omits an explicit budget override.
+ *
+ * <p>When a parent's {@code CostBudget} uses
+ * {@code SessionWindow}, the window filters by the
+ * parent's {@code (sessionId, agentId)} pair — so
+ * inheriting it verbatim into a child would cause every
+ * call the child makes (tagged with the child's own
+ * {@code (sessionId, agentId)}) to be invisible to the
+ * budget's SUM aggregation. The child would appear to
+ * have unlimited budget. This exception surfaces the
+ * misconfiguration at spawn time rather than silently
+ * at runtime. See §5.5 for the validation site and the
+ * recommended override shape.
+ *
+ * <p>Like {@link BudgetExhaustedException}, this is
+ * unchecked and is caught by the engine layer, which
+ * surfaces it as a terminal {@code Error}
+ * {@link ai.forvum.core.event.AgentEvent} with
+ * {@code code = "spawn_invalid_config"} plus
+ * {@code parentAgentId}, {@code childAgentId}, and the
+ * educational {@code getMessage()} text.
+ */
+public final class SpawnConfigurationException extends RuntimeException {
+    private final String parentAgentId;
+    private final String childAgentId;
+
+    public SpawnConfigurationException(
+            String parentAgentId, String childAgentId, String reason) {
+        super(reason);
+        this.parentAgentId = parentAgentId;
+        this.childAgentId = childAgentId;
+    }
+
+    public String parentAgentId() { return parentAgentId; }
+    public String childAgentId() { return childAgentId; }
+}
+```
+
+**Type conventions and cross-references:**
+
+- **Two-dimensional cap with per-dimension opt-in, expressed as a flat record.** `maxUsd` (`BigDecimal`) and `maxTokens` (`Long`) are both nullable; at least one must be non-null (enforced in the canonical constructor). Pure-cloud users configure USD only; pure-local users configure tokens only; hybrid users configure both. Exhaustion fires when *any* non-null cap is reached. A flat record was chosen over a sealed hierarchy of cap types (`UsdBudget`/`TokenBudget`/`CompositeBudget`) because USD and token dimensions differ only in which field is populated — not in schema shape — so the hierarchy would import form without the justifying condition. (Decisions 1, 4)
+- **Validation via `IllegalStateException` with origin-naming messages.** All canonical constructors in this subsection throw `IllegalStateException` (not `IllegalArgumentException`) with triage-oriented text naming the likely origin of the invalid value — config file (`agents/<id>.json`, `crons/<id>.json`) or a ledger / arithmetic bug. `CostBudget`'s canonical constructor in particular enforces four invariants: at least one cap is non-null, `maxUsd` (if present) is non-negative, `maxTokens` (if present) is non-negative, and `window` is non-null. Matches the convention set by `ModelRef` (§4.3.5.1) and earlier Tier-1 Groups. (Decision 4)
+- **`provider_calls` is the authoritative cost ledger.** Neither `CostBudget` nor `Usage` persists spend state; the read-side aggregates over `provider_calls` on demand via `SUM(cost_usd), SUM(tokens_in + tokens_out)` scoped by the current `Window`. Denormalized aggregate columns were rejected to avoid the derived-cache desync class of bugs. (Decision 2)
+- **Null `cost_usd` rows contribute zero to the USD aggregation.** Providers that do not report cost (e.g., local Ollama) write `NULL` to `provider_calls.cost_usd`; `SUM(cost_usd)` ignores NULL by SQL semantics, yielding the intuitive "local calls are free in USD" contract without `COALESCE` or provider-name special-casing. The token dimension is unaffected (`tokens_in` and `tokens_out` are `NOT NULL`). (Decision 3)
+- **`Window` is a sealed marker interface; permits carry scope data.** The interface declares no methods. `DayWindow(ZoneId tz)` holds the resolved timezone; `SessionWindow(String sessionId, String agentId)` holds the session identity. `BudgetMeter` implementations pattern-match on the permit type via exhaustive `switch` to build the SQL filter; adding a new permit breaks compilation at consumer sites, which is the intended extensibility surface. (Decision 5)
+- **`ZoneId` resolution on `DayWindow` is config-parse work, not runtime.** The optional `timezone` field in `agents/<id>.json` (and `crons/<id>.json`) is parsed at config load; absent → `ZoneId.systemDefault()`. A null `tz` reaching the `DayWindow` constructor indicates a wiring bug, not a missing config. (Decision 5)
+- **Reset policy is implicit in each `Window` permit.** `DayWindow` resets at calendar-aligned midnight in its `tz`. `SessionWindow` has no internal reset — it spans the lifetime of the identified session. A free `reset` field was rejected because it would admit nonsensical `(permit, reset)` combinations that the type system should rule out. (Decision 6)
+- **`BudgetMeter` is a service; `CostBudget` is pure data.** The read-side of the budget lives on a CDI-wired bean, not on `CostBudget` itself — runtime concerns (ledger queries) stay out of the data record. The default `BudgetMeter` implementation lives in the M5 persistence layer (§5.x) and owns the SQL; §4.3.5.2 ships only the interface. (Decision 7)
+- **`Usage` is an atomic snapshot carrying spent, remaining, exhaustion, and cause.** A single `SUM()` trip populates every consumer's need: enforcement reads `usage.exhausted()`; operator commands read `usage.spent()` / `usage.remaining()`; fallback-reason classification reads `usage.cause()`. No re-query race between "check exhausted" and "observe spent" because all four fields come from the same aggregation. (Decision 7)
+- **`Spend` has boxed `Long tokens`, not primitive.** Allows `remaining.tokens` to be `null` when the budget's `maxTokens` is `null` (opt-out per Decision 1). Sentinel alternatives (`Long.MAX_VALUE` for "no cap") were rejected as obfuscating. `spent`'s non-null dimensions are a `BudgetMeter` contractual guarantee, not a `Spend`-constructor invariant — the constructor permits null so the type stays reusable for `remaining`. (Decision 7)
+- **`ExhaustionCause` includes `BOTH_CAPS_HIT` as a first-class constant.** The rare case where both dimensions reach their caps in the same SQL trip is visible downstream (fallback reason, operator log, OTel attribute) without an ad-hoc bitmask encoding. (Decision 7)
+- **`FallbackChatModel` pre-call is the enforcement point.** The decorator invokes `BudgetMeter.usage(budget)` before dispatching to the selected `ModelProvider`; exhaustion emits `FallbackTriggered(reason = FallbackReasons.COST_BUDGET, cause = usage.cause)`. Enforcement is **best-effort**: the check-to-record window creates overshoot bounded by `concurrent_calls × per_call_cost` — typical interactive use ~$0.02–$0.10, heavy-fanout scenarios up to ~$5. Users with strict caps should configure `maxUsd` 5–10% below their hard limit. (Decision 8)
+- **Cost-driven exhaustion short-circuits the chain via `BudgetExhaustedException`.** Unlike retry-class `FallbackReasons` (`RATE_LIMIT`, `TIMEOUT`, `SERVER_ERROR`) where the chain loop `continue`s to the next link, `COST_BUDGET` throws `BudgetExhaustedException` from `FallbackChatModel.chat(...)` — no further links are attempted; the engine catches the exception and emits a terminal `Error` `AgentEvent` with `code = "budget_exhausted"`. Unchecked because the only legitimate catcher is the engine layer; intermediate layers avoid `throws` pollution. (Decision 9)
+- **Warn+continue, escalate-to-human, and per-agent-configurable exhaustion responses are explicitly rejected for MVP.** Warn defeats the cap's purpose; escalate needs notification infrastructure absent in Tier 1; per-agent configurability is speculative flexibility without articulated demand. (Decision 9)
+- **Inherited spawn budgets are independent copies.** A child agent's `CostBudget` equals the parent's (immutable record; reference-passed is semantically equivalent to value-copy), but the SQL scope resolves per the child's `agent_id` via CDI context, so spend is tracked independently per agent. Parent caps do **not** bound total tree spend by default — operators needing total-tree enforcement configure conservative per-agent caps or pass explicit reduced budgets at spawn time. (Decision 10)
+- **Override is all-or-nothing.** The spawn API (§5.5) accepts an optional `CostBudget` parameter: absent ⇒ inherit verbatim, present ⇒ replace entirely. No partial merge — ambiguous null semantics (opt-out vs. inherit-this-field) would make the API unreadable. Callers wanting partial adjustments construct the full `CostBudget` explicitly from the parent's immutable record. (Decision 10)
+- **`SessionWindow` inheritance without override is prohibited at spawn time.** A parent `CostBudget` with `SessionWindow` points at parent's `(sessionId, agentId)`; silently inheriting it into a child would cause the child's calls to be invisible to its own SUM, yielding an effectively unbounded budget with no warning. The spawn path throws `SpawnConfigurationException` in that case, carrying parent/child agent IDs and an educational message pointing the operator at the override mechanism. Document-as-degenerate and smart-inheritance (auto-reconstruct) were both rejected in favor of spawn-boundary surfacing. (Decision 10)
+- **Cross-references.** `provider_calls` schema + indexes: §4.2 (V1 schema). Enforcement call site and dispatch pseudocode: §5.4 (`FallbackChatModel`). Spawn mechanism and override parameter: §5.5 (`spawn_worker`). `Error` `AgentEvent` mapping for thrown exceptions (`budget_exhausted`, `spawn_invalid_config`): §4.3.2. `ModelRef` (co-located in `forvum-core` module, different package `ai.forvum.core`): §4.3.5.1. OpenTelemetry span attributes consuming `Usage.spent` and `Usage.cause`: §3.4.
+- **Reserved future extension paths.** *New `Window` permits* — `LineageWindow(rootAgentId)` for shared-budget hierarchies (Group 4c or later), rolling-window / monthly / unbounded-accumulation permits as additional `permits` of the sealed interface (non-breaking). *Per-link cost awareness in `FallbackChain`* — if Group 4c enriches chain links with `costDims` declarations, Decision 9's short-circuit becomes overridable by chain policy, enabling free-tier fallback substitution. *Race-window mitigations* — pre-allocation soft reservations or pessimistic locking if production telemetry shows overshoot exceeding the documented bounds of Decision 8. *Exhaustion escalation* — escalate-to-human via channel notification if demand surfaces post-MVP.
+
+##### 4.3.5.3 `FallbackChain`
+
+*TBD (Group 4c).*
+
+#### 4.3.6 MemoryPolicy
+
+*TBD (Group 5).*
 
 ---
 
@@ -324,6 +1010,8 @@ The single hardest architectural problem Forvum solves is running many agents in
 `@AgentScoped` is a `@NormalScope` annotation declared in `forvum-core`. Its backing context is an implementation of Quarkus ArC's `InjectableContext` SPI, registered via a `BuildStep` in `forvum-engine` so ArC discovers it at build time and generates the correct native reflection hints. A `ScopedValue<AgentId> CURRENT_AGENT` is the context's identity key — every CDI bean annotated `@AgentScoped` resolves to the bean instance keyed by the current scoped value at injection time.
 
 `ScopedValue` over `ThreadLocal` is not a cosmetic choice. Virtual threads fanned out from an orchestrator carry the bound value through continuations without the inheritance semantics of `InheritableThreadLocal`, which the JDK now explicitly discourages for virtual threads. Binding and unbinding is stack-scoped: `ScopedValue.callWhere(CURRENT_AGENT, agentId, () -> agent.run(turn))` guarantees the binding is torn down when the lambda returns, even on exceptions, so no agent ever observes a stale identity. The `InjectableContext` implementation stores per-agent bean instances in a `ConcurrentHashMap<AgentId, ContextInstances>` and evicts entries when the registry removes an agent.
+
+Alongside `CURRENT_AGENT`, the scope carries a second binding `ScopedValue<UUID> CURRENT_TURN`. It is bound at the start of every turn using nested `ScopedValue.where(...)` builders, *before* the user message is inserted into `messages`. Every write path inside the scope that touches `messages`, `tool_invocations`, `provider_calls`, or `capr_events` reads `CURRENT_TURN.get()` and populates that row's `turn_id` column (see §4.3.1 for the contract and §4.2 V2 for the schema). `CURRENT_TURN.get()` is also the source of the `turnId` field on the `Done` and `ErrorEvent` `AgentEvent` records. Together, `CURRENT_AGENT` and `CURRENT_TURN` give every piece of per-turn state a pair of stable identifiers — agent-scope for isolation, turn-scope for structural correlation.
 
 Inside the scope, every bean that holds per-agent state is `@AgentScoped`:
 
@@ -453,7 +1141,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Commit:** `chore: bootstrap multi-module reactor`.
 
 - [ ] **M2 — Core domain types.**
-  - **Files:** `forvum-core/src/main/java/ai/forvum/core/id/AgentId.java`, `Identity.java`, `ChannelMessage.java`, `ToolSpec.java`, `ModelRef.java`, `FallbackChain.java`, `CostBudget.java`, `MemoryPolicy.java`, plus sealed `AgentEvent permits TokenDelta, ToolInvoked, ToolResult, FallbackTriggered, Done, Error`.
+  - **Files:** `forvum-core/src/main/java/ai/forvum/core/id/AgentId.java`, `Identity.java`, `ChannelMessage.java`, `ToolSpec.java`, `ModelRef.java`, `FallbackChain.java`, `CostBudget.java`, `MemoryPolicy.java`, plus sealed `AgentEvent permits TokenDelta, ToolInvoked, ToolResult, FallbackTriggered, Done, ErrorEvent`.
   - **Deps:** none beyond core Java 25. Zero Quarkus dependency — verified by `mvn dependency:analyze`.
   - **Verify:** unit tests in `forvum-core/src/test/java/ai/forvum/core/.../` round-trip each record through Jackson; pattern-matching over `AgentEvent` compiles without a `default` branch.
   - **Commit:** `feat(core): add domain records and sealed event hierarchy`.
@@ -670,7 +1358,7 @@ The MVP is "done" when all twenty Phase 1 milestones are green and the following
 5. **Sub-agent spawn.** Ask the main agent to "use a researcher sub-agent to find X". Expected: a new `researcher` agent is spawned via `AgentRegistry.spawn`, runs its own turn, returns; the trace contains `forvum.graph.node{name=spawn_worker}` → `forvum.graph.node{name=worker_run}` spans.
 6. **Web channel parity.** Start the web channel, open `http://localhost:8080/`, send the same message. Expected: the same assistant reply; a new row in `sessions` distinct from the TUI session.
 7. **Telegram channel parity.** Configure a bot token, DM the bot from an allowed user id. Expected: reply within the turn latency budget; denied for a disallowed user id.
-8. **Cron run.** Add `crons/daily-brief.json` firing every minute with `primary = ollama`. Wait 90 seconds. Expected: `messages` contains an assistant message from the cron; `provider_calls.provider = 'ollama'`.
+8. **Cron run.** Add `crons/daily-brief.json` firing every minute with `primary = ollama:llama3.2:1b`. Wait 90 seconds. Expected: `messages` contains an assistant message from the cron; `provider_calls.provider = 'ollama'`.
 9. **Hot reload without restart.** Edit `agents/main.md` while the process runs; send a new message. Expected: the new system prompt is in effect; prior turns finished with the old prompt.
 10. **CAPR dashboard.** Enable judge mode, run five turns, visit `/q/dashboard/capr`. Expected: the endpoint returns a JSON summary with at least five entries in `capr_events`.
 
