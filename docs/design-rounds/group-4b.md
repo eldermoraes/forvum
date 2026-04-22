@@ -288,6 +288,231 @@ The `BudgetMeter` **implementation** (the actual SUM query, CDI wiring against t
 - **§3.4 OpenTelemetry observability:** span attributes for `forvum.llm.call` can expose `usage.spent().usd()` and `usage.spent().tokens()` directly from an already-computed snapshot when the caller already paid for a `BudgetMeter.usage()` trip for the enforcement check — avoiding redundant SUM queries per span. No new contract surface; just a hook into the existing one.
 - **#9 enforcement boundary (unblocked by this decision):** the shape of `BudgetMeter.usage()` is independent of *who* invokes it — `FallbackChatModel` decorator, engine layer, or per-provider adapter all call the same method. #9 decides only the call site, not the API. Atomic-snapshot semantics also mean whichever boundary is chosen sees a consistent read regardless of concurrency.
 
+### Decision 8 — Enforcement boundary
+**Approved:** 2026-04-22 (session-local)
+**Decision:** `FallbackChatModel.chat(...)` is the enforcement point. Before dispatching to the selected `ModelProvider`, the decorator invokes `BudgetMeter.usage(budget)` on the current `CostBudget`. If `Usage.exhausted == true`, the decorator emits a `FallbackTriggered` event carrying `reason = FallbackReasons.COST_BUDGET` and the `ExhaustionCause` from the snapshot, then yields control back to the fallback-chain loop — effectively asking the chain to try the next link instead of the currently-selected provider. Behavior of the chain loop *when* the fallback fires (hard stop, free-tier substitution, escalate-to-human, etc.) is explicitly scoped to Decision 9 / open point #4 (exhaustion behavior), not to this decision.
+**Rationale:**
+- **Fit with `FallbackReasons.COST_BUDGET` as a first-class fallback trigger.** §4.3.2 (preserved by Decision 3) already encodes budget exhaustion as a fallback reason. A pre-call check inside `FallbackChatModel` routes exhaustion through the same "try next link" machinery as rate-limit / timeout / server-error — no novel code path for cost-driven routing.
+- **Per-call granularity matches the ledger.** `provider_calls` records one row per LLM call; enforcing once per call keeps check and record on the same axis. Tool loops (§5.5) making N LLM calls in a single turn get N independent checks.
+- **Minimum provider surface.** One check site covers every provider; `ModelProvider` implementations (M9–M12) remain thin SDK wrappers with no cost awareness of their own.
+- **Race window, made explicit (not glossed).** Pre-call enforcement is best-effort — between the check passing and the spend being persisted, a concurrent turn can commit its own spend and push the shared ledger over the cap. The race window scales as `concurrent_calls × per_call_cost`:
+  - *Typical interactive use* (1–2 parallel turns on small/medium models): overshoot bounded at ~$0.02–$0.10.
+  - *Fanout scenario* (sub-agent spawn with parallel execution + heavy models like Opus, up to 10 concurrent calls at ~$0.50/call): overshoot up to ~$5.
+  
+  This is accepted for MVP as **best-effort enforcement**: `maxUsd` is the *intent*, not a transactional gate. Users with strict financial caps should configure a **conservative buffer** — setting `maxUsd` 5–10% below their hard limit absorbs typical fanout overshoot without meaningfully under-utilizing the budget.
+- **Future mitigations documented, not promised.** Three paths exist for tightening the race window if production metrics later show the bound is exceeded in real use; none is implemented in MVP:
+  - *Pre-allocation soft reservations.* Insert a "reserved" row in the ledger before dispatch, reconcile on completion or timeout. Requires extra persistence state and rollback logic — premature for Tier 1.
+  - *Pessimistic SQL lock* (`SELECT … FOR UPDATE`). SQLite's lock granularity is per-database (not per-row) and serializing budget reads would bottleneck throughput; this also breaks the stateless-budget property established by Decision 2.
+  - *Accept bounded overshoot and document the trade-off* — this decision's choice for MVP.
+  
+  Any of these can be revisited in a later milestone if telemetry shows overshoot exceeding the documented bound.
+
+**Resolves open point(s):** #9
+
+**Implication for §4.3.5.2 spec:** None. The contract types locked by Decisions 4, 5, 6, 7 are sufficient; §4.3.5.2 owns contracts, not enforcement flow.
+
+**Implication for §5.4 `FallbackChatModel` spec:** §5.4 gains a paragraph describing the dispatch order inside `chat(...)`, plus a declared dependency on `BudgetMeter` (CDI-wired alongside the chain-config fields). Reference pseudocode for the order:
+
+```
+for each link in chain:
+    usage = budgetMeter.usage(budget)
+    if usage.exhausted:
+        emit FallbackTriggered(reason = COST_BUDGET, cause = usage.cause)
+        continue  // yield to chain loop; next-link behavior per Decision 9 / #4
+    try:
+        return link.provider.chat(...)
+    catch (RetryableException e):
+        emit FallbackTriggered(reason = mapToFallbackReason(e))
+        continue
+// chain exhausted: propagate terminal failure
+```
+
+Whether `continue` after a COST_BUDGET emission actually proceeds to the next link, short-circuits the whole chain, or triggers a different response (escalate, warn-and-continue, etc.) is the scope of Decision 9 / open point #4. This decision locks only the **trigger mechanism** (where and when the check fires, what event it emits), not the **response**.
+
+**Implication for other sections:**
+- **§3.4 OpenTelemetry observability:** the budget-check span attribute for `forvum.llm.call` can expose `Usage.spent.usd`, `Usage.spent.tokens`, and (when `exhausted`) `Usage.cause` directly from the snapshot already computed for enforcement — no extra SUM query per span. Attribute keys consistent with Decision 7's suggested mapping (`cost_budget.cause = "usd_cap_hit"`, etc.).
+- **Configuration documentation (§4.1 + operator docs):** `agents/<id>.json` and `crons/<id>.json` schema notes must explicitly mention the **best-effort enforcement** trade-off — `maxUsd` is the intent, not a transactional guarantee — and include the **conservative-buffer recommendation** (5–10% below the operator's hard limit) for users with strict caps.
+
+**Punts (deferred to Decision 9 / open point #4 — exhaustion behavior):**
+- **Free-tier fallback substitution.** If a chain is configured as `[anthropic, ollama]` and the USD cap is exhausted, should the `continue` branch inside `FallbackChatModel.chat(...)` try `ollama` (which reports `NULL` cost → Decision 3 treats as zero → would not grow the exhausted USD dimension), or should exhaustion short-circuit the entire chain regardless of which providers remain? This is an **exhaustion-behavior** question (what happens *in response to* `exhausted == true`), not an **enforcement-location** question (where the check sits). Punted to Decision 9 / open point #4.
+- **Primary-response semantics beyond "emit + continue".** Whether `COST_BUDGET` triggers hard stop, warn-and-continue, escalate-to-human, or per-agent-configurable behavior is also #4 territory.
+
+### Decision 9 — Exhaustion behavior
+**Approved:** 2026-04-22 (session-local)
+**Decision:**
+- **Primary response (Q1):** hard stop on exhaustion. Of the four inventory options for exhaustion behavior, only (α) hard stop is adopted; (β) warn+continue, (γ) escalate-to-human, and (δ) configurable-per-agent are explicitly rejected (see Rationale below).
+- **Chain behavior (Q2):** short-circuit the chain on the first `COST_BUDGET` emission — `FallbackChatModel` does **not** attempt subsequent links for cost-driven exhaustion. This contrasts with retry-class `FallbackReasons` (`RATE_LIMIT`, `TIMEOUT`, `SERVER_ERROR`, etc.) where `continue` to the next link remains correct.
+- **Signalling mechanism:** short-circuit is signalled by throwing a new unchecked exception, `BudgetExhaustedException`, from inside `FallbackChatModel.chat(...)`. The exception carries the `ExhaustionCause` from the `Usage` snapshot and the current `turnId`. The engine layer wraps turn execution, catches `BudgetExhaustedException`, and emits a terminal `Error` `AgentEvent` whose payload carries `code = "budget_exhausted"`, the exception's `cause`, and its `turnId`.
+- **Extension door (Q2-c):** per-link cost awareness is deferred to **Group 4c** (`FallbackChain`). If Group 4c introduces a `costDims` declaration on the chain link shape, Decision 9's short-circuit default becomes overridable by chain policy — the chain would then decide whether to skip only links consuming the exhausted dimension instead of terminating entirely. This preserves compatibility: Group 4b locks the default; Group 4c can introduce the override without revisiting this decision.
+
+Exception shape (added to the `ai.forvum.core.budget` package alongside the other budget-related types):
+
+```java
+package ai.forvum.core.budget;
+
+public final class BudgetExhaustedException extends RuntimeException {
+    private final ExhaustionCause cause;
+    private final UUID turnId;
+
+    public BudgetExhaustedException(ExhaustionCause cause, UUID turnId) {
+        super("Budget exhausted: " + cause + " in turn " + turnId);
+        this.cause = cause;
+        this.turnId = turnId;
+    }
+
+    public ExhaustionCause cause() { return cause; }
+    public UUID turnId() { return turnId; }
+}
+```
+
+**Rationale:**
+- **(α) hard stop over (β)/(γ)/(δ).**
+  - (β) *warn+continue* defeats the purpose of a cap — a cap that logs but doesn't stop cannot enforce financial or runaway control. Rejected.
+  - (γ) *escalate-to-human* requires notification-channel integration (channel plugin, operator-acknowledgment state machine) that isn't present in Tier 1. Deferred to a future milestone; not adopted as a default.
+  - (δ) *configurable-per-agent* (`onCostExhaustion: "hardStop" | "warn" | "escalate"`) is speculative flexibility without evidence of demand. Per CLAUDE.md "no speculative flexibility", rejected until a real use case surfaces.
+- **(Q2-b) short-circuit over (Q2-a) budget-blind retry and (Q2-c) per-link cost awareness.**
+  - (Q2-a) is equivalent to (Q2-b) in *outcome* (the ledger state doesn't change between link attempts, so subsequent links fail the same `BudgetMeter.usage()` check) but noisier in the event stream. Rejected as noise with no semantic gain.
+  - (Q2-c) requires enriching the `FallbackChain` link shape with per-link `costDims` — a contract change that belongs in Group 4c, not here. Scope-blocked for Group 4b; explicitly left as an extension contract for Group 4c.
+- **`BudgetExhaustedException` as the signalling mechanism.**
+  - *Exception matches a genuinely exceptional condition.* Budget exhaustion is a terminal failure of the turn, not a normal outcome.
+  - *Magic-return alternative* (`Optional<ChatResponse>` empty, or a dedicated sentinel result) would force every caller in the path to check — the exception is unmistakable and flows to the single "right" catcher (the engine layer).
+  - *Last-event-as-`FallbackTriggered`* alternative leaves the turn in an ambiguous state — no `Done`, no `Error`, just a trailing `FallbackTriggered` — which confuses renderers, CAPR processors, and log consumers. Group 1 already established `Error` `AgentEvent` as the canonical channel for hard failures; reusing it via exception catch at the engine layer preserves that contract.
+- **`RuntimeException` (unchecked) over checked exception.** The exception crosses multiple layers (`FallbackChatModel` → engine → graph node). Forcing declared `throws` at each level would pollute signatures between the throw site and the single legitimate catcher (the engine). Callers other than the engine don't need to know this exception exists.
+- **Package `ai.forvum.core.budget`.** Groups the cost-related contract types (`CostBudget`, `Window` + permits, `BudgetMeter`, `Usage`, `Spend`, `ExhaustionCause`, `BudgetExhaustedException`) as a discoverable unit. A refinement over the inventory's presumed top-level `ai.forvum.core` — keeps the top-level namespace reserved for truly cross-cutting records (`ModelRef`, `AgentEvent`, etc.).
+
+**Resolves open point(s):** #4
+
+**Implication for §4.3.5.2 spec:** `BudgetExhaustedException` is added to the package contracts, written verbatim. §4.3.5.2 now enumerates (in `ai.forvum.core.budget`):
+- `CostBudget` (record)
+- `Window` sealed interface + `DayWindow`, `SessionWindow` permits
+- `BudgetMeter` interface
+- `Usage`, `Spend` records
+- `ExhaustionCause` enum
+- `BudgetExhaustedException` (final `RuntimeException`)
+
+**Implication for §5.4 `FallbackChatModel` spec:** the dispatch-order pseudocode now differentiates `COST_BUDGET` from retry-class reasons. Revised reference pseudocode:
+
+```
+for each link in chain:
+    usage = budgetMeter.usage(budget)
+    if usage.exhausted:
+        emit FallbackTriggered(reason = COST_BUDGET, cause = usage.cause)
+        throw new BudgetExhaustedException(usage.cause, currentTurnId)
+        // short-circuit: NO further links attempted for cost-driven exhaustion
+    try:
+        return link.provider.chat(...)
+    catch (RetryableException e):
+        emit FallbackTriggered(reason = mapToFallbackReason(e))
+        continue  // retry-class reasons (RATE_LIMIT, TIMEOUT, ...) remain "continue"
+// chain exhausted on retry-class reasons only: propagate terminal failure
+```
+
+**Implication for engine layer (M6+):** the graph node wrapping turn execution catches `BudgetExhaustedException` and emits a terminal `Error` `AgentEvent` whose payload carries `code = "budget_exhausted"`, the exception's `cause` (an `ExhaustionCause`), and its `turnId`. This mapping is engine-layer contract, not part of §4.3.5.2. Note: Group 1's `Error` event shape is the target; if it does not already carry a free-form `cause` attribute, a minor Group 1 touch-up (attribute map or equivalent) will be needed — flagged here for M6+ review.
+
+**Cross-reference to Decision 8:** the `continue` branch for `reason == COST_BUDGET` in Decision 8's reference pseudocode is reference-only and is now superseded by the throw semantics above. Decision 8 is **not** amended in the committed text (option (ii) from the alternatives presented with this decision) — readers should interpret Decision 8's pseudocode through the lens of Decision 9, which establishes the mechanical ground truth. The cost of rewriting Decision 8 for textual consistency is a diff + git-history entry for zero semantic change; the cost of this cross-reference is a single paragraph, preferred.
+
+**Implication for other sections:**
+- **Group 4c (`FallbackChain`):** if Group 4c introduces per-link cost awareness (a `costDims` declaration on the chain link shape), Decision 9's short-circuit default becomes overridable by chain policy — the chain can decide to skip only those remaining links that consume the exhausted dimension instead of terminating the chain entirely. This is an extension contract, not a retroactive change: Group 4b locks "hard stop unless chain policy overrides"; Group 4c defines the override mechanism if it opts to.
+- **§3.4 OpenTelemetry observability:** the terminal `Error` event emitted by the engine should propagate `cause` as a span attribute (e.g., `budget.cause = "usd_cap_hit"`) for alerting and dashboard consumers. No new contract surface; uses the attribute mapping from Decision 7 / Decision 8.
+
+**Rejections (on-record for future re-litigation if circumstances change):**
+- (β) warn+continue — defeats the purpose of the cap.
+- (γ) escalate-to-human — requires notification infrastructure absent in Tier 1.
+- (δ) configurable-per-agent — speculative flexibility without evidence of demand.
+- (Q2-a) try L+1 unaware — equivalent to (Q2-b) in outcome, only noisier in the event stream.
+
+**Punts (deferred to later design rounds):**
+- (Q2-c) per-link cost awareness → Group 4c. The short-circuit default of Decision 9 is compatible with a future override mechanism introduced by Group 4c's chain link shape.
+- Escalate-to-human via channel notification → post-MVP milestone if demand surfaces.
+
+### Decision 10 — Spawn inheritance
+**Approved:** 2026-04-22 (session-local)
+**Decision:**
+- **Inheritance semantics (a):** **independent copy** — (X) from the inventory. Child's `CostBudget` equals the parent's (immutable record; passed by reference is semantically equivalent to value copy); SUM scope resolves per the child's `agent_id` via CDI context at `BudgetMeter.usage(budget)` call time. Spend is tracked independently per agent.
+- **Override mechanism (b):** spawn API accepts an optional `CostBudget` parameter. Omitted / `null` → child inherits parent's `CostBudget` verbatim. Non-null → child uses the passed `CostBudget`; no partial merge, no blending with parent's values.
+- **SessionWindow inheritance (c):** **prohibited** at spawn time. If the parent's `CostBudget.window` is a `SessionWindow` **and** the spawn request omits an override, the spawn path throws a new unchecked exception, `SpawnConfigurationException`, carrying parent/child agent IDs and an educational reason string.
+
+Exception shape (added to `ai.forvum.core.budget` alongside the other budget types):
+
+```java
+package ai.forvum.core.budget;
+
+public final class SpawnConfigurationException extends RuntimeException {
+    private final String parentAgentId;
+    private final String childAgentId;
+
+    public SpawnConfigurationException(
+            String parentAgentId, String childAgentId, String reason) {
+        super(reason);
+        this.parentAgentId = parentAgentId;
+        this.childAgentId = childAgentId;
+    }
+
+    public String parentAgentId() { return parentAgentId; }
+    public String childAgentId() { return childAgentId; }
+}
+```
+
+Expected educational message (constructed by the spawn path when throwing, with `<childId>` and `<parentId>` substituted):
+
+> "Cannot inherit SessionWindow-scoped budget into spawn — child agent '<childId>' has different identity than parent '<parentId>'. SessionWindow filters by (sessionId, agentId), so inheriting verbatim would cause child's spend to be invisible to its budget enforcement. Provide an explicit CostBudget override in the spawn request, scoped to the child's identity (e.g., DayWindow for general caps, or SessionWindow with child's own session)."
+
+**Rationale:**
+- **(X) independent copy over (Y) shared reference and (Z) proportional carve-out.**
+  - *(Y) shared reference* requires either a new `Window` permit expressing lineage scope (`LineageWindow(rootAgentId)` or equivalent) OR a schema change adding `budget_id` / `parent_agent_id` to `provider_calls`. Both are out of Group 4b's scope — they belong to Group 4c or a later schema-expansion milestone. Rejected here; documented as a compatible future extension path.
+  - *(Z) proportional carve-out* introduces a "ratio" knob absent from the inventory, requires spawn-time snapshot arithmetic, and has no articulated demand. Complexity without demand. Rejected.
+  - *(X)* mutates no locked decision, changes no schema, and yields child-scoped tracking naturally because the `Window` permits' SQL filters already scope by `agent_id` — either via CDI context (`DayWindow`) or via the explicit `agentId` field (`SessionWindow`, handled separately by sub-decision (c)).
+- **All-or-nothing override over partial merge.**
+  - *Partial merge* has ambiguous null semantics: an override with `maxUsd = null` — is that "opt out of USD for the child" or "inherit parent's `maxUsd`"? Two interpretations cannot coexist in one API. Rejected.
+  - *All-or-nothing* keeps override semantics obvious: present → use it, absent → inherit. Users wanting partial adjustments construct the full `CostBudget` explicitly, referencing parent's immutable record. CLAUDE.md "no abstractions for single-use code" rules out a builder / `withUsd(...)` surface as speculative flexibility.
+- **Prohibit-SessionWindow-inheritance over document-as-degenerate and smart-inheritance.**
+  - *Document-as-degenerate* creates a silent bug: the inherited `SessionWindow` points at parent's `(sessionId, agentId)`, the child's calls carry a different `agent_id`, the SUM never sees them, the child has effectively infinite budget — with no warning at spawn time. For an OSS project, a pitfall of "you configured a cap and it silently doesn't apply" is exactly what design must prevent, not defer to documentation. Rejected.
+  - *Smart inheritance* (auto-reconstruct `SessionWindow` with child identity at inheritance time) was rejected for two reasons: (i) it introduces magic behavior — sets a precedent that "inherit" can silently mutate fields, a surprising transformation for immutable records; (ii) the caller who chose `SessionWindow` almost certainly wants a *specific* `sessionId` for the child (a fresh one? the turn's session? the parent's session again for chained context?), which the spawn mechanism cannot infer — so auto-reconstruction picks an arbitrary `sessionId` that may or may not match intent.
+  - *Prohibit* surfaces the configuration error at spawn time (development time — first test run) via an educational exception, not weeks later when a cloud-provider bill arrives. Cost: ~5–10 lines in the spawn path. Benefit: bug is impossible rather than documented. Net positive by a wide margin for an OSS project targeting safe-by-default.
+- **Exception placement in `ai.forvum.core.budget`.** The exception arises from a *budget configuration* invariant (`SessionWindow`'s `(sessionId, agentId)` fields are identity-pinned; inheritance can't reconcile with a child of different identity). A contributor debugging "a budget-related problem" finds all budget exceptions co-located with the budget types. The spawn path is the thrower, but the invariant is budget-owned — so the type lives with the invariant, not with the thrower.
+- **`RuntimeException` (unchecked).** Consistent with `BudgetExhaustedException` from Decision 9 — crosses multiple layers (spawn invoker → engine → graph node), the only legitimate catcher is the engine, and unchecked avoids `throws` declaration pollution through the intermediate layers.
+
+**Resolves open point(s):** #6
+
+**Implication for §4.3.5.2 spec:** `SpawnConfigurationException` is added to the `ai.forvum.core.budget` package contracts, written verbatim. The complete §4.3.5.2 package surface (cumulative across Decisions 4, 5, 6, 7, 9, 10):
+- `CostBudget` (record)
+- `Window` sealed interface + `DayWindow`, `SessionWindow` permits
+- `BudgetMeter` interface
+- `Usage`, `Spend` records
+- `ExhaustionCause` enum
+- `BudgetExhaustedException`, `SpawnConfigurationException` (both final `RuntimeException`)
+
+**Implication for §5.5 `spawn_worker` spec:** §5.5 gains (i) an explicit `CostBudget` override parameter on the spawn API signature and (ii) validation logic in the spawn pseudocode. Reference pseudocode for the validation:
+
+```
+function spawn(spec, budgetOverride):
+    effectiveBudget = (budgetOverride != null) ? budgetOverride : spec.parent.costBudget
+    if effectiveBudget.window() instanceof SessionWindow && budgetOverride == null:
+        throw new SpawnConfigurationException(
+            spec.parent.agentId,
+            spec.childAgentId,
+            <educational message per Decision 10>)
+    // ... proceed with spawn construction using effectiveBudget
+```
+
+Behavioral nuance: the `SessionWindow` prohibition fires only when the parent has a `SessionWindow`-based budget **and** the caller omitted the override. A caller that explicitly passes a `SessionWindow`-based override (with the child's own `(sessionId, agentId)`) is allowed — explicit intent is respected.
+
+**Implication for engine layer (M6+):** the graph node wrapping spawn execution catches `SpawnConfigurationException` and emits a terminal `Error` `AgentEvent` whose payload carries `code = "spawn_invalid_config"` plus the exception's message (`getMessage()`), `parentAgentId`, and `childAgentId`. This surfaces the configuration error through the same `Error` channel as `BudgetExhaustedException`'s `code = "budget_exhausted"` (Decision 9), maintaining a uniform failure-reporting contract across budget-driven failures.
+
+**Implication for other sections:**
+- **§4.1 config schema / operator documentation:** `agents/<id>.json` and `crons/<id>.json` schema notes should mention that using `SessionWindow` on a parent agent requires each spawn to provide an explicit `CostBudget` override — the spawn will fail at the spawn boundary (not silently) if this is forgotten. The exception message is designed to be self-directing; the docs reinforce.
+- **Group 4c (`FallbackChain`):** unaffected by this decision. #6 is budget-scoped; chain topology is orthogonal.
+
+**Rejections (on-record):**
+- (Y) shared reference — requires new `Window` permit OR schema change, out of Group 4b scope; documented as future extension via a `LineageWindow`-style permit in Group 4c or later.
+- (Z) proportional carve-out — complexity without articulated demand.
+- Partial merge override — ambiguous null semantics; speculative flexibility.
+- Document-as-degenerate `SessionWindow` inheritance — creates silent bug that violates the `CostBudget` "configured cap enforces calls" invariant; OSS projects must prevent such pitfalls in design, not in documentation.
+- Smart inheritance (auto-reconstruct `SessionWindow` with child identity) — magic behavior, sets precedent for transformations on inherit, and doesn't address that the caller likely wants a specific `sessionId` that the spawn mechanism cannot infer.
+
+**Punts (deferred to later design rounds):**
+- (Y) shared-reference inheritance → Group 4c or later, via a new `Window` permit (e.g., `LineageWindow(rootAgentId)`) that scopes SUMs across agent lineages. Compatible with Decision 10's default of (X): inheritance still copies the `CostBudget`, but if the copied `Window` is a `LineageWindow`, child's SUM reuses the same root-agent scope as parent's, yielding shared-pool semantics without special casing the inheritance step.
+
 *Template for future entries:*
 
 ```
