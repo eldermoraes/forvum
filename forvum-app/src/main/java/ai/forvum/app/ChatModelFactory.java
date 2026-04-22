@@ -11,7 +11,7 @@ import java.time.Duration;
 public class ChatModelFactory {
 
     private static final String OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434";
-    private static final Duration OLLAMA_TIMEOUT = Duration.ofMinutes(2);
+    private static final Duration OLLAMA_TIMEOUT = Duration.ofMinutes(5);
 
     public ChatLanguageModel resolve(ModelRef ref) {
         return switch (ref.provider()) {
