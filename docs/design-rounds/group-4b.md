@@ -84,7 +84,72 @@ Seven points defined pre-inventory; three more revealed by the inventory finding
 
 ## Decisions log
 
-*Empty until decisions are approved. Format to follow when entries land:*
+### Decision 1 — Unit of measure
+**Approved:** 2026-04-22 (session-local)
+**Decision:** Both paired — a single `CostBudget` tracks both USD and tokens against the same scope/reset; exhaustion fires when either dimension's cap is reached.
+**Rationale:** Options A (USD only) and B (tokens only) each fail to cover the three user profiles Forvum must support: cloud-only (needs USD cap), local-only (USD cap is theater under Ollama's null-cost reporting), and hybrid (wants both). B additionally conflates financial control ("don't spend more than $X") with runaway-call control ("don't loop into thousands of calls") — distinct concerns that a single cap cannot disambiguate. D (independent budgets) covers all three profiles but explodes combinatorially in type shape (#10), spawn inheritance (#6), and test surface; excessive for Tier 1. C keeps one object with a single scope/reset while tracking both dimensions, and allows opt-out per dimension via nullability (pure-local user leaves `maxUsd = null`; cloud-only user leaves `maxTokens = null`).
+**Resolves open point(s):** #1
+**Implication for §4.3.5.2 spec:** `CostBudget` exposes a USD cap and a token cap sharing one scope/reset window. Exhaustion = any non-null cap reached. Per-field nullability for opt-out is proposed; formal confirmation of shape (flat record vs. sealed hierarchy) deferred to #10.
+**Implication for other sections:** §5.4 `FallbackChatModel` budget consultation reads both dimensions. §4.2 `provider_calls` already records both dimensions per row — #7 confirms that the row-level ledger is the aggregation source (no new column needed). #8 (null-cost handling) escalates to resolution position 3 (right after #7), since USD is now in scope and the schema's `cost_usd REAL` nullability demands an accounting policy.
+
+### Decision 2 — SQL representation
+**Approved:** 2026-04-22 (session-local)
+**Decision:** `provider_calls` (§4.2) is the canonical cost ledger. `CostBudget` computes spend on-the-fly via `SUM()` queries scoped by agent/cron/session and a time window; no aggregate columns are added to the schema, and `CostBudget` itself holds no persisted spend state.
+**Rationale:** The schema already persists `tokens_in`, `tokens_out`, and `cost_usd` per row in `provider_calls`, providing both dimensions needed after Decision 1. A denormalized aggregate column would be a derived cache with dessync risk; keeping the ledger authoritative avoids that entire class of bugs. On-the-fly `SUM()` assumes each budget's time window is bounded (per-day, per-month, per-session — to be resolved in #2 granularity); for short windows in single-user MVP use, reads are fast with an index on `(agent_id, created_at)`. If Forvum eventually runs at higher volume (e.g., 90k+ rows after 6 months of intensive use) or if #2 introduces an "all-time" scope, materialized views or periodic aggregation can be added in a later milestone. Not a concern in Tier 1; flagged for production review if a bottleneck surfaces.
+**Resolves open point(s):** #7
+**Implication for §4.3.5.2 spec:** `CostBudget` is a cap-carrier only — it exposes a read-side method (shape TBD, likely `currentSpend(Window window)` or equivalent) that delegates to the `provider_calls` ledger; no `spent` or `remaining` fields persist on `CostBudget` itself.
+**Implication for other sections:** M5 persistence confirms `provider_calls` as the canonical table for cost data (no additional table or column introduced by `CostBudget`). #5 (tracking primary) simplifies — the "persist `spent` vs. `remaining`" question dissolves since nothing is persisted on the budget object itself; #5 now reduces to the API-shape question of what the read-side method returns.
+
+### Decision 3 — Null-cost handling
+**Approved:** 2026-04-22 (session-local)
+**Decision:** Null-cost rows are treated as zero in the USD aggregation of `CostBudget`. At the persistence layer, `provider_calls.cost_usd` is written as `NULL` when the provider did not report a cost, and as the reported numeric value when it did; `SUM(cost_usd)` (which ignores NULL by SQL semantics) then yields the zero-contribution behavior with no special-case logic. Token dimension is unaffected — `tokens_in`/`tokens_out` are NOT NULL and always contribute to `maxTokens`.
+**Rationale:** Options (a) "treat as zero" and (b) "skip row from USD accounting" converge behaviorally because SQL `SUM` ignores NULL; the real choice is framing and what gets persisted. Persisting NULL preserves an analytical signal — a later query can distinguish a local-provider row from a cloud row that happened to cost $0 — while interpreting NULL as zero in the aggregation delivers the intuitive "local contributions are free in USD" contract. Option (c) would require an externally maintained per-provider pricing table (infinite maintenance; arbitrary unit costs for truly local providers) to solve a problem Decision 1 already dissolved via per-dimension opt-in. Option (d) would reject configurations (USD-only cap + local provider in chain) that Decision 1 explicitly permits. "Treat as zero" is preferred as the framing name because "skip" might imply the full row is ignored, whereas token counts from the same row still contribute to `maxTokens`.
+**Resolves open point(s):** #8
+**Implication for §4.3.5.2 spec:** USD aggregation is a plain `SUM(cost_usd) WHERE ...scope+window...` over `provider_calls`; no `COALESCE` required. Exhaustion in the USD dimension: `sum ≥ maxUsd` when `maxUsd != null`. Token dimension unchanged; aggregates over NOT NULL columns. `CostBudget` itself requires no null-cost-aware logic.
+**Implication for other sections:**
+- **M9-M12 (provider adapters):** each provider's `ChatResponse` carries usage metadata with an **optional** cost field — the exact shape (`Optional<BigDecimal>`, `double + boolean reported`, or another form) is deferred to the provider-specific milestones. A provider populates the field when the remote API exposes cost; otherwise the field is absent or flagged not-reported.
+- **M5 (persistence layer):** writes `cost_usd = NULL` when the provider's usage lacks a cost value; writes the reported numeric otherwise. **No provider-name-based special casing in the persistence adapter** — a provider that was previously "local" (e.g., a TGI deployment with compute-based pricing, or an Ollama plugin that exposes cost) starts populating `cost_usd` transparently as soon as its `ChatResponse` carries the field, with zero persistence-layer changes.
+- **#9 (enforcement boundary):** whichever layer checks the budget invokes the same `SUM` query; null-cost rows require no special handling at enforcement time.
+
+### Decision 4 — Type shape
+**Approved:** 2026-04-22 (session-local)
+**Decision:** Option 1 — flat Java record `CostBudget(BigDecimal maxUsd, Long maxTokens, Window window)` with nullable primitive fields, validated in the canonical constructor via `IllegalStateException` with informative, triage-oriented messages.
+**Rationale:** Simplest shape that encodes the two-dimensional, opt-in-per-dimension contract from Decision 1, with a direct parallel to Group 4a's `ModelRef` (flat record, primitives, no wrapper types). Option 2 (sealed hierarchy `permits UsdBudget, TokenBudget, CompositeBudget`) was rejected because it imports the *form* of Group 1's `AgentEvent` without the justifying condition: `AgentEvent` permits diverge in payload per event type, whereas USD vs. token caps differ only in which of two fields is populated, not in schema shape. Option 3 (`Optional<UsdCap>` + `Optional<TokenCap>`) was rejected for concrete technical reasons, not just style: `Optional` in record fields breaks default Jackson serialization, conflicts with Brian Goetz's official Java guidance on `Optional` usage, and introduces a pattern no other Tier-1 Group uses. Option 4 (flat record with nullable `UsdCap`/`TokenCap` value objects) was the attractive middle ground but was rejected under CLAUDE.md's "no abstractions for single-use code" and "no speculative flexibility" — the two `Cap` types would be used solely inside `CostBudget`, and the validation they'd encapsulate (`signum() < 0`, `< 0`) is too trivial to justify dedicated types.
+Two adjustments from the base proposal align `CostBudget` with the convention set by Groups 2, 3, 4a: (i) validation throws `IllegalStateException` rather than `IllegalArgumentException`, matching the established convention that invalid values arising from config parsing or DB reads indicate invalid *system state*, not caller argument misuse; (ii) error messages name the likely origin of the invalid value (config file, programmatic construction) and the on-disk path an operator should inspect (`agents/<id>.json`, `crons/<id>.json`), mirroring the informative-message pattern of Groups 2 and 4a.
+**Resolves open point(s):** #10
+**Implication for §4.3.5.2 spec:** Final record form for §4.3.5.2:
+
+```java
+public record CostBudget(BigDecimal maxUsd, Long maxTokens, Window window) {
+    public CostBudget {
+        if (maxUsd == null && maxTokens == null) {
+            throw new IllegalStateException(
+                "CostBudget must declare at least one cap (maxUsd, "
+              + "maxTokens, or both). Both nulls indicates either a "
+              + "config-file error or a programmatic construction bug. "
+              + "Check agents/<id>.json or crons/<id>.json.");
+        }
+        if (maxUsd != null && maxUsd.signum() < 0) {
+            throw new IllegalStateException(
+                "CostBudget maxUsd must be non-negative. Got: " + maxUsd
+              + ". Negative caps are nonsensical — check config "
+              + "file formatting.");
+        }
+        if (maxTokens != null && maxTokens < 0) {
+            throw new IllegalStateException(
+                "CostBudget maxTokens must be non-negative. Got: " + maxTokens
+              + ". Negative caps are nonsensical — check config "
+              + "file formatting.");
+        }
+    }
+}
+```
+
+The `Window` field's concrete type is deferred to #2 (granularity) + #3 (reset policy), which together define what `Window` needs to express; the record declaration above will be updated once `Window` is fixed.
+**Implication for other sections:** None new. Reinforces the `IllegalStateException` + informative-message convention established by Groups 2, 3, 4a — Group 4c (`FallbackChain`) and Group 5 (`MemoryPolicy`) should continue the same pattern.
+**Fallback note:** Option 4 (`UsdCap`/`TokenCap` record value objects with nullable fields on `CostBudget`) is documented here as a fallback shape. If subsequent decisions reveal that these wrappers would be reused outside `CostBudget` — e.g., `FallbackChain` exposing per-dimension cost information, `MemoryPolicy` introducing its own `Cap` type, or `#6` spawn inheritance carving out per-dimension allowances for children — revisit this decision. Refactoring from Option 1 to Option 4 is localized (introduce two record types, wrap the two fields, update Jackson mapping) and carries no schema implications.
+
+*Template for future entries:*
 
 ```
 ### Decision N — <topic>
