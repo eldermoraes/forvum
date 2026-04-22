@@ -697,9 +697,299 @@ public record ModelRef(String provider, String model) {
 - **Deferred to M7 (observability):** whether the OpenTelemetry span `forvum.llm.call` emits the model as a single `<provider>:<model>` string attribute (matching `ModelRef.toString()`) or as two separate attributes (`llm.provider` + `llm.model`). The type contract supports both — M7 picks based on OTel semantic-conventions prevailing at implementation time.
 - **Forward reference resolution.** The `ModelRef` forward reference declared in §4.3.2 (`TokenDelta.modelRef`, `FallbackTriggered.primary`, `FallbackTriggered.attempted`) resolves to this record.
 
-##### 4.3.5.2 `CostBudget`
+##### 4.3.5.2 `CostBudget` and related types
 
-*TBD (Group 4b).*
+A `CostBudget` declares a monetary (USD) and/or token cap bounding an agent's or cron's LLM spend over a scoped time window. It is a pure data record — caps and window are static configuration — paired with a read-side service, `BudgetMeter`, that reports current usage by aggregating over the `provider_calls` ledger (§4.2) on demand. Nothing is persisted on `CostBudget` itself; the ledger is authoritative. Per-dimension opt-in is expressed via nullability: `maxUsd = null` means "no USD cap", `maxTokens = null` means "no token cap", and both being null is rejected at construction time.
+
+All types in this subsection live in the `ai.forvum.core.budget` package of the `forvum-core` module, co-located with `ModelRef` (§4.3.5.1) at the module level but grouped into their own package to signal the budget surface as a discoverable unit. Two unchecked exceptions are declared alongside the records — `BudgetExhaustedException` (thrown by `FallbackChatModel` on a pre-call check, §5.4) and `SpawnConfigurationException` (thrown at spawn time when a `SessionWindow`-scoped parent budget would be silently inherited without a child-specific override, §5.5) — both caught by the engine and surfaced as terminal `Error` `AgentEvent`s (§4.3.2). `CostBudget` is distinct from `toolBudget` (§5.5 tool-loop count cap); the two caps coexist on each config independently.
+
+```java
+// Module: forvum-core
+// Package: ai.forvum.core.budget
+// Each top-level type below lives in its own .java file.
+
+package ai.forvum.core.budget;
+
+import java.math.BigDecimal;
+import java.time.ZoneId;
+import java.util.UUID;
+
+// -- Shape: the cap carrier --
+
+public record CostBudget(BigDecimal maxUsd, Long maxTokens, Window window) {
+    public CostBudget {
+        if (maxUsd == null && maxTokens == null) {
+            throw new IllegalStateException(
+                "CostBudget must declare at least one cap (maxUsd, "
+              + "maxTokens, or both). Both nulls indicates either a "
+              + "config-file error or a programmatic construction bug. "
+              + "Check agents/<id>.json or crons/<id>.json.");
+        }
+        if (maxUsd != null && maxUsd.signum() < 0) {
+            throw new IllegalStateException(
+                "CostBudget maxUsd must be non-negative. Got: " + maxUsd
+              + ". Negative caps are nonsensical — check config "
+              + "file formatting.");
+        }
+        if (maxTokens != null && maxTokens < 0) {
+            throw new IllegalStateException(
+                "CostBudget maxTokens must be non-negative. Got: " + maxTokens
+              + ". Negative caps are nonsensical — check config "
+              + "file formatting.");
+        }
+        if (window == null) {
+            throw new IllegalStateException(
+                "CostBudget window must be non-null. Every budget "
+              + "requires an explicit time window (DayWindow or "
+              + "SessionWindow). Check agents/<id>.json or "
+              + "crons/<id>.json — if the timezone field was the "
+              + "only window-related config, the config parser "
+              + "must still construct a DayWindow with resolved "
+              + "ZoneId before building CostBudget.");
+        }
+    }
+}
+
+// -- Scope and timing --
+
+/**
+ * Scope + time window over which a {@link CostBudget} is aggregated.
+ *
+ * <p><b>Marker interface with scope data carried by permits.</b>
+ * This interface declares no methods. Each permit carries the scope
+ * data relevant to its granularity ({@link ZoneId} for
+ * {@link DayWindow}; {@code sessionId + agentId} for
+ * {@link SessionWindow}). Consumers that must derive a persistence
+ * query from a {@code Window} pattern-match on the permit type via
+ * exhaustive {@code switch} — see {@link BudgetMeter} implementations
+ * in the M5 persistence layer (§5.x) for the canonical pattern.
+ *
+ * <p><b>Extensibility contract.</b> Adding a new permit to this
+ * sealed interface is a source-compatible change for code that only
+ * constructs or passes {@code Window} values. Consumers that
+ * pattern-match on permits via exhaustive {@code switch} will fail
+ * compilation until the new permit is handled — this is the intended
+ * surfacing mechanism for new cost-window policies.
+ */
+public sealed interface Window permits DayWindow, SessionWindow {
+}
+
+public record DayWindow(ZoneId tz) implements Window {
+    public DayWindow {
+        if (tz == null) {
+            throw new IllegalStateException(
+                "DayWindow tz must be non-null. Config-parse boundary "
+              + "substitutes ZoneId.systemDefault() when the \"timezone\" "
+              + "field is absent from agents/<id>.json or crons/<id>.json, "
+              + "so a null reaching this constructor indicates a wiring bug.");
+        }
+    }
+}
+
+public record SessionWindow(String sessionId, String agentId) implements Window {
+    public SessionWindow {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalStateException(
+                "SessionWindow sessionId must be non-null and non-blank. "
+              + "Got: '" + sessionId + "'. This indicates the session "
+              + "context was not propagated at construction time.");
+        }
+        if (agentId == null || agentId.isBlank()) {
+            throw new IllegalStateException(
+                "SessionWindow agentId must be non-null and non-blank. "
+              + "Got: '" + agentId + "'. Check agent resolution before "
+              + "constructing.");
+        }
+    }
+}
+
+// -- Read-side --
+
+/**
+ * Read-side service for querying a {@link CostBudget}'s
+ * current usage.
+ *
+ * <p>Implementations aggregate over {@code provider_calls}
+ * (§4.2) scoped by the budget's {@link Window} to produce
+ * an atomic {@link Usage} snapshot in a single SQL trip.
+ * The default implementation lives in the M5 persistence
+ * layer (§5.x); this interface ships only the contract.
+ *
+ * <p>Safe to inject as a singleton CDI bean; no per-call
+ * state.
+ */
+public interface BudgetMeter {
+    Usage usage(CostBudget budget);
+}
+
+/**
+ * Atomic snapshot of a {@link CostBudget}'s current usage, produced
+ * by a single {@code SUM()} trip over {@code provider_calls} and
+ * consumed jointly by the enforcement path and observability layers.
+ *
+ * <p><b>Atomicity.</b> All four fields derive from the same SQL
+ * aggregation; no caller should recompute any field from the others.
+ * The snapshot is a point-in-time read — subsequent calls can return
+ * different values as concurrent turns advance the ledger.
+ *
+ * <p><b>Biconditional invariant.</b> The canonical constructor
+ * enforces {@code cause != null} if and only if
+ * {@code exhausted == true}. A violation throws
+ * {@link IllegalStateException} and names which side of the
+ * biconditional was broken (see constructor source).
+ */
+public record Usage(
+    Spend spent,              // already consumed (usd + tokens)
+    Spend remaining,          // headroom; individual dimensions may be
+                              // null when the matching cap on CostBudget
+                              // is null (opt-out per Decision 1)
+    boolean exhausted,        // any non-null cap reached
+    ExhaustionCause cause     // null iff exhausted == false
+) {
+    public Usage {
+        if (spent == null) {
+            throw new IllegalStateException(
+                "Usage spent must be non-null. Construct via BudgetMeter "
+              + "or test fixtures — a null here indicates a programmatic "
+              + "construction bug.");
+        }
+        if (remaining == null) {
+            throw new IllegalStateException(
+                "Usage remaining must be non-null. Individual dimensions "
+              + "inside the Spend may be null (opt-out), but the Spend "
+              + "record itself must be present.");
+        }
+        if (exhausted && cause == null) {
+            throw new IllegalStateException(
+                "Usage cause must accompany exhausted=true. Either the "
+              + "ExhaustionCause was lost between BudgetMeter query and "
+              + "Usage construction, or the exhausted flag was set "
+              + "without computing cause. Check BudgetMeter output.");
+        }
+        if (!exhausted && cause != null) {
+            throw new IllegalStateException(
+                "Usage cause must be null when exhausted=false. A non-null "
+              + "cause paired with exhausted=false indicates a caller "
+              + "populated cause without flipping the exhausted flag.");
+        }
+    }
+}
+
+public record Spend(BigDecimal usd, Long tokens) {
+    public Spend {
+        if (usd != null && usd.signum() < 0) {
+            throw new IllegalStateException(
+                "Spend usd must be null or non-negative. Got: " + usd
+              + ". Negative values indicate either a ledger accounting "
+              + "bug or an arithmetic underflow in BudgetMeter.");
+        }
+        if (tokens != null && tokens < 0) {
+            throw new IllegalStateException(
+                "Spend tokens must be null or non-negative. Got: " + tokens
+              + ". Negative values indicate either a ledger accounting "
+              + "bug or an arithmetic underflow in BudgetMeter.");
+        }
+    }
+}
+
+public enum ExhaustionCause {
+    USD_CAP_HIT,
+    TOKEN_CAP_HIT,
+    BOTH_CAPS_HIT
+}
+
+// -- Failure signals --
+
+/**
+ * Thrown by {@code FallbackChatModel.chat(...)} when a pre-call
+ * {@link BudgetMeter#usage(CostBudget)} check returns
+ * {@code exhausted == true}. The exception short-circuits the
+ * fallback chain for cost-driven exhaustion — no further links are
+ * attempted, in contrast with retry-class {@code FallbackReasons}
+ * (see §5.4) — and is caught by the engine layer, which surfaces it
+ * as a terminal {@code Error} {@link ai.forvum.core.event.AgentEvent}
+ * with {@code code = "budget_exhausted"} plus {@code cause} and
+ * {@code turnId} attributes.
+ *
+ * <p>Unchecked because the only legitimate catcher is the engine
+ * layer; intermediate layers should not declare {@code throws}.
+ */
+public final class BudgetExhaustedException extends RuntimeException {
+    private final ExhaustionCause cause;
+    private final UUID turnId;
+
+    public BudgetExhaustedException(ExhaustionCause cause, UUID turnId) {
+        super("Budget exhausted: " + cause + " in turn " + turnId);
+        this.cause = cause;
+        this.turnId = turnId;
+    }
+
+    public ExhaustionCause cause() { return cause; }
+    public UUID turnId() { return turnId; }
+}
+
+/**
+ * Thrown at spawn time when a parent agent's
+ * {@link CostBudget} carries a {@link SessionWindow} and
+ * the spawn request omits an explicit budget override.
+ *
+ * <p>When a parent's {@code CostBudget} uses
+ * {@code SessionWindow}, the window filters by the
+ * parent's {@code (sessionId, agentId)} pair — so
+ * inheriting it verbatim into a child would cause every
+ * call the child makes (tagged with the child's own
+ * {@code (sessionId, agentId)}) to be invisible to the
+ * budget's SUM aggregation. The child would appear to
+ * have unlimited budget. This exception surfaces the
+ * misconfiguration at spawn time rather than silently
+ * at runtime. See §5.5 for the validation site and the
+ * recommended override shape.
+ *
+ * <p>Like {@link BudgetExhaustedException}, this is
+ * unchecked and is caught by the engine layer, which
+ * surfaces it as a terminal {@code Error}
+ * {@link ai.forvum.core.event.AgentEvent} with
+ * {@code code = "spawn_invalid_config"} plus
+ * {@code parentAgentId}, {@code childAgentId}, and the
+ * educational {@code getMessage()} text.
+ */
+public final class SpawnConfigurationException extends RuntimeException {
+    private final String parentAgentId;
+    private final String childAgentId;
+
+    public SpawnConfigurationException(
+            String parentAgentId, String childAgentId, String reason) {
+        super(reason);
+        this.parentAgentId = parentAgentId;
+        this.childAgentId = childAgentId;
+    }
+
+    public String parentAgentId() { return parentAgentId; }
+    public String childAgentId() { return childAgentId; }
+}
+```
+
+**Type conventions and cross-references:**
+
+- **Two-dimensional cap with per-dimension opt-in, expressed as a flat record.** `maxUsd` (`BigDecimal`) and `maxTokens` (`Long`) are both nullable; at least one must be non-null (enforced in the canonical constructor). Pure-cloud users configure USD only; pure-local users configure tokens only; hybrid users configure both. Exhaustion fires when *any* non-null cap is reached. A flat record was chosen over a sealed hierarchy of cap types (`UsdBudget`/`TokenBudget`/`CompositeBudget`) because USD and token dimensions differ only in which field is populated — not in schema shape — so the hierarchy would import form without the justifying condition. (Decisions 1, 4)
+- **Validation via `IllegalStateException` with origin-naming messages.** All canonical constructors in this subsection throw `IllegalStateException` (not `IllegalArgumentException`) with triage-oriented text naming the likely origin of the invalid value — config file (`agents/<id>.json`, `crons/<id>.json`) or a ledger / arithmetic bug. `CostBudget`'s canonical constructor in particular enforces four invariants: at least one cap is non-null, `maxUsd` (if present) is non-negative, `maxTokens` (if present) is non-negative, and `window` is non-null. Matches the convention set by `ModelRef` (§4.3.5.1) and earlier Tier-1 Groups. (Decision 4)
+- **`provider_calls` is the authoritative cost ledger.** Neither `CostBudget` nor `Usage` persists spend state; the read-side aggregates over `provider_calls` on demand via `SUM(cost_usd), SUM(tokens_in + tokens_out)` scoped by the current `Window`. Denormalized aggregate columns were rejected to avoid the derived-cache desync class of bugs. (Decision 2)
+- **Null `cost_usd` rows contribute zero to the USD aggregation.** Providers that do not report cost (e.g., local Ollama) write `NULL` to `provider_calls.cost_usd`; `SUM(cost_usd)` ignores NULL by SQL semantics, yielding the intuitive "local calls are free in USD" contract without `COALESCE` or provider-name special-casing. The token dimension is unaffected (`tokens_in` and `tokens_out` are `NOT NULL`). (Decision 3)
+- **`Window` is a sealed marker interface; permits carry scope data.** The interface declares no methods. `DayWindow(ZoneId tz)` holds the resolved timezone; `SessionWindow(String sessionId, String agentId)` holds the session identity. `BudgetMeter` implementations pattern-match on the permit type via exhaustive `switch` to build the SQL filter; adding a new permit breaks compilation at consumer sites, which is the intended extensibility surface. (Decision 5)
+- **`ZoneId` resolution on `DayWindow` is config-parse work, not runtime.** The optional `timezone` field in `agents/<id>.json` (and `crons/<id>.json`) is parsed at config load; absent → `ZoneId.systemDefault()`. A null `tz` reaching the `DayWindow` constructor indicates a wiring bug, not a missing config. (Decision 5)
+- **Reset policy is implicit in each `Window` permit.** `DayWindow` resets at calendar-aligned midnight in its `tz`. `SessionWindow` has no internal reset — it spans the lifetime of the identified session. A free `reset` field was rejected because it would admit nonsensical `(permit, reset)` combinations that the type system should rule out. (Decision 6)
+- **`BudgetMeter` is a service; `CostBudget` is pure data.** The read-side of the budget lives on a CDI-wired bean, not on `CostBudget` itself — runtime concerns (ledger queries) stay out of the data record. The default `BudgetMeter` implementation lives in the M5 persistence layer (§5.x) and owns the SQL; §4.3.5.2 ships only the interface. (Decision 7)
+- **`Usage` is an atomic snapshot carrying spent, remaining, exhaustion, and cause.** A single `SUM()` trip populates every consumer's need: enforcement reads `usage.exhausted()`; operator commands read `usage.spent()` / `usage.remaining()`; fallback-reason classification reads `usage.cause()`. No re-query race between "check exhausted" and "observe spent" because all four fields come from the same aggregation. (Decision 7)
+- **`Spend` has boxed `Long tokens`, not primitive.** Allows `remaining.tokens` to be `null` when the budget's `maxTokens` is `null` (opt-out per Decision 1). Sentinel alternatives (`Long.MAX_VALUE` for "no cap") were rejected as obfuscating. `spent`'s non-null dimensions are a `BudgetMeter` contractual guarantee, not a `Spend`-constructor invariant — the constructor permits null so the type stays reusable for `remaining`. (Decision 7)
+- **`ExhaustionCause` includes `BOTH_CAPS_HIT` as a first-class constant.** The rare case where both dimensions reach their caps in the same SQL trip is visible downstream (fallback reason, operator log, OTel attribute) without an ad-hoc bitmask encoding. (Decision 7)
+- **`FallbackChatModel` pre-call is the enforcement point.** The decorator invokes `BudgetMeter.usage(budget)` before dispatching to the selected `ModelProvider`; exhaustion emits `FallbackTriggered(reason = FallbackReasons.COST_BUDGET, cause = usage.cause)`. Enforcement is **best-effort**: the check-to-record window creates overshoot bounded by `concurrent_calls × per_call_cost` — typical interactive use ~$0.02–$0.10, heavy-fanout scenarios up to ~$5. Users with strict caps should configure `maxUsd` 5–10% below their hard limit. (Decision 8)
+- **Cost-driven exhaustion short-circuits the chain via `BudgetExhaustedException`.** Unlike retry-class `FallbackReasons` (`RATE_LIMIT`, `TIMEOUT`, `SERVER_ERROR`) where the chain loop `continue`s to the next link, `COST_BUDGET` throws `BudgetExhaustedException` from `FallbackChatModel.chat(...)` — no further links are attempted; the engine catches the exception and emits a terminal `Error` `AgentEvent` with `code = "budget_exhausted"`. Unchecked because the only legitimate catcher is the engine layer; intermediate layers avoid `throws` pollution. (Decision 9)
+- **Warn+continue, escalate-to-human, and per-agent-configurable exhaustion responses are explicitly rejected for MVP.** Warn defeats the cap's purpose; escalate needs notification infrastructure absent in Tier 1; per-agent configurability is speculative flexibility without articulated demand. (Decision 9)
+- **Inherited spawn budgets are independent copies.** A child agent's `CostBudget` equals the parent's (immutable record; reference-passed is semantically equivalent to value-copy), but the SQL scope resolves per the child's `agent_id` via CDI context, so spend is tracked independently per agent. Parent caps do **not** bound total tree spend by default — operators needing total-tree enforcement configure conservative per-agent caps or pass explicit reduced budgets at spawn time. (Decision 10)
+- **Override is all-or-nothing.** The spawn API (§5.5) accepts an optional `CostBudget` parameter: absent ⇒ inherit verbatim, present ⇒ replace entirely. No partial merge — ambiguous null semantics (opt-out vs. inherit-this-field) would make the API unreadable. Callers wanting partial adjustments construct the full `CostBudget` explicitly from the parent's immutable record. (Decision 10)
+- **`SessionWindow` inheritance without override is prohibited at spawn time.** A parent `CostBudget` with `SessionWindow` points at parent's `(sessionId, agentId)`; silently inheriting it into a child would cause the child's calls to be invisible to its own SUM, yielding an effectively unbounded budget with no warning. The spawn path throws `SpawnConfigurationException` in that case, carrying parent/child agent IDs and an educational message pointing the operator at the override mechanism. Document-as-degenerate and smart-inheritance (auto-reconstruct) were both rejected in favor of spawn-boundary surfacing. (Decision 10)
+- **Cross-references.** `provider_calls` schema + indexes: §4.2 (V1 schema). Enforcement call site and dispatch pseudocode: §5.4 (`FallbackChatModel`). Spawn mechanism and override parameter: §5.5 (`spawn_worker`). `Error` `AgentEvent` mapping for thrown exceptions (`budget_exhausted`, `spawn_invalid_config`): §4.3.2. `ModelRef` (co-located in `forvum-core` module, different package `ai.forvum.core`): §4.3.5.1. OpenTelemetry span attributes consuming `Usage.spent` and `Usage.cause`: §3.4.
+- **Reserved future extension paths.** *New `Window` permits* — `LineageWindow(rootAgentId)` for shared-budget hierarchies (Group 4c or later), rolling-window / monthly / unbounded-accumulation permits as additional `permits` of the sealed interface (non-breaking). *Per-link cost awareness in `FallbackChain`* — if Group 4c enriches chain links with `costDims` declarations, Decision 9's short-circuit becomes overridable by chain policy, enabling free-tier fallback substitution. *Race-window mitigations* — pre-allocation soft reservations or pessimistic locking if production telemetry shows overshoot exceeding the documented bounds of Decision 8. *Exhaustion escalation* — escalate-to-human via channel notification if demand surfaces post-MVP.
 
 ##### 4.3.5.3 `FallbackChain`
 

@@ -100,6 +100,8 @@ Seven points defined pre-inventory; three more revealed by the inventory finding
 **Implication for §4.3.5.2 spec:** `CostBudget` is a cap-carrier only — it exposes a read-side method (shape TBD, likely `currentSpend(Window window)` or equivalent) that delegates to the `provider_calls` ledger; no `spent` or `remaining` fields persist on `CostBudget` itself.
 **Implication for other sections:** M5 persistence confirms `provider_calls` as the canonical table for cost data (no additional table or column introduced by `CostBudget`). #5 (tracking primary) simplifies — the "persist `spent` vs. `remaining`" question dissolves since nothing is persisted on the budget object itself; #5 now reduces to the API-shape question of what the read-side method returns.
 
+> **Note (added 2026-04-22):** Decision 7 supersedes the "it exposes a read-side method" hypothesis above. The read-side method lives on the `BudgetMeter` service, not on `CostBudget` itself; `CostBudget` remains a pure data record. See Decision 7 for the materialized contract.
+
 ### Decision 3 — Null-cost handling
 **Approved:** 2026-04-22 (session-local)
 **Decision:** Null-cost rows are treated as zero in the USD aggregation of `CostBudget`. At the persistence layer, `provider_calls.cost_usd` is written as `NULL` when the provider did not report a cost, and as the reported numeric value when it did; `SUM(cost_usd)` (which ignores NULL by SQL semantics) then yields the zero-contribution behavior with no special-case logic. Token dimension is unaffected — `tokens_in`/`tokens_out` are NOT NULL and always contribute to `maxTokens`.
@@ -145,9 +147,11 @@ public record CostBudget(BigDecimal maxUsd, Long maxTokens, Window window) {
 }
 ```
 
-The `Window` field's concrete type is deferred to #2 (granularity) + #3 (reset policy), which together define what `Window` needs to express; the record declaration above will be updated once `Window` is fixed.
+The `Window` type itself is defined in Decisions 5 and 6 (sealed interface with `DayWindow`/`SessionWindow` permits, reset semantics implicit per permit). The field type `Window window` above remains correct verbatim — no update to the record declaration was needed.
 **Implication for other sections:** None new. Reinforces the `IllegalStateException` + informative-message convention established by Groups 2, 3, 4a — Group 4c (`FallbackChain`) and Group 5 (`MemoryPolicy`) should continue the same pattern.
 **Fallback note:** Option 4 (`UsdCap`/`TokenCap` record value objects with nullable fields on `CostBudget`) is documented here as a fallback shape. If subsequent decisions reveal that these wrappers would be reused outside `CostBudget` — e.g., `FallbackChain` exposing per-dimension cost information, `MemoryPolicy` introducing its own `Cap` type, or `#6` spawn inheritance carving out per-dimension allowances for children — revisit this decision. Refactoring from Option 1 to Option 4 is localized (introduce two record types, wrap the two fields, update Jackson mapping) and carries no schema implications.
+
+> **Note (amended 2026-04-22):** The sentence preceding "**Implication for other sections:**" above was rewritten from its original form — "The `Window` field's concrete type is deferred to #2 (granularity) + #3 (reset policy), which together define what `Window` needs to express; the record declaration above will be updated once `Window` is fixed." — to reflect that Decisions 5 and 6 later resolved #2 and #3 *without* requiring any update to the `CostBudget` record declaration above. The forward-promise "will be updated" became a no-op once `Window` was defined as a separate sealed interface.
 
 ### Decision 5 — Granularity
 **Approved:** 2026-04-22 (session-local)
@@ -273,7 +277,7 @@ public enum ExhaustionCause {
 
 **Resolves open point(s):** #5
 
-**Implication for §4.3.5.2 spec:** §4.3.5.2 now lands four records, one sealed interface with two permits, one service interface, and one enum — all in the `forvum-core` module:
+**Implication for §4.3.5.2 spec:** §4.3.5.2 now lands four records, one sealed interface with two permits, one service interface, and one enum — all in the `ai.forvum.core.budget` package of the `forvum-core` module, per the placement fixed by Decision 9:
 - `CostBudget` record (final form from Decision 4, with its `Window window` field now bound to the sealed type from Decision 5).
 - `Window` sealed interface + `DayWindow`, `SessionWindow` permits (from Decisions 5 & 6).
 - `BudgetMeter` interface declaring `Usage usage(CostBudget budget)` — the read-side contract. No implementation ships in `forvum-core`; the default M5 persistence implementation issues the `SUM()` query and assembles `Usage`.
@@ -282,6 +286,8 @@ public enum ExhaustionCause {
 - `ExhaustionCause` enum with three constants.
 
 The `BudgetMeter` **implementation** (the actual SUM query, CDI wiring against the `provider_calls` table) is explicitly **not** part of §4.3.5.2 — it lands in §5.x / M5 persistence milestone. §4.3.5.2 owns only the contract types.
+
+> **Note (amended 2026-04-22):** The opening sentence of this Implication above was refined from its original form — "all in the `forvum-core` module" (module-level only, no sub-package) — to explicitly name the `ai.forvum.core.budget` sub-package, per the placement established by Decision 9 for the entire budget contract surface.
 
 **Implication for other sections:**
 - **§5.4 `FallbackChatModel`:** pre-call consultation of `BudgetMeter.usage(budget)`. If `Usage.exhausted() == true`, emits `FallbackTriggered` with `reason = FallbackReasons.COST_BUDGET`; the `ExhaustionCause` from `Usage.cause()` maps onto the event's causal payload (e.g. attribute keys like `cost_budget.cause = "usd_cap_hit"` / `"token_cap_hit"` / `"both_caps_hit"`) so downstream consumers — logs, operator `/status`, dashboards — see which dimension triggered the fallback without re-querying the ledger.
