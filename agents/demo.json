@@ -1,4 +1,4 @@
 {
   "systemPrompt": "You are a helpful assistant running in the Forvum personal AI framework. Keep responses concise and direct.",
-  "primaryModel": "ollama:qwen3:1.7b"
+  "primaryModel": "ollama:qwen3.5:0.8b"
 }
