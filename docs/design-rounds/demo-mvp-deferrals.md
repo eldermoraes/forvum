@@ -61,11 +61,14 @@ explicit.
 - **ULTRAPLAN reference:** §5.1 (@AgentScoped custom CDI context 
   with ScopedValue<AgentId> CURRENT_AGENT + ScopedValue<UUID> 
   CURRENT_TURN).
-- **MVP shape:** SimpleAgent as @ApplicationScoped bean receiving 
-  AgentSpec and ChatModel via constructor injection. History kept 
-  in memory via langchain4j MessageWindowChatMemory 
-  (List<ChatMessage>). No per-agent scope isolation — single-agent 
-  demo doesn't exercise the isolation requirement.
+- **MVP shape:** SimpleAgent as a plain class (not CDI-managed), 
+  instantiated by the CLI with explicit AgentSpec and 
+  ChatLanguageModel arguments — both are runtime-parameterized by 
+  the CLI's --agent option, which doesn't cleanly fit @Produces at 
+  deploy time. History kept in memory via langchain4j 
+  MessageWindowChatMemory (List<ChatMessage>, 20-message window). 
+  No per-agent scope isolation — single-agent demo doesn't exercise 
+  the isolation requirement.
 - **Debt incurred:** when sub-agent spawn (§5.2, §5.5) or multi-
   agent configuration enters scope, the @ApplicationScoped single 
   bean must become @AgentScoped with InjectableContext backing + 
