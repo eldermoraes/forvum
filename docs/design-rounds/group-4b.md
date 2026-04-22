@@ -149,6 +149,145 @@ The `Window` field's concrete type is deferred to #2 (granularity) + #3 (reset p
 **Implication for other sections:** None new. Reinforces the `IllegalStateException` + informative-message convention established by Groups 2, 3, 4a — Group 4c (`FallbackChain`) and Group 5 (`MemoryPolicy`) should continue the same pattern.
 **Fallback note:** Option 4 (`UsdCap`/`TokenCap` record value objects with nullable fields on `CostBudget`) is documented here as a fallback shape. If subsequent decisions reveal that these wrappers would be reused outside `CostBudget` — e.g., `FallbackChain` exposing per-dimension cost information, `MemoryPolicy` introducing its own `Cap` type, or `#6` spawn inheritance carving out per-dimension allowances for children — revisit this decision. Refactoring from Option 1 to Option 4 is localized (introduce two record types, wrap the two fields, update Jackson mapping) and carries no schema implications.
 
+### Decision 5 — Granularity
+**Approved:** 2026-04-22 (session-local)
+**Decision:** `Window` is a Java sealed interface with two permits for MVP: `DayWindow(ZoneId tz)` and `SessionWindow(String sessionId, String agentId)`. `ZoneId` resolution reads an optional `timezone` field from `agents/<id>.json` (and `crons/<id>.json` when applicable) and falls back to `ZoneId.systemDefault()` when the field is absent.
+**Rationale:** A sealed interface over granularity permits covers both mental models Forvum must support — daily rolling caps ("don't spend more than $X per day") and per-conversation caps ("cap this chat session at N tokens") — without introducing an `enum` + parameter-bundle shape that would couple unrelated fields into a single record. A pre-decision grep check against `docs/ULTRAPLAN.md` §4.2 confirmed `provider_calls.session_id TEXT NOT NULL` plus the composite index `idx_provider_session (session_id, created_at)` already exist in the V1 schema, so `SessionWindow` requires zero schema change and reuses the same `SUM()` infrastructure as `DayWindow`. The `sealed permits` form also leaves the door open for post-MVP additions (rolling windows, monthly caps, unbounded accumulation, hierarchical stacks — see "Combos not included" below) as new permits without breaking existing callers: a `switch` over a sealed type forces exhaustive handling at every call site the moment a permit is added, surfacing work cleanly rather than silently.
+**Resolves open point(s):** #2
+**Implication for §4.3.5.2 spec:** Ships the sealed `Window` interface plus its two permits, and a contract method that scopes a `SUM()` aggregation over `provider_calls` to the window — conceptually each permit yields a SQL filter (WHERE-clause fragment + parameter bindings). The concrete signature of that contract method is fixed in §4.3.5.2 alongside the final `CostBudget` record. `CostBudget`'s `Window window` field from Decision 4 now resolves to this sealed type. Shape sketch for §4.3.5.2:
+
+```java
+public sealed interface Window permits DayWindow, SessionWindow {
+    // Each permit provides the WHERE-clause fragment and parameter
+    // bindings that scope a SUM() over provider_calls to its window.
+}
+
+public record DayWindow(ZoneId tz) implements Window {
+    // Validate: tz non-null (config-parse boundary substitutes
+    // ZoneId.systemDefault() when the "timezone" field is absent,
+    // so a null reaching this constructor indicates a wiring bug).
+}
+
+public record SessionWindow(String sessionId, String agentId) implements Window {
+    // Validate: both fields non-null and non-blank.
+}
+```
+
+Full constructor validation with informative `IllegalStateException` messages (per the Groups 2/3/4a and Decision-4 convention) is materialized at spec-assembly time in §4.3.5.2.
+**Implication for other sections:**
+- **§4.1 config schema (on-disk layout):** `agents/<id>.json` (and `crons/<id>.json` when applicable) gains an **optional** `timezone` field, used only when that config's `costBudget` carries a `DayWindow`. Absent field ⇒ `ZoneId.systemDefault()` applied at parse time.
+- **§4.2 persistence (M5):** No schema change. `DayWindow` aggregation reads via `idx_provider_agent` (`agent_id, created_at`); `SessionWindow` reads via `idx_provider_session` (`session_id, created_at`). Both indexes already exist in the V1 schema.
+- **M9–M12 providers + cron implementation (implementation note, not a Group-4b contract change):** For `SessionWindow` to behave as a per-invocation cap in crons and autonomous agents, **each cron firing must generate its own fresh `session_id`** (one-session-per-invocation). `provider_calls.session_id` is `NOT NULL`, but §4.2 does not yet pin how crons populate it; this log entry pins the choice to avoid silent divergence. A naive M2+ implementation that reuses a fixed `session_id` per cron definition would make `SessionWindow` accumulate across invocations and behave like an unbounded window — the exact failure mode this decision is intended to preempt. M2+ milestone reviewers should honor this note when wiring cron execution.
+**Combos not included:** rolling windows (last N hours), monthly/calendar-aligned-to-month, unbounded accumulation, and hierarchical (agent ∈ cron ∈ global) stacking were considered and deliberately deferred. Each can be added post-MVP as an additional permit of `Window` without breaking changes to `CostBudget`, to existing config files, or to downstream callers — an absent permit is never visible to code that doesn't handle it.
+
+### Decision 6 — Reset policy
+**Approved:** 2026-04-22 (session-local)
+**Decision:** Reset policy is not a free configuration knob — it is implicit in each `Window` permit. `DayWindow(ZoneId tz)` resets at calendar-aligned midnight in its resolved `ZoneId`. `SessionWindow(sessionId, agentId)` has no internal reset; its accounting spans the lifetime of the identified session.
+**Rationale:** Reset semantics are entailed by granularity, not orthogonal to it — exposing a separate `reset` field would admit nonsensical combinations (e.g., a `DayWindow` with a "session-lifetime" reset) that the type system should rule out. Making reset implicit in the permit also keeps `CostBudget` immutable and stateless, consistent with Decision 2 (no persisted spend state): the SQL filter produced by each `Window` permit expresses both the scope and the cutoff of that window in one step — for `DayWindow`, `WHERE agent_id = ? AND created_at >= midnight(today, tz)`; for `SessionWindow`, `WHERE session_id = ? AND agent_id = ?`.
+**Resolves open point(s):** #3
+**Implication for §4.3.5.2 spec:** The SQL-filter contract method on each `Window` permit encodes its own reset semantics; no separate reset field, `ResetPolicy` type, or reset configuration knob is introduced on `CostBudget` or on `Window`.
+**Implication for other sections:** None. Reset requires no state persistence — the `provider_calls.created_at` timestamps plus each permit's SQL filter are sufficient to compute the current window on demand at each `SUM()` call.
+
+### Decision 7 — Read-side API (tracking primary)
+**Approved:** 2026-04-22 (session-local)
+**Decision:** The read-side of the budget is a service method — `CostBudget` stays a pure data record, consistent with the Groups 2/3/4a pattern — returning an atomic usage snapshot from a single SQL trip. Service name: **`BudgetMeter`** (interface in `forvum-core`; default implementation lives in the M5 persistence layer, with the ledger / `DataSource` supplied via CDI injection). Method signature:
+
+```java
+public interface BudgetMeter {
+    Usage usage(CostBudget budget);
+}
+```
+
+Shape of the returned types (all in `forvum-core`):
+
+```java
+public record Usage(
+    Spend spent,              // already consumed (usd + tokens)
+    Spend remaining,          // headroom; individual dimensions may be
+                              // null when the matching cap on CostBudget
+                              // is null (opt-out per Decision 1)
+    boolean exhausted,        // any non-null cap reached
+    ExhaustionCause cause     // null iff exhausted == false
+) {
+    public Usage {
+        if (spent == null) {
+            throw new IllegalStateException(
+                "Usage spent must be non-null. Construct via BudgetMeter "
+              + "or test fixtures — a null here indicates a programmatic "
+              + "construction bug.");
+        }
+        if (remaining == null) {
+            throw new IllegalStateException(
+                "Usage remaining must be non-null. Individual dimensions "
+              + "inside the Spend may be null (opt-out), but the Spend "
+              + "record itself must be present.");
+        }
+        if (exhausted && cause == null) {
+            throw new IllegalStateException(
+                "Usage cause must accompany exhausted=true. Either the "
+              + "ExhaustionCause was lost between BudgetMeter query and "
+              + "Usage construction, or the exhausted flag was set "
+              + "without computing cause. Check BudgetMeter output.");
+        }
+        if (!exhausted && cause != null) {
+            throw new IllegalStateException(
+                "Usage cause must be null when exhausted=false. A non-null "
+              + "cause paired with exhausted=false indicates a caller "
+              + "populated cause without flipping the exhausted flag.");
+        }
+    }
+}
+
+public record Spend(BigDecimal usd, Long tokens) {
+    public Spend {
+        if (usd != null && usd.signum() < 0) {
+            throw new IllegalStateException(
+                "Spend usd must be null or non-negative. Got: " + usd
+              + ". Negative values indicate either a ledger accounting "
+              + "bug or an arithmetic underflow in BudgetMeter.");
+        }
+        if (tokens != null && tokens < 0) {
+            throw new IllegalStateException(
+                "Spend tokens must be null or non-negative. Got: " + tokens
+              + ". Negative values indicate either a ledger accounting "
+              + "bug or an arithmetic underflow in BudgetMeter.");
+        }
+    }
+}
+
+public enum ExhaustionCause {
+    USD_CAP_HIT,
+    TOKEN_CAP_HIT,
+    BOTH_CAPS_HIT
+}
+```
+
+**Rationale:**
+- **(ii) service over (i) instance method on `CostBudget`** — `CostBudget` knows its caps and window (static config), but knowing how to query the ledger (runtime dependency) belongs in a service bean, not in a data record. This preserves the Tier-1 pattern of pure-data records (`ModelRef`, `CostBudget`) + behavior services.
+- **(D) atomic snapshot over (A)/(B)/(C) single-field returns** — one `SUM(cost_usd), SUM(tokens_in + tokens_out)` SQL trip populates every consumer's need. Enforcement path reads `usage.exhausted()`; operator `/status` reads `usage.spent()`/`usage.remaining()`; `FallbackTriggered.reason` mapping reads `usage.cause()` — all from the same snapshot, with no re-query race between "check exhausted" and "observe spent/remaining" that could accumulate between two separate trips.
+- **`Spend` reused between `spent` and `remaining`** — DRY and symmetric; the same two-dimension shape (usd + tokens) describes both what has been consumed and what still fits. Per-dimension nullability on `remaining` encodes "no cap on this dimension" (opt-out per Decision 1) without introducing a separate `Headroom` type.
+- **`BOTH_CAPS_HIT` as a first-class enum constant** — the rare-but-real case where both caps are reached in the same SQL trip is visible downstream (fallback reason, operator log) without ad-hoc "bitmask" patterns.
+- **Nullable `cause` paired with boolean `exhausted` over `Optional<ExhaustionCause>`** — same argument as Decision 4: `Optional` in record fields breaks default Jackson serialization and conflicts with Brian Goetz's official guidance on `Optional`. The canonical-constructor biconditional invariant (`cause != null ⇔ exhausted == true`) encodes the relationship safely without `Optional`.
+- **Boxed `Long tokens` on `Spend` adopted over primitive `long tokens`** — a minor adjustment from the approved decision text. The decision permits `remaining.tokens` to be null when `maxTokens == null` on the budget (opt-out of the tokens dimension), which requires a reference type. Boxing both fields keeps the `Spend` type symmetric and reusable; `spent`'s non-nullness is guaranteed by `BudgetMeter`'s contract (spent is always concrete), while `remaining` opts per-dimension into null. Sentinel alternatives (`Long.MAX_VALUE` for "no cap") were rejected as obfuscating — boxing cost is negligible at Tier-1 call rates.
+- **Validation via `IllegalStateException` with informative messages** — continues the Groups 2/3/4a/4b-earlier-decisions convention. Messages name the likely origin of the invalid value (ledger accounting bug, arithmetic underflow, caller error) to speed triage.
+
+**Resolves open point(s):** #5
+
+**Implication for §4.3.5.2 spec:** §4.3.5.2 now lands four records, one sealed interface with two permits, one service interface, and one enum — all in the `forvum-core` module:
+- `CostBudget` record (final form from Decision 4, with its `Window window` field now bound to the sealed type from Decision 5).
+- `Window` sealed interface + `DayWindow`, `SessionWindow` permits (from Decisions 5 & 6).
+- `BudgetMeter` interface declaring `Usage usage(CostBudget budget)` — the read-side contract. No implementation ships in `forvum-core`; the default M5 persistence implementation issues the `SUM()` query and assembles `Usage`.
+- `Usage` record with its invariant-checking canonical constructor.
+- `Spend` record with signum / non-negative validation.
+- `ExhaustionCause` enum with three constants.
+
+The `BudgetMeter` **implementation** (the actual SUM query, CDI wiring against the `provider_calls` table) is explicitly **not** part of §4.3.5.2 — it lands in §5.x / M5 persistence milestone. §4.3.5.2 owns only the contract types.
+
+**Implication for other sections:**
+- **§5.4 `FallbackChatModel`:** pre-call consultation of `BudgetMeter.usage(budget)`. If `Usage.exhausted() == true`, emits `FallbackTriggered` with `reason = FallbackReasons.COST_BUDGET`; the `ExhaustionCause` from `Usage.cause()` maps onto the event's causal payload (e.g. attribute keys like `cost_budget.cause = "usd_cap_hit"` / `"token_cap_hit"` / `"both_caps_hit"`) so downstream consumers — logs, operator `/status`, dashboards — see which dimension triggered the fallback without re-querying the ledger.
+- **§3.4 OpenTelemetry observability:** span attributes for `forvum.llm.call` can expose `usage.spent().usd()` and `usage.spent().tokens()` directly from an already-computed snapshot when the caller already paid for a `BudgetMeter.usage()` trip for the enforcement check — avoiding redundant SUM queries per span. No new contract surface; just a hook into the existing one.
+- **#9 enforcement boundary (unblocked by this decision):** the shape of `BudgetMeter.usage()` is independent of *who* invokes it — `FallbackChatModel` decorator, engine layer, or per-provider adapter all call the same method. #9 decides only the call site, not the API. Atomic-snapshot semantics also mean whichever boundary is chosen sees a consistent read regardless of concurrency.
+
 *Template for future entries:*
 
 ```
