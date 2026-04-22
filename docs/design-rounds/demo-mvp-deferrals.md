@@ -63,8 +63,9 @@ explicit.
   CURRENT_TURN).
 - **MVP shape:** SimpleAgent as @ApplicationScoped bean receiving 
   AgentSpec and ChatModel via constructor injection. History kept 
-  in memory (List<ChatMessage>). No per-agent scope isolation — 
-  single-agent demo doesn't exercise the isolation requirement.
+  in memory via langchain4j MessageWindowChatMemory 
+  (List<ChatMessage>). No per-agent scope isolation — single-agent 
+  demo doesn't exercise the isolation requirement.
 - **Debt incurred:** when sub-agent spawn (§5.2, §5.5) or multi-
   agent configuration enters scope, the @ApplicationScoped single 
   bean must become @AgentScoped with InjectableContext backing + 
