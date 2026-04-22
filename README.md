@@ -14,6 +14,8 @@ In active design and early implementation. `main` ships the Maven bootstrap and 
 
 The demo lives on the `demo/conference-mvp` branch and runs a single agent against an Ollama model via an interactive CLI.
 
+![FORVUM CLI session — boot banner, agent ready prompt, and a two-turn interaction](docs/images/cli-demo.png)
+
 **Prerequisites:**
 
 - Java 25
