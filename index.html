@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Forvum — personal AI agents with the rigor of enterprise software</title>
+  <meta name="description" content="A configuration-first JVM platform for personal AI agents. Local-first, observable, budgeted by contract. Designed in the open on Quarkus and LangChain4j." />
+  <meta name="author" content="Elder Moraes" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://forvum.ai/" />
+  <meta property="og:title" content="Forvum — personal AI agents with the rigor of enterprise software" />
+  <meta property="og:description" content="A configuration-first JVM platform for personal AI agents. Local-first, observable, budgeted by contract. Designed in the open on Quarkus and LangChain4j." />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://forvum.ai/" />
+  <meta name="twitter:title" content="Forvum — personal AI agents with the rigor of enterprise software" />
+  <meta name="twitter:description" content="A configuration-first JVM platform for personal AI agents. Local-first, observable, budgeted by contract. Designed in the open on Quarkus and LangChain4j." />
+  <meta name="twitter:creator" content="@elderjava" />
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230c0e12'/%3E%3Ctext x='50' y='68' font-family='ui-monospace,monospace' font-size='56' font-weight='500' fill='%23ef9f27' text-anchor='middle'%3EF%3C/text%3E%3C/svg%3E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg-primary: #0c0e12;
+      --bg-secondary: #14171c;
+      --bg-tertiary: #1a1d24;
+      --bg-footer: #0a0c10;
+      --border-subtle: #1f242a;
+      --border-strong: #2c333b;
+      --text-primary: #f5f7fa;
+      --text-secondary: #e8eaed;
+      --text-muted: #9aa0a6;
+      --text-faint: #6c727a;
+      --text-very-faint: #5e6570;
+      --accent: #ef9f27;
+      --accent-text: #1a1004;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      line-height: 1.5;
+    }
+
+    a { color: inherit; }
+
+    .container {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 0;
+    }
+
+    .section {
+      padding: 3rem 2.25rem;
+      border-bottom: 0.5px solid var(--border-subtle);
+    }
+
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .section-heading {
+      font-size: 28px;
+      font-weight: 500;
+      line-height: 1.2;
+      margin: 0 0 2rem;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .hero {
+      padding: 4rem 2.25rem 3rem;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      background: rgba(239, 159, 39, 0.08);
+      border: 0.5px solid rgba(239, 159, 39, 0.25);
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--accent);
+      margin-bottom: 1.75rem;
+      letter-spacing: 0.04em;
+    }
+
+    .hero-badge-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .hero h1 {
+      font-size: 42px;
+      font-weight: 500;
+      line-height: 1.12;
+      margin: 0 0 1.25rem;
+      max-width: 600px;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+
+    .hero p {
+      font-size: 17px;
+      line-height: 1.55;
+      color: var(--text-muted);
+      max-width: 560px;
+      margin: 0 0 2.25rem;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 2.5rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 22px;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      border-radius: 8px;
+      transition: opacity 0.15s ease, background 0.15s ease;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--accent-text);
+      border: 0.5px solid var(--accent);
+    }
+
+    .btn-primary:hover { opacity: 0.9; }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-primary);
+      border: 0.5px solid var(--border-strong);
+    }
+
+    .btn-secondary:hover { background: rgba(255,255,255,0.04); }
+
+    .stats-row {
+      display: flex;
+      gap: 28px;
+      flex-wrap: wrap;
+      padding-top: 1.5rem;
+      border-top: 0.5px solid var(--border-subtle);
+      font-family: var(--font-mono);
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--text-faint);
+      letter-spacing: 0.1em;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }
+
+    .feature-card {
+      background: var(--bg-secondary);
+      border: 0.5px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 1.5rem 1.25rem;
+    }
+
+    .feature-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    .feature-tag-product { color: var(--accent); }
+    .feature-tag-arch { color: var(--text-faint); }
+
+    .feature-card h3 {
+      font-size: 16px;
+      font-weight: 500;
+      margin: 0 0 8px;
+      color: var(--text-primary);
+    }
+
+    .feature-card p {
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-muted);
+      margin: 0;
+    }
+
+    .flow-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .flow-caption {
+      font-size: 13px;
+      color: var(--text-faint);
+      max-width: 600px;
+      margin: 1.5rem 0 0;
+      font-family: var(--font-mono);
+      line-height: 1.6;
+    }
+
+    .roadmap-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      background: var(--border-subtle);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .roadmap-item {
+      background: var(--bg-secondary);
+      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .roadmap-mid {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      min-width: 32px;
+    }
+
+    .roadmap-mid-done { color: var(--accent); }
+    .roadmap-mid-other { color: var(--text-faint); }
+
+    .roadmap-status {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      min-width: 60px;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .roadmap-status-done {
+      background: rgba(239, 159, 39, 0.12);
+      color: var(--accent);
+    }
+
+    .roadmap-status-planned {
+      background: var(--border-subtle);
+      color: var(--text-muted);
+    }
+
+    .roadmap-text {
+      font-size: 14px;
+      color: var(--text-secondary);
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .roadmap-footer {
+      font-size: 13px;
+      color: var(--text-faint);
+      margin: 1.5rem 0 0;
+    }
+
+    .roadmap-footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .roadmap-footer a:hover { text-decoration: underline; }
+
+    .footer {
+      padding: 2.5rem 2.25rem;
+      background: var(--bg-footer);
+      border-top: 0.5px solid var(--border-subtle);
+    }
+
+    .footer-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 24px;
+      margin-bottom: 2rem;
+    }
+
+    .footer-brand {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+
+    .footer-tagline {
+      font-size: 13px;
+      color: var(--text-faint);
+      max-width: 320px;
+      line-height: 1.6;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .footer-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+
+    .footer-links a:hover { color: var(--accent); }
+
+    .footer-bottom {
+      padding-top: 1.5rem;
+      border-top: 0.5px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 32px; }
+      .section-heading { font-size: 24px; }
+      .section, .hero { padding: 2.5rem 1.5rem; }
+      .footer { padding: 2rem 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+
+    <section class="hero">
+      <div class="hero-badge">
+        <span class="hero-badge-dot"></span>
+        forvum.ai · in active design
+      </div>
+      <h1>Personal AI agents with the rigor of enterprise software.</h1>
+      <p>A configuration-first JVM platform — local-first, observable, budgeted by contract. Designed in the open on Quarkus and LangChain4j, with every architectural decision specified before code lands.</p>
+      <div class="button-row">
+        <a href="https://github.com/eldermoraes/forvum" class="btn btn-primary">View on GitHub →</a>
+        <a href="https://github.com/eldermoraes/forvum/blob/main/docs/ULTRAPLAN.md" class="btn btn-secondary">Read the design</a>
+      </div>
+      <div class="stats-row">
+        <div>
+          <div class="stat-label">Version</div>
+          <div class="stat-value">v0.1 · in design</div>
+        </div>
+        <div>
+          <div class="stat-label">Stack</div>
+          <div class="stat-value">Java 25 · Quarkus · LangChain4j</div>
+        </div>
+        <div>
+          <div class="stat-label">License</div>
+          <div class="stat-value">Apache 2.0</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="features">
+      <div class="section-label">Features</div>
+      <h2 class="section-heading">Built on four pillars.</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-tag feature-tag-product">Product</div>
+          <h3>Local-first by default</h3>
+          <p>Runs on your machine with Ollama. Cloud providers are configurable, never required.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag feature-tag-product">Product</div>
+          <h3>Configuration-first</h3>
+          <p>Define agents in JSON, not Java. The platform composes the runtime around your config.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag feature-tag-arch">Architecture</div>
+          <h3>Hermetic agent isolation</h3>
+          <p>Custom CDI scope plus Java 25 ScopedValue ensure each agent has its own beans, memory, and budget.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag feature-tag-arch">Architecture</div>
+          <h3>Budgeted by contract</h3>
+          <p>USD and token caps as first-class types. Hard-stop enforcement via dedicated exception, not best-effort logging.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="how-it-works">
+      <div class="section-label">How it works</div>
+      <h2 class="section-heading">From config to response.</h2>
+      <svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg" class="flow-svg" role="img" aria-label="Forvum data flow from config file through agent runtime, pluggable model providers, and response back to user, with SQLite ledger and channels">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#5e6570"/>
+          </marker>
+        </defs>
+        <text x="265" y="40" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="#6c727a">turn_id propagated through every step →</text>
+        <rect x="20" y="80" width="120" height="80" rx="10" fill="#14171c" stroke="#2c333b" stroke-width="0.5"/>
+        <text x="80" y="108" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#ef9f27" letter-spacing="0.5">CONFIG</text>
+        <text x="80" y="128" text-anchor="middle" font-family="Inter, ui-sans-serif, sans-serif" font-size="13" font-weight="500" fill="#f5f7fa">agents/</text>
+        <text x="80" y="146" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="#9aa0a6">demo.json</text>
+        <line x1="142" y1="120" x2="183" y2="120" stroke="#5e6570" stroke-width="1" marker-end="url(#arrow)"/>
+        <rect x="190" y="60" width="150" height="120" rx="10" fill="#1a1d24" stroke="#ef9f27" stroke-width="1"/>
+        <text x="265" y="88" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#ef9f27" letter-spacing="0.5">FORVUM RUNTIME</text>
+        <text x="265" y="108" text-anchor="middle" font-family="Inter, ui-sans-serif, sans-serif" font-size="13" font-weight="500" fill="#f5f7fa">Agent</text>
+        <text x="265" y="128" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#9aa0a6">@AgentScoped</text>
+        <text x="265" y="146" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#9aa0a6">+ memory</text>
+        <text x="265" y="162" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#9aa0a6">+ budget</text>
+        <line x1="342" y1="120" x2="383" y2="120" stroke="#5e6570" stroke-width="1" marker-end="url(#arrow)"/>
+        <rect x="390" y="80" width="140" height="80" rx="10" fill="#14171c" stroke="#2c333b" stroke-width="0.5"/>
+        <text x="460" y="108" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#ef9f27" letter-spacing="0.5">PROVIDERS</text>
+        <text x="460" y="128" text-anchor="middle" font-family="Inter, ui-sans-serif, sans-serif" font-size="13" font-weight="500" fill="#f5f7fa">SPI · pluggable</text>
+        <text x="460" y="146" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="#9aa0a6">local · cloud · custom</text>
+        <line x1="532" y1="120" x2="573" y2="120" stroke="#5e6570" stroke-width="1" marker-end="url(#arrow)"/>
+        <rect x="580" y="80" width="100" height="80" rx="10" fill="#14171c" stroke="#2c333b" stroke-width="0.5"/>
+        <text x="630" y="108" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="10" fill="#ef9f27" letter-spacing="0.5">OUTPUT</text>
+        <text x="630" y="128" text-anchor="middle" font-family="Inter, ui-sans-serif, sans-serif" font-size="13" font-weight="500" fill="#f5f7fa">Response</text>
+        <text x="630" y="146" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="#9aa0a6">+ events</text>
+        <line x1="265" y1="180" x2="265" y2="215" stroke="#5e6570" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+        <rect x="170" y="218" width="190" height="32" rx="6" fill="#14171c" stroke="#2c333b" stroke-width="0.5"/>
+        <text x="265" y="238" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="#9aa0a6">SQLite ledger · provider_calls</text>
+        <line x1="630" y1="160" x2="630" y2="215" stroke="#5e6570" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+        <rect x="540" y="218" width="180" height="32" rx="6" fill="#14171c" stroke="#2c333b" stroke-width="0.5"/>
+        <text x="630" y="238" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="#9aa0a6">CLI · Web · Telegram</text>
+      </svg>
+      <p class="flow-caption">Every turn gets a UUID generated at the runtime boundary. The same id flows through the ledger and the channels — one query reconstructs the full reasoning path.</p>
+    </section>
+
+    <section class="section" id="roadmap">
+      <div class="section-label">Roadmap</div>
+      <h2 class="section-heading">What ships next.</h2>
+      <div class="roadmap-list">
+        <div class="roadmap-item">
+          <span class="roadmap-mid roadmap-mid-done">M1</span>
+          <span class="roadmap-status roadmap-status-done">Done</span>
+          <span class="roadmap-text">Multi-module Maven bootstrap and Tier 1 contract design rounds.</span>
+        </div>
+        <div class="roadmap-item">
+          <span class="roadmap-mid roadmap-mid-other">M2</span>
+          <span class="roadmap-status roadmap-status-planned">Next</span>
+          <span class="roadmap-text">Materialize core contracts as code: events, model refs, enums, budgets.</span>
+        </div>
+        <div class="roadmap-item">
+          <span class="roadmap-mid roadmap-mid-other">M3</span>
+          <span class="roadmap-status roadmap-status-planned">Planned</span>
+          <span class="roadmap-text">SPI surface for providers, channels, and tools.</span>
+        </div>
+        <div class="roadmap-item">
+          <span class="roadmap-mid roadmap-mid-other">M5</span>
+          <span class="roadmap-status roadmap-status-planned">Planned</span>
+          <span class="roadmap-text">SQLite persistence layer with Flyway migrations and the canonical ledger.</span>
+        </div>
+        <div class="roadmap-item">
+          <span class="roadmap-mid roadmap-mid-other">M8</span>
+          <span class="roadmap-status roadmap-status-planned">Planned</span>
+          <span class="roadmap-text">Fallback chains and budget enforcement at the dispatch boundary.</span>
+        </div>
+      </div>
+      <p class="roadmap-footer">Full milestone scope through M20 in <a href="https://github.com/eldermoraes/forvum/blob/main/docs/ULTRAPLAN.md">docs/ULTRAPLAN.md §7</a>.</p>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-top">
+        <div>
+          <div class="footer-brand">Forvum</div>
+          <div class="footer-tagline">Personal AI agents with the rigor of enterprise software. Designed in the open.</div>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/eldermoraes/forvum">github</a>
+          <a href="https://www.linkedin.com/in/eldermoraes/">linkedin</a>
+          <a href="https://twitter.com/elderjava">twitter</a>
+          <a href="https://eldermoraes.ai">eldermoraes.ai</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>built by Elder Moraes · apache 2.0</span>
+        <span>v0.1 · in active design</span>
+      </div>
+    </footer>
+
+  </main>
+</body>
+</html>
