@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Forvum social preview">
+  <title>Forvum — personal AI agents with the rigor of enterprise software</title>
+
+  <rect width="1200" height="630" fill="#0c0e12"/>
+
+  <rect x="60" y="60" width="1080" height="510" rx="24" fill="none" stroke="#1f242a" stroke-width="1"/>
+
+  <g transform="translate(600, 240)">
+    <path d="M -180 -70 L -220 -70 L -220 70 L -180 70" fill="none" stroke="#ef9f27" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="0" y="48" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="140" font-weight="500" fill="#f5f7fa" letter-spacing="-5">forvum</text>
+    <path d="M 180 -70 L 220 -70 L 220 70 L 180 70" fill="none" stroke="#ef9f27" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <text x="600" y="400" text-anchor="middle" font-family="'Inter', -apple-system, BlinkMacSystemFont, sans-serif" font-size="30" font-weight="400" fill="#9aa0a6">Personal AI agents with the rigor of enterprise software.</text>
+
+  <text x="600" y="444" text-anchor="middle" font-family="'Inter', -apple-system, BlinkMacSystemFont, sans-serif" font-size="20" font-weight="400" fill="#6c727a">A configuration-first JVM platform.</text>
+
+  <g transform="translate(600, 520)">
+    <rect x="-250" y="-24" width="500" height="48" rx="24" fill="none" stroke="rgba(239, 159, 39, 0.3)" stroke-width="1"/>
+    <circle cx="-210" cy="0" r="5" fill="#ef9f27"/>
+    <text x="-190" y="6" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="18" font-weight="400" fill="#ef9f27">forvum.ai</text>
+    <text x="-60" y="6" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="18" font-weight="400" fill="#6c727a">·</text>
+    <text x="-40" y="6" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="18" font-weight="400" fill="#9aa0a6">designed in the open</text>
+  </g>
+</svg>
