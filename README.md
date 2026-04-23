@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/forvum-mark.svg">
+    <img src="docs/brand/forvum-mark-light.svg" alt="Forvum" width="120" />
+  </picture>
+</p>
+
 # Forvum
 
 *A JVM platform for personal AI agents, designed in the open. The plan is written; the code follows, milestone by milestone.*

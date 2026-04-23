@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 100" role="img" aria-label="Forvum wordmark">
+  <title>Forvum</title>
+  <path d="M 22 28 L 10 28 L 10 72 L 22 72" fill="none" stroke="#ef9f27" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="160" y="68" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="44" font-weight="500" fill="#f5f7fa" letter-spacing="-1.5">forvum</text>
+  <path d="M 298 28 L 310 28 L 310 72 L 298 72" fill="none" stroke="#ef9f27" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

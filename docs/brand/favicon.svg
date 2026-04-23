@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Forvum favicon">
+  <title>Forvum</title>
+  <rect width="32" height="32" rx="6" fill="#0c0e12"/>
+  <path d="M 9 8 L 5 8 L 5 24 L 9 24" fill="none" stroke="#ef9f27" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 23 8 L 27 8 L 27 24 L 23 24" fill="none" stroke="#ef9f27" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="16" y="22" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="14" font-weight="500" fill="#f5f7fa">f</text>
+</svg>
