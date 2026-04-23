@@ -6,9 +6,9 @@
   <rect x="60" y="60" width="1080" height="510" rx="24" fill="none" stroke="#1f242a" stroke-width="1"/>
 
   <g transform="translate(600, 240)">
-    <path d="M -180 -70 L -220 -70 L -220 70 L -180 70" fill="none" stroke="#ef9f27" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M -240 -90 L -290 -90 L -290 90 L -240 90" fill="none" stroke="#ef9f27" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
     <text x="0" y="48" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="140" font-weight="500" fill="#f5f7fa" letter-spacing="-5">forvum</text>
-    <path d="M 180 -70 L 220 -70 L 220 70 L 180 70" fill="none" stroke="#ef9f27" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 240 -90 L 290 -90 L 290 90 L 240 90" fill="none" stroke="#ef9f27" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 
   <text x="600" y="400" text-anchor="middle" font-family="'Inter', -apple-system, BlinkMacSystemFont, sans-serif" font-size="30" font-weight="400" fill="#9aa0a6">Personal AI agents with the rigor of enterprise software.</text>
