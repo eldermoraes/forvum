@@ -15,6 +15,18 @@
 
 Forvum is a JVM platform being built to let anyone run personal AI agents on their own machine — with the same discipline enterprise Java brings to any other production system. The full architectural vision lives in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md), covering the core contracts for agents, events, budgets, and scope isolation. The `main` branch currently ships the multi-module Maven bootstrap and the design documentation; a working vertical slice — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Implementation proceeds milestone by milestone. If you're a Java developer who wants an AI layer on your own terms, contributions to design or code are welcome.
 
+## The name
+
+*Forvum* is a fusion of two Latin words.
+
+**Forum** — the public space where Roman citizens gathered to deliberate, debate, and decide.
+
+**Quorum** — the minimum number of voices required for a collective decision to stand.
+
+The platform inherits both. Forvum is where agents convene, deliberate, and act — and where every decision is shaped by structure rather than by an opaque single step. Each turn, each tool call, each fallback, each judgment is observable in the ledger; nothing dissolves into a black box.
+
+The result is not an orchestrator that commands silently from the center. It is an architecture where coordination, evidence, and control are all first-class — and where the work of an agent system can finally be reasoned about.
+
 ## Status
 
 In active design and early implementation. `main` ships the Maven bootstrap and the architectural design rounds documented in [docs/design-rounds/](docs/design-rounds/). A conference-demo MVP is available on the `demo/conference-mvp` branch. Not yet production-ready.
