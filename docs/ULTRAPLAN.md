@@ -156,6 +156,17 @@ Quarkus 3.31.x. Provides build-time CDI (Arc), native OpenTelemetry integration,
 - **GitHub Actions CI** runs a matrix of `linux-amd64` and `macos-arm64`, building both JVM and native targets on every pull request. A `@QuarkusIntegrationTest` smoke-runs the native binary and fails the build if cold-start exceeds 200 ms.
 - **Release channels.** The JVM jar and an OCI container image ship to GitHub Releases and Docker Hub. Platform-specific native binaries ship to GitHub Releases. A Homebrew tap and a Scoop bucket follow from v0.5 onward.
 
+### 3.8 Concurrency Discipline
+
+Forvum runs every per-request workflow on virtual threads. The choice is not cosmetic — `@AgentScoped` (§5.1), `ScopedValue<AgentId>` propagation, and the orchestrator-workers spawn pattern (§5.5) all assume virtual-thread semantics. The rules below codify the implementation discipline so the assumption holds in practice.
+
+- **Virtual-thread placement by layer.** Channel inbound REST and WebSocket handlers (`forvum-channel-*`), the engine turn orchestrator (`forvum-engine`), and `quarkus-scheduler`-fired cron entries (M19) all run on virtual threads. Inbound REST/WebSocket handlers and `@Scheduled` methods (the M19 cron entries) carry `@RunOnVirtualThread`; engine-internal fan-out injects or constructs `Executors.newVirtualThreadPerTaskExecutor()` explicitly. The default Quarkus worker pool is the *exception*; any use is commented at the call site with a rationale.
+- **Spawn fan-out (StructuredTaskScope, preview caveat).** §5.5 `spawn_worker → worker_run` is the natural fit for Java 25's `StructuredTaskScope.ShutdownOnFailure` / `ShutdownOnSuccess`, which gives structured cancellation and exception propagation across sub-agent boundaries. `StructuredTaskScope` is JEP 505 — *fifth preview* in Java 25 LTS — so it requires `--enable-preview` at compile and run time, with attendant restrictions on GraalVM native-image. The binding commitment is gated on a spike during M18 — where the supervisor graph's `spawn_worker → worker_run` actually exercises fan-out — that confirms StructuredTaskScope produces a working native image. On spike failure, Forvum ships v0.1 with a manual `Thread.ofVirtual().start(...)` fan-out plus explicit `CompletionStage` join, and revisits when the JEP exits preview.
+- **Pinning detection.** Dev and test profiles enable `-Djdk.tracePinnedThreads=full`. A CI step greps test output for `Thread pinned` and fails the build on any new occurrence. `forvum-engine/src/test/resources/pinning-allowlist.txt` enumerates documented carve-outs (each entry cites the upstream issue or PR); the CI step suppresses only matches whose stack-trace fingerprint is on that allowlist.
+- **`synchronized` forbidden in hot paths.** A CI grep over `forvum-engine/src/main/java` and (when they exist) `forvum-channel-*/src/main/java` fails the build on any `synchronized` keyword. Use `java.util.concurrent.locks.ReentrantLock`, `java.util.concurrent` collections, or `java.util.concurrent.atomic` primitives. Modules not yet created are exempt until they appear; the rule applies forward, not retroactively.
+- **JDBC and virtual threads — posture finalized at M5.** Xerial SQLite JDBC uses `synchronized` JNI native methods and will pin virtual threads. Rather than pre-commit a mitigation against an unfinalized connection-pool choice, this section records the *symptom* and defers the resolution to M5 (see Risk #11). M5 picks among (a) a managed platform-thread executor for transactions, (b) explicit `@Blocking` on Hibernate-bound code paths, or (c) a loom-friendly driver if one becomes available; the chosen pattern is back-filled here.
+- **Observability marker.** Every `forvum.*` OTel span carries a `thread.is_virtual` boolean attribute. Dev UI exposes a Concurrency card showing VT-vs-PT carrier counts and pin-detection events; it lands as part of the `forvum-engine` Dev UI surface (§3.2) without a dedicated milestone. The same data exports via OTLP in Phase 2 (§7.2 item 15).
+
 ---
 
 ## 4. Storage (Files + SQLite Schema)
@@ -1344,6 +1355,16 @@ Each item below is either a technical risk to validate early or a decision defer
     - **Context:** Running a judge model on every turn doubles LLM calls and cost.
     - **Mitigation:** Judge is off by default in production; enabled in dev and in scheduled evaluation runs. When enabled, the default judge is a cheap local Ollama model, not a hosted one.
     - **Decision trigger:** the evaluation harness in v1.0+ measures judge-vs-human agreement; if agreement falls below 0.7 on our suite, we either replace the judge model or invest in calibration.
+
+11. **JDBC/SQLite pinning under virtual threads.**
+    - **Context:** Xerial SQLite JDBC uses `synchronized` JNI native methods, which pin virtual threads. The engine runs on virtual threads end-to-end (§3.8); without mitigation, every Hibernate transaction blocks a carrier thread.
+    - **Mitigation:** M5 chooses among (a) a managed platform-thread executor for transactions, (b) explicit `@Blocking` posture on Hibernate-bound code paths, or (c) a loom-friendly JDBC driver if one becomes available. The selection is recorded back into §3.8 once locked.
+    - **Decision trigger:** an M5 spike measures pin events under steady-state load (a synthetic 100-turn run hitting `messages` and `provider_calls`); the option that produces zero unbounded pins wins. If all three options have unbounded pin events, ship the least-bad option in v0.1 and file an issue capping the regression.
+
+12. **Mutiny ↔ virtual-thread boundary in the Telegram channel.**
+    - **Context:** `forvum-channel-telegram` (M17) uses `quarkus-rest-client-reactive`, which is Mutiny-based. The rest of the engine — including all `@AgentScoped` work — runs on virtual threads with no Mutiny exposure. Without an explicit seam, Mutiny types could leak into engine code and create dual-paradigm code paths.
+    - **Mitigation:** `UpdateProcessor` (M17) is the seam: it consumes the Mutiny `Uni<Update>` stream from the REST client, `await().indefinitely()`s within a virtual-thread scope, and hands `ChannelMessage` records (only `forvum-core` / `forvum-sdk` types) to the engine. The boundary is enforced at build time via the `maven-enforcer-plugin` `bannedDependencies` rule in `forvum-engine/pom.xml`, banning `io.smallrye.mutiny:*` from the compile classpath.
+    - **Decision trigger:** the `bannedDependencies` enforcement step in M17's CI build fails if any engine code introduces a Mutiny type. If the seam leaks, redesign `UpdateProcessor` before M17 ships.
 
 ---
 
