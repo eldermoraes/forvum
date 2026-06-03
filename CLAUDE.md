@@ -27,10 +27,11 @@ trade-off for a reflection-free native binary.
 - Docs: `docs/ULTRAPLAN.md` (source of truth, M1–M20 roadmap) · founding paradigm
   `docs/CONTEXT-ENGINEERING.md` (PT source) → `docs/CONTEXT-ENGINEERING-MAPPING.md` (EN mapping) ·
   `docs/ISSUES.md` (per-step issue master index) · `CONTRIBUTING.md` (full contributor guide).
-- Status: active design + early implementation. M1–M2 complete (multi-module reactor + Tier-1 domain
-  contracts: records, sealed `AgentEvent`, enums, `PermissionScope`, budget types); M3–M20 planned. A
-  working vertical slice (one agent vs local Ollama via CLI) lives on `demo/conference-mvp`. Not
-  production-ready.
+- Status: active design + early implementation. M1–M3 complete (multi-module reactor + Tier-1 domain
+  contracts: records, sealed `AgentEvent`, enums, `PermissionScope`, budget types; plus the Layer-1
+  plugin SDK: sealed provider interfaces, `@ForvumExtension`, re-exported `@RegisterForReflection`);
+  M4–M20 planned. A working vertical slice (one agent vs local Ollama via CLI) lives on
+  `demo/conference-mvp`. Not production-ready.
 
 ---
 
