@@ -27,9 +27,10 @@ trade-off for a reflection-free native binary.
 - Docs: `docs/ULTRAPLAN.md` (source of truth, M1–M20 roadmap) · founding paradigm
   `docs/CONTEXT-ENGINEERING.md` (PT source) → `docs/CONTEXT-ENGINEERING-MAPPING.md` (EN mapping) ·
   `docs/ISSUES.md` (per-step issue master index) · `CONTRIBUTING.md` (full contributor guide).
-- Status: active design + early implementation. M1 complete (multi-module reactor + Tier-1
-  contracts); M2–M20 planned. A working vertical slice (one agent vs local Ollama via CLI) lives on
-  `demo/conference-mvp`. Not production-ready.
+- Status: active design + early implementation. M1–M2 complete (multi-module reactor + Tier-1 domain
+  contracts: records, sealed `AgentEvent`, enums, `PermissionScope`, budget types); M3–M20 planned. A
+  working vertical slice (one agent vs local Ollama via CLI) lives on `demo/conference-mvp`. Not
+  production-ready.
 
 ---
 
@@ -130,6 +131,9 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
 `devui-testing_runTests` (all) or `devui-testing_runTest` with `{"className":"ai.forvum.…"}` (one). Each
 milestone's `Verify` script is the contract the run must satisfy. Native integration tests (`-Pnative`,
 `@QuarkusIntegrationTest`, Failsafe) remain a Maven step inside the native profile and are the M20 gate.
+**Exception — Quarkus-free modules (`forvum-core`, `forvum-sdk`):** they boot no Quarkus, so the Dev MCP
+test runner cannot start and does not apply; run their unit/property tests directly via Maven Surefire
+(`./mvnw -pl forvum-core test`). The "never raw `mvn test`" rule is scoped to Quarkus-bearing modules.
 
 Test layout: unit `*Test` (Surefire, no Quarkus boot/IO) → integration `*IT` (`@QuarkusTest`, real
 SQLite via `@TempDir`) → E2E under `forvum-app/src/test/java/ai/forvum/e2e/` (ten scripts, landing
@@ -286,6 +290,11 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
   exists, coverage gates are gates.
 - **Property-based tests (jqwik) MANDATORY for parsers/records:** `ModelRef.parse` roundtrip,
   `AgentEvent` Jackson roundtrip, `CostBudget` invariants, `PermissionScope.fromName` failure modes.
+  jqwik is managed in `forvum-bom` (the `net.jqwik:jqwik` aggregator — there is no `jqwik-bom`). A
+  Quarkus-free module that uses jqwik must import `org.junit:junit-bom:5.x` **before** `forvum-bom` in
+  its `dependencyManagement`: jqwik targets the JUnit 5 platform, but `quarkus-bom` pins JUnit 6, and
+  mixing the two platform lines breaks test discovery (done in `forvum-core` at M2; recurs in
+  `forvum-sdk` at M3).
 - **Native-mode parity — MANDATORY** (§5). Parser/record (M2), provider HTTP (M9–M12), TUI (M15), web
   (M16), Telegram (M17), and the M20 cold-start gate run native.
 - **Per-turn performance gates** (excluding inference, via `FakeProvider`): TUI ≤200 ms, Web ≤300 ms,
