@@ -56,6 +56,13 @@ Maven multi-module reactor under `ai.forvum`. The layering enforces **core stays
 at the build level: `forvum-engine` has zero compile dependencies on any concrete
 channel/provider/tool module.
 
+This is enforced (since M1) by `maven-enforcer-plugin` `bannedDependencies` in each module's pom,
+allowlist form: `forvum-core` bans Quarkus/Quarkiverse; `forvum-sdk` may depend only on `forvum-core`;
+`forvum-engine` only on `forvum-core` + `forvum-sdk`. **Every new module carries its own enforcer
+execution** — a Layer-3 plugin compiles only against `forvum-sdk` (copy the template in
+`docs/CODE-REVIEW.md` §5.1). The rule runs at `validate`, so `./mvnw -DskipTests validate` is the fast
+local check.
+
 ```
 forvum-parent (pom)
 ├── Layer 0  Foundation (no Quarkus)
