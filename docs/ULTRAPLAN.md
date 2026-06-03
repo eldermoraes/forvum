@@ -1349,7 +1349,7 @@ Goal: match OpenClaw's feature set so a user currently on OpenClaw can migrate t
 20. **Session compaction.** When a session approaches the model's context window, compaction caps a reserve-token floor, mutates the oldest turns first to preserve the cached prefix, and strips orphaned reasoning/tool blocks. This is the Context Engineering Compress pillar (§1.4, §2.7) realized on the live session window.
 21. **Detached task runtime registration.** A `TaskExecutor` SPI in `forvum-sdk` plus a SQLite `tasks` ledger that unifies cron entries, sub-agent runs, and background tasks under one queryable record.
 22. **Cron isolated-agent delivery modes.** `delivery.mode: none | last | explicit-to` on cron entries, with per-execution dedupe and ambiguous delivery rejected at add/update time. Folds into the item 11 RBAC `cron` role.
-23. **`OutputGuard` SPI.** An outbound sensitive-data (secret/PII) filter on every channel egress surface — the v0.5 realization of the §1.4 outbound-filter promise. Full contract is specified via design-round Group 6a (§9.2, once the §9 Security section lands).
+23. **`OutputGuard` SPI.** An outbound sensitive-data (secret/PII) filter on every channel egress surface — the v0.5 realization of the §1.4 outbound-filter promise. Full contract lands with the §9 Security section (§9.2 `OutputFilter`).
 
 ### 7.3 Phase 3 — v1.0+ (differentiators)
 

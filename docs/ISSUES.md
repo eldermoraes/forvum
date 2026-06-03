@@ -71,7 +71,7 @@ Phase 2 (v0.5 parity) — gated on a stable MVP (M20)
 Phase 3 (v1.0+) — gated on v0.5
   P3-1 … P3-10  (P3-1 single-binary install is the native-mandate product expression)
 
-Design rounds (parallel track; must close before the contracts they define are coded)
+Design & contracts (parallel track; must land before the contracts they define are coded)
   DR-6a ─→ { DR-4c, DR-5, DR-6b, DR-6c, TEST-SEC } ─→ DR-8
   BR-CLEANUP (independent)
 ```
@@ -85,16 +85,16 @@ Design rounds (parallel track; must close before the contracts they define are c
 | EPIC-1 — Phase 1 MVP (v0.1) | M1–M20 | 20 |
 | EPIC-2 — Phase 2 v0.5 parity | P2-1 … P2-15 + 8 parity additions | 23 |
 | EPIC-3 — Phase 3 v1.0+ | P3-1 … P3-10 | 10 |
-| EPIC-DR — Open design rounds | DR-6a, DR-6b, DR-6c, DR-4c, DR-5, DR-8, TEST-SEC, BR-CLEANUP | 8 |
+| EPIC-DR — Design & contracts | DR-6a, DR-6b, DR-6c, DR-4c, DR-5, DR-8, TEST-SEC, BR-CLEANUP | 8 |
 | EPIC-X — Cross-cutting CI/test infra | X1 … X8 | 8 |
 | Epic parents | EPIC-1, EPIC-2, EPIC-3, EPIC-DR, EPIC-X | 5 |
 | **Total** | | **74** |
 
-Labels used: `epic`, `phase-1`, `phase-2`, `phase-3`, `design-round`, `ci-infra`, `native`,
+Labels used: `epic`, `phase-1`, `phase-2`, `phase-3`, `design`, `ci-infra`, `native`,
 `plugin-tooling`, `provider`, `channel`, `tool`, `engine`, `core`, `sdk`, `persistence`, `security`,
 `observability`, `context-engineering`, `branch-hygiene`, `blocked`.
 
-Milestones used: `v0.1 MVP`, `v0.5 Parity`, `v1.0+`, `Design Rounds`, `CI/Test Infra`.
+Milestones used: `v0.1 MVP`, `v0.5 Parity`, `v1.0+`, `Design & Contracts`, `CI/Test Infra`.
 
 ---
 
@@ -146,13 +146,13 @@ the product expression of the native mandate.
 
 ---
 
-## EPIC-DR — Close remaining design rounds
-**Labels:** `epic`, `design-round` · **Milestone:** `Design Rounds`
+## EPIC-DR — Settle remaining design & contracts
+**Labels:** `epic`, `design` · **Milestone:** `Design & Contracts`
 
-**Context.** Tier-1 design rounds (Groups 1–4b, §3.8, §10) are CLOSED. The open surface (R9) is:
-Group 6a (threat model + tool filters; opened on `main`, decisions log empty), Group 6b/6c (planned,
-no file yet), Group 4c (`FallbackChain`, §4.3.5.3 `*TBD*`), Group 5 (`MemoryPolicy`, §4.3.6 `*TBD*`),
-Group 8 (Persona/AgentSpec). Closing them resolves the two predating `*TBD*` markers and creates §9.
+**Context.** Tier-1 contracts (Groups 1–4b, §3.8, §10) are SETTLED. The open surface (R9) is:
+Group 6a (threat model + tool filters; design sign-off pending), Group 6b/6c (planned),
+Group 4c (`FallbackChain`, §4.3.5.3 `*TBD*`), Group 5 (`MemoryPolicy`, §4.3.6 `*TBD*`),
+Group 8 (Persona/AgentSpec). Settling them resolves the two predating `*TBD*` markers and creates §9.
 
 **Scope.** Parent tracking the dependency chain DR-6a → {DR-4c, DR-5, DR-6b, DR-6c, TEST-SEC} → DR-8,
 plus BR-CLEANUP.
@@ -972,7 +972,7 @@ parity verified. **[NATIVE]** native parity. **[PLUGIN]** `quarkus/skills`. **De
 ## P2-OUTPUTGUARD — OutputGuard SPI (§7.2 item 23; CE REQ #2)
 **Labels:** `phase-2`, `sdk`, `security`, `context-engineering`, `native`, `blocked` · **Milestone:** `v0.5 Parity`
 **Context.** The v0.5 realization of the §1.4 outbound-filter promise: an outbound secret/PII filter.
-The full contract is defined by design-round Group 6a (§9.2 `OutputFilter`). **Scope.** `OutputGuard`
+The full contract is defined by DR-6a (§9.2 `OutputFilter`). **Scope.** `OutputGuard`
 SPI in `forvum-sdk`; outbound sensitive-data filter at the pre-channel-emit hook. **Files.**
 `forvum-sdk/.../OutputGuard.java` + engine enforcement. **Acceptance.** A configured `OutputGuard`
 blocks/redacts outbound secrets/PII at the channel boundary per the §9.2 contract; parity verified.
@@ -1074,88 +1074,88 @@ for langchain4j eval primitives. **Dependencies.** M18 (CAPR events), P3-4.
 
 ---
 
-# EPIC-DR — OPEN DESIGN ROUNDS
+# EPIC-DR — DESIGN & CONTRACTS
 
-Design rounds happen on `main` (the live design surface). Workflow: propose → `/tmp` draft → `cp` →
-commit. No `*TBD*` marker should remain in `docs/ULTRAPLAN.md` once these close.
+These contracts are settled on `main` (the live design surface). An architectural change starts with a
+GitHub issue/discussion for design sign-off, then a PR. No `*TBD*` marker should remain in
+`docs/ULTRAPLAN.md` once these land.
 
-## DR-6a — Close Group 6a (threat model + tool-execution filters)
-**Labels:** `design-round`, `security`, `context-engineering` · **Milestone:** `Design Rounds`
-**Context.** `docs/design-rounds/group-6a-tool-filters.md` is opened on `main` with an inventory + 8
-pre-committed constraints + 6 open design points but an empty decisions log. It is the highest-leverage
-round — it unblocks five downstream items and creates §9.
-**Scope / Deliverables.** Deliberate the 6 open points; write the Decisions log; author **§9.1 Threat
+## DR-6a — Settle Group 6a (threat model + tool-execution filters)
+**Labels:** `design`, `security`, `context-engineering` · **Milestone:** `Design & Contracts`
+**Context.** Group 6a (threat model + tool filters) has an inventory + 8 pre-committed constraints + 6
+open design points but no signed-off decisions yet. It is the highest-leverage item — it unblocks five
+downstream items and creates §9.
+**Scope / Deliverables.** Deliberate the 6 open points; record the decisions; author **§9.1 Threat
 Model** (STRIDE by surface, everything touching `ToolExecutor`) + **§9.2 Tool-Execution Filters**
 (`OutputFilter` contract: hook layers pre-tool-call / pre-channel-emit / pre-memory-write, policy shape,
 trip outcome block-vs-redact-vs-`FallbackReasons.FILTERED`, `PermissionScope` composition;
 `WorkspaceRoot` contract for fs tools; `ShellAllowlist` contract; prompt-injection structural defense;
 per-channel security UX), inserted between §8 and §10. Honor the 8 pre-committed constraints.
-**Files.** `docs/design-rounds/group-6a-tool-filters.md` (decisions log), `docs/ULTRAPLAN.md` (new
-§9.1/§9.2; resolve §10's "see §9 once it lands" forward-reference; upgrade the §1.4 governance bullet
-from principle to contract).
-**Acceptance Criteria.** Decisions log complete; §9.1 + §9.2 inserted; new exception types decided; the
+**Files.** `docs/ULTRAPLAN.md` (new §9.1/§9.2; resolve §10's "see §9 once it lands" forward-reference;
+upgrade the §1.4 governance bullet from principle to contract).
+**Acceptance Criteria.** Decisions recorded; §9.1 + §9.2 inserted; new exception types decided; the
 prompt-injection-mitigation CE Guardrails pillar becomes structural; §10 forward-reference resolved.
 **Dependencies.** §3.8 (done), §10 (done). **Blocks:** DR-4c, DR-5, DR-6b, DR-8, TEST-SEC, P2-OUTPUTGUARD.
-**Commit.** `docs(design-round): close Group 6a — threat model and tool-execution filters`
+**Commit.** `docs(design): settle Group 6a — threat model and tool-execution filters`
 
-## DR-6b — Open & close Group 6b (plugin trust + MCP server trust)
-**Labels:** `design-round`, `security` · **Milestone:** `Design Rounds`
-**Context.** Carved out of 6a; no round file exists yet. **Scope.** Create the round file; define the
+## DR-6b — Settle Group 6b (plugin trust + MCP server trust)
+**Labels:** `design`, `security` · **Milestone:** `Design & Contracts`
+**Context.** Carved out of 6a; not yet specified. **Scope.** Define the
 trust boundary for `plugins/` (JVM fast-jar SPI) and configured MCP servers — capability declaration vs
 enforcement, sandboxing posture, what a plugin can do to prompt assembly / `PermissionScope`.
-**Files.** `docs/design-rounds/group-6b-plugin-mcp-trust.md`, `docs/ULTRAPLAN.md` §9.3.
+**Files.** `docs/ULTRAPLAN.md` §9.3.
 **Acceptance.** §9.3 (or a §9.1 STRIDE extension) covers plugin/MCP threat surfaces + the enforcement
-contract; decisions logged. **Dependencies.** DR-6a (reuses the `OutputFilter`/`ToolExecutor`
-enforcement seam). **Commit.** `docs(design-round): close Group 6b — plugin and MCP server trust`
+contract; decisions recorded. **Dependencies.** DR-6a (reuses the `OutputFilter`/`ToolExecutor`
+enforcement seam). **Commit.** `docs(design): settle Group 6b — plugin and MCP server trust`
 
-## DR-6c — Open & close Group 6c (audit retention + supply chain + privacy)
-**Labels:** `design-round`, `security` · **Milestone:** `Design Rounds`
-**Context.** Carved out of 6a; no round file yet; largely parallel to 6b. **Scope.** Create the round
-file; retention policy for `tool_invocations`/`provider_calls`/`capr_events`, supply-chain posture for
+## DR-6c — Settle Group 6c (audit retention + supply chain + privacy)
+**Labels:** `design`, `security` · **Milestone:** `Design & Contracts`
+**Context.** Carved out of 6a; not yet specified; largely parallel to 6b. **Scope.** Define the
+retention policy for `tool_invocations`/`provider_calls`/`capr_events`, supply-chain posture for
 the native build inputs, privacy of persisted conversation + memory. **Files.**
-`docs/design-rounds/group-6c-audit-supplychain-privacy.md`, `docs/ULTRAPLAN.md` §9.4 + any §4.2
+`docs/ULTRAPLAN.md` §9.4 + any §4.2
 retention notes. **Acceptance.** §9.4 (or a dedicated subsection) authored; ties to native-first build
-inputs; decisions logged. **Dependencies.** DR-6a (after). **Commit.** `docs(design-round): close Group
+inputs; decisions recorded. **Dependencies.** DR-6a (after). **Commit.** `docs(design): settle Group
 6c — audit retention, supply chain, privacy`
 
-## DR-4c — Close Group 4c (FallbackChain)
-**Labels:** `design-round`, `core` · **Milestone:** `Design Rounds`
-**Context.** §4.3.5.3 is literally `*TBD (Group 4c)*`. Group 4b is closed (the explicit blocker); 4c
+## DR-4c — Settle Group 4c (FallbackChain)
+**Labels:** `design`, `core` · **Milestone:** `Design & Contracts`
+**Context.** §4.3.5.3 is literally `*TBD (Group 4c)*`. Group 4b is settled (the explicit blocker); 4c
 benefits from DR-6a deciding whether a `Filtered` reason joins `FallbackReasons`. **Scope.** Define
 §4.3.5.3 — the `FallbackChain(primary, List<fallback>, CostBudget)` shape, the `FailureClass` enum
 permits (incl. the `Filtered` permit handed over by 6a constraint 7), per-link `costDims` (the Group-4b
 Decision-9 short-circuit override door), and the `LineageWindow` interplay reserved by Group 4b.
-**Files.** `docs/design-rounds/group-4c-fallbackchain.md`, `docs/ULTRAPLAN.md` §4.3.5.3.
+**Files.** `docs/ULTRAPLAN.md` §4.3.5.3.
 **Acceptance.** §4.3.5.3 materialized (no longer `*TBD*`); `FailureClass` enum spec'd; the §4.3.2
 line-477 migration path (`String reason` → `FailureClass`) pinned to M8. **Dependencies.** Group 4b
-(done); benefits from DR-6a. **Commit.** `docs(design-round): close Group 4c — FallbackChain contract`
+(done); benefits from DR-6a. **Commit.** `docs(design): settle Group 4c — FallbackChain contract`
 
-## DR-5 — Open & close Group 5 (MemoryPolicy)
-**Labels:** `design-round`, `core`, `context-engineering` · **Milestone:** `Design Rounds`
+## DR-5 — Settle Group 5 (MemoryPolicy)
+**Labels:** `design`, `core`, `context-engineering` · **Milestone:** `Design & Contracts`
 **Context.** §4.3.6 is `*TBD (Group 5)*`; `MemoryPolicy` is already listed in `forvum-core` types and
 inherited at spawn. **Scope.** Define §4.3.6 — the `MemoryPolicy` record/shape, the Write/Compress
 governance role, retrieval framing as `<retrieved_memory>` data blocks (6a point 5), the pre-memory-write
 `OutputFilter` boundary (6a point 2c), spawn inheritance alongside `CostBudget`/`Identity`.
-**Files.** `docs/design-rounds/group-5-memory-policy.md`, `docs/ULTRAPLAN.md` §4.3.6.
+**Files.** `docs/ULTRAPLAN.md` §4.3.6.
 **Acceptance.** §4.3.6 materialized; `MemoryPolicy` confirmed in the `forvum-core` type list; dissolves
 demo deferral D2's memoryPolicy gap. **Dependencies.** DR-6a (memory-write boundary + retrieval
-framing); touches M5 episodic+semantic memory. **Commit.** `docs(design-round): close Group 5 —
+framing); touches M5 episodic+semantic memory. **Commit.** `docs(design): settle Group 5 —
 MemoryPolicy contract`
 
-## DR-8 — Open & close Group 8 (Persona / AgentSpec composition)
-**Labels:** `design-round`, `core` · **Milestone:** `Design Rounds`
+## DR-8 — Settle Group 8 (Persona / AgentSpec composition)
+**Labels:** `design`, `core` · **Milestone:** `Design & Contracts`
 **Context.** Named as a downstream consumer in 6a; matches demo deferral D2. Last in the chain.
 **Scope.** Formalize the `AgentSpec` record composing `Identity`, `Persona`, `FallbackChain`,
 `CostBudget`, `MemoryPolicy`, the allowed `PermissionScope` set, and the parent pointer — replacing the
 demo's ad-hoc shape; define the on-disk `agents/<id>.json` schema authoritatively. **Files.**
-`docs/design-rounds/group-8-agentspec.md`, `docs/ULTRAPLAN.md` new §4.3.x `AgentSpec` subsection.
+`docs/ULTRAPLAN.md` new §4.3.x `AgentSpec` subsection.
 **Acceptance.** The `AgentSpec` subsection authored; demo D2 resolved permanently; the `agents/<id>.json`
 schema defined. **Dependencies.** DR-4c, DR-5, DR-6a (needs all composed types to exist first).
-**Commit.** `docs(design-round): close Group 8 — Persona and AgentSpec composition`
+**Commit.** `docs(design): settle Group 8 — Persona and AgentSpec composition`
 
 ## TEST-SEC — Security-test layer (the "Group 7 Testing" gap)
-**Labels:** `design-round`, `security`, `ci-infra` · **Milestone:** `Design Rounds`
-**Context.** There is no Group-7 round file; "Group 7 Testing" is §10 (closed discipline) + the §9-gated
+**Labels:** `design`, `security`, `ci-infra` · **Milestone:** `Design & Contracts`
+**Context.** "Group 7 Testing" is §10 (settled discipline) + the §9-gated
 security-test layer + per-milestone test debt. **Scope.** Stand up
 `forvum-app/src/test/java/ai/forvum/security/` negative integration tests (prompt injection → no tool
 escalation; path traversal → denied (M14); spawn-boundary identity override → rejected (M7/M17);
@@ -1166,15 +1166,15 @@ build on a regression; implements §10's already-written security-test bullet on
 **Dependencies.** DR-6a (the contracts under test). **Commit.** `test: add security negative-test layer`
 
 ## BR-CLEANUP — Branch hygiene
-**Labels:** `design-round`, `branch-hygiene` · **Milestone:** `Design Rounds`
+**Labels:** `design`, `branch-hygiene` · **Milestone:** `Design & Contracts`
 **Context.** `design-round-tier1` is fully superseded by `main` (its group-4b is pre-decision; group-6a
 is absent) and would only cause confusion if someone branched from it. `demo/conference-mvp` is a
 throwaway vertical slice carrying deferrals D1–D8. **Scope.** Delete the stale `design-round-tier1`
 branch; decide the demo branch's fate (discard per its own "Return path", or cherry-pick learnings —
 unlikely to match the Tier-1 contracts). **Files.** none (repo hygiene); referenced in
 `forvum/CLAUDE.md`'s branch-model section. **Acceptance.** `design-round-tier1` deleted; the demo branch
-fate decided and recorded; the deferrals D1–D8 migrate into the relevant M-issues / design rounds when
-closed (D8 → M5; D1 → M9–M12; D2 → DR-5/DR-8; D3 → M6; D4 → M5; D5 → M2; D6 → M8/DR-4c; D7 → respective
+fate decided and recorded; the deferrals D1–D8 migrate into the relevant M-issues / contracts when
+settled (D8 → M5; D1 → M9–M12; D2 → DR-5/DR-8; D3 → M6; D4 → M5; D5 → M2; D6 → M8/DR-4c; D7 → respective
 milestones). **Dependencies.** none. **Commit.** `chore: delete stale design-round-tier1 branch`
 
 ---
