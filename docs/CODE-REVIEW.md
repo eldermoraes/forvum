@@ -29,8 +29,12 @@ bot** — CI only builds and tests.
    judgment dimensions (section 3) and the anti-over-engineering checks (section 4).
 3. **Record the result** as a PR comment (template in section 6).
 4. **Merge gate.** Merge only when **all three** hold: CI is green (JVM + native, both platforms)
-   **and** this rubric was walked **and** the maintainer approves. Squash-merge with a
-   Conventional-Commit subject.
+   **and** this rubric was walked **and** the maintainer approves. Because the maintainer authors most
+   PRs, GitHub will not accept a self-review — "approval" here is the maintainer's recorded judgment
+   plus this rubric, not a GitHub review. Merge with `gh pr merge <n> --squash --delete-branch`: squash
+   to a Conventional-Commit subject; the head branch is not auto-deleted (repo setting off), so
+   `--delete-branch` removes it; and a `Closes #<issue>` line in the PR body closes the milestone issue
+   on merge to `main`.
 
 ---
 
@@ -149,12 +153,17 @@ or core internals (CLAUDE.md §12):
 
 ```xml
 <bannedDependencies>
+    <!-- Allowlist form (consistent with core/sdk/engine): ban every ai.forvum module,
+         re-allow only forvum-sdk — so a plugin can never reach core internals, the engine,
+         another extension, or the app, regardless of future module names. -->
+    <includes>
+        <include>ai.forvum:forvum-sdk</include>
+    </includes>
     <excludes>
-        <exclude>ai.forvum:forvum-engine</exclude>
-        <exclude>ai.forvum:forvum-core</exclude>
+        <exclude>ai.forvum:*</exclude>
     </excludes>
     <searchTransitive>true</searchTransitive>
-    <message>A Forvum extension (Layer 3) compiles only against forvum-sdk; it must not depend on forvum-engine or forvum-core. See CLAUDE.md section 12.</message>
+    <message>A Forvum extension (Layer 3) compiles only against forvum-sdk (among ai.forvum modules); it must not depend on forvum-core, forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
 </bannedDependencies>
 ```
 
