@@ -29,7 +29,7 @@ The result is not an orchestrator that commands silently from the center. It is 
 
 ## Status
 
-In active design and early implementation. `main` ships the Maven bootstrap and the architectural design rounds documented in [docs/design-rounds/](docs/design-rounds/). A conference-demo MVP is available on the `demo/conference-mvp` branch. Not yet production-ready.
+In active design and early implementation. `main` ships the multi-module Maven reactor (M1 complete) and the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Not yet production-ready.
 
 ## Quick demo
 
@@ -83,22 +83,22 @@ Forvum is organized as a Maven reactor with five modules, structured to match th
 - **`forvum-sdk`** — public SPI for extension points (model providers, channels, tools). Specified in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §2.2.
 - **`forvum-engine`** — Quarkus engine, extension-agnostic. Orchestrates agent lifecycle, resolves specs, emits events. Specified in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §2.3.
 - **`forvum-bom`** — centralized dependency version management.
-- **`forvum-app`** — the runnable assembly. Wires providers, hosts the Picocli CLI, boots Quarkus.
+- **`forvum-app`** — the runnable assembly. Wires providers, hosts the TamboUI TUI, boots Quarkus.
 
-For the full architecture — decisions, tradeoffs, and deferred design — read [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) and the design round records in [docs/design-rounds/](docs/design-rounds/).
+For the full architecture — decisions, tradeoffs, and deferred design — read [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md); see [docs/ISSUES.md](docs/ISSUES.md) for the per-step roadmap.
 
 ## Roadmap
 
 Implementation proceeds in milestones M1 through M20:
 
-- **M1 (complete)** — multi-module Maven bootstrap and the Tier 1 contract design rounds.
+- **M1 (complete)** — multi-module Maven reactor and the Tier 1 contracts.
 - **M2–M20 (planned)** — core contract materialization, persistence, budget enforcement, fallback chains, observability, channels, DevUI, sub-agents, judging, and production hardening.
 
 Detailed milestone scope is in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §7.
 
 ## Contributing
 
-Design contributions are welcome before code. The design round workflow in [docs/design-rounds/](docs/design-rounds/) documents how architectural decisions are proposed, debated, and recorded. See [CONTRIBUTING.md](CONTRIBUTING.md) for the short version.
+Contributions to design and code are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute — open an issue or discussion for architectural changes before a PR. [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) is the architectural source of truth.
 
 ## License
 
