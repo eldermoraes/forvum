@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL — when executing this plan, use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans`. Phase 1 milestones use checkbox (`- [ ]`) syntax. Implementation language is English throughout (code identifiers, comments, commit messages, docs, config keys). User-facing strings that are part of the app's localization surface may be localized, but source strings default to English.
 
-**Goal:** Ship Forvum — a local-first, open-source personal AI assistant in Java 25 / Quarkus 3.31 / Langchain4j 1.12 / LangGraph4j — that first reaches, then surpasses, OpenClaw on features and engineering quality.
+**Goal:** Ship Forvum — a local-first, open-source personal AI assistant in Java 25 / Quarkus 3.33.x LTS / LangChain4j 1.15.1 (via quarkus-langchain4j 1.11.0.CR1) / LangGraph4j 1.8.17 — that first reaches, then surpasses, OpenClaw on features and engineering quality.
 
-**Architecture:** Maven multi-module, CDI-first with a custom `@AgentScoped` context for in-process sub-agent isolation. The core stays extension-agnostic; every channel, provider, and tool is a module that implements a sealed-interface SDK contract. Hybrid persistence — human-editable markdown and JSON files under `~/.forvum/` for intent, embedded SQLite for operational state, memory, and metrics. Dual build targets from day one: a JVM fast-jar and a GraalVM native single-binary, both gated in CI.
+**Architecture:** Maven multi-module, CDI-first with a custom `@AgentScoped` context for in-process sub-agent isolation. The core stays extension-agnostic; every channel, provider, and tool is a module that implements a sealed-interface SDK contract. Hybrid persistence — human-editable markdown and JSON files under `~/.forvum/` for intent, embedded SQLite for operational state, memory, and metrics. GraalVM native is the primary, mandatory build target — every milestone is native-buildable and native parity is enforced in CI on every PR; the JVM fast-jar is the development target and the only path that loads runtime drop-in plugins.
 
-**Tech Stack:** Java 25 · Maven · Quarkus 3.31.x · Quarkiverse `quarkus-langchain4j-*` · Langchain4j 1.12 · LangGraph4j · Xerial SQLite JDBC · Hibernate ORM + Panache + Flyway · JLine 3 · Quarkus WebSockets Next · Quarkus Scheduler · OpenTelemetry · GraalVM CE 24+ · JaCoCo · GitHub Actions.
+**Tech Stack:** Java 25 · Maven · Quarkus 3.33.x LTS · Quarkiverse `quarkus-langchain4j-*` 1.11.0.CR1 · LangChain4j 1.15.1 (transitive via quarkus-langchain4j 1.11.0.CR1) · LangGraph4j 1.8.17 · Xerial SQLite JDBC · Hibernate ORM + Panache + Flyway · JLine 3 · Quarkus WebSockets Next · Quarkus Scheduler · OpenTelemetry · GraalVM for JDK 25 (Community Edition 25+); native builds use Mandrel 25.0.x-Final as the Quarkus-preferred `native-image` distribution · JaCoCo · GitHub Actions.
 
 **Implementation-language policy:** Forvum is open-source, so every artifact inside the repository (code, identifiers, JavaDoc, comments, commit messages, PR descriptions, documentation, config file keys, log messages, error strings, file and directory names) is in English. That is a non-negotiable collaboration requirement, not a stylistic preference.
 
@@ -27,6 +27,8 @@ OpenClaw (at `../openclaw/`) is the most capable personal AI assistant in the cu
 - **Request-scoped identity and context.** The triple (agent, user, channel-account) is resolved per inbound request, not cached globally. This keeps multi-channel, multi-agent behavior clean.
 - **Deterministic prompt assembly.** Every `Set` and `Map` that feeds prompt composition is sorted by a stable key at the assembly boundary, so prompt-cache prefixes stay byte-identical turn over turn — a correctness requirement, not an optimization.
 - **Lightweight adapter surfaces.** Channels and providers expose small capability-typed interfaces rather than fat base classes. OpenClaw achieves this with TypeScript discriminated unions; we achieve it with sealed Java interfaces and capability records.
+- **A shared SSRF egress policy on every outbound HTTP surface.** Like OpenClaw, every tool or provider that makes outbound HTTP requests passes through one egress policy that blocks private and loopback ranges by default, with `strict` and `allowPrivateNetwork` modes; in Forvum this is a `forvum-engine` HTTP-client decorator plus a `PermissionScope`-aware policy bean, so no extension reaches the network outside it.
+- **A broad bundled channel/provider catalog as an architectural commitment, not a frozen list.** OpenClaw ships a wide channel/provider surface; we replicate the extensible architecture and ship a curated first-party set (§2.4), with the long tail delivered as community plugins through the Maven-coordinate marketplace (§7.2).
 
 ### 1.2 What we improve
 
@@ -37,20 +39,22 @@ OpenClaw's design has friction points rooted in its TypeScript/Node origins. A J
 - **Build-time DI instead of hand-rolled lazy loading.** OpenClaw's `*.runtime.ts` split exists to keep cold paths light. Quarkus' build-time CDI gives this for free — each channel, provider, and tool is a build-step-discovered bean with framework-emitted reflection hints, fully native-compatible.
 - **Immutable request-scoped handles.** OpenClaw's plugin registry is global-mutable and documented as a "transitional compatibility surface." Forvum uses immutable handles derived per request from the `AgentRegistry`, eliminating an entire class of cross-request pollution bugs.
 - **First-class per-agent and per-cron LLM selection with fallback.** OpenClaw can swap providers but fallback chains are ad hoc. Forvum makes `FallbackChain(primary, fallbacks, budget)` a core type and `FallbackChatModel` a library-wide decorator; every agent and every cron job carries its own chain, and fallback events land in `provider_calls` with `is_fallback = 1` for later analysis.
+- **A queryable task ledger as a day-one primitive.** OpenClaw only recently unified its background bookkeeping over a JSONL-era surface. Forvum makes a SQLite `tasks` ledger and a `TaskExecutor` SPI first-class from the MVP, so cron, sub-agent, and background runs are recorded in one queryable place rather than reconstructed from logs.
 
 ### 1.3 Phased objectives
 
-- **MVP (v0.1).** Three channels (TUI, Web UI, Telegram). A main agent plus spawnable sub-agents and independent agents. Per-agent and per-cron LLM selection with fallback. Runtime-configurable via `.md` / `.json` without recompiling. User recognition across channels. Agent identity and persona definition. Native image produced in CI from day one.
-- **v0.5 (parity).** Feature parity with OpenClaw: browser tool, code-execution sandbox, voice channel, device pairing, memory-host SDK, Maven-coordinate plugin marketplace, skill marketplace, session replay, config doctor, provider onboarding wizard, RBAC on tools.
+- **MVP (v0.1).** Three channels (TUI, Web UI, Telegram). A main agent plus spawnable sub-agents and independent agents. Per-agent and per-cron LLM selection with fallback. Runtime-configurable via `.md` / `.json` without recompiling. User recognition across channels. Agent identity and persona definition. The GraalVM native binary is the primary CI artifact — every milestone is native-buildable and native parity is enforced on every PR (§6).
+- **v0.5 (parity).** Feature parity with OpenClaw v2026.4.19-beta.2 — the authoritative parity set is enumerated in §7.2 (a single source of truth, so this objective never drifts from the roadmap).
 - **v1.0+ (leap).** Differentiators unlocked by the clean Java foundation: single-binary native install, queryable semantic memory, LangGraph4j cyclic agents as a first-class primitive, CAPR-driven adaptive model routing, multi-user by toggle, Dev UI live-edit of configs, Kubernetes-native team-assistant mode, proxy-model compression middleware.
 
 ### 1.4 Guiding principles (from `CONTEXT-ENGINEERING.md`)
 
-- **Orchestrator-Workers hub-and-spoke** is the default multi-agent topology.
+- **Context Engineering is a structural property, not a slogan.** The four pillars from `CONTEXT-ENGINEERING.md` — **Write** (governing reasoning state in scratchpad and memory tiers), **Select** (high-precision filtering of what enters the window), **Compress** (summarizing oversized content at write-back), and **Isolate** (hermetic per-agent state separation) — each have a named owning module; the pillar-to-module map is §2.7 and this section is no longer their sole home.
+- **Orchestrator-Workers hub-and-spoke** is the default multi-agent topology; spawned workers run in parallel so the topology is also the latency mechanism (§5.5).
 - **Small-and-fast models** (for example a local Ollama `qwen3:1.7b`) handle routing, intent classification, and metadata-extraction sub-steps to minimize end-to-end latency.
 - **Strict per-agent state isolation** prevents context clash — every agent runs inside its own `@AgentScoped` context with its own memory, tool subset, and system prompt.
 - **Observability with CAPR** (Cost-Aware Pass Rate) sits alongside token counts and latency as a first-class metric from the MVP onward.
-- **Governance from day one.** Every tool carries a `PermissionScope`, user-approval hooks gate destructive actions, and outbound outputs can be filtered for sensitive data.
+- **Governance from day one.** Every tool carries a `PermissionScope`, user-approval hooks gate destructive actions, and outbound outputs can be filtered for sensitive data — the outbound filter is realized as the `OutputGuard` SPI in §7.2, so this principle has a concrete owner rather than living only here.
 
 ---
 
@@ -61,12 +65,12 @@ The project is a Maven multi-module reactor under `groupId = ai.forvum`, organiz
 ### 2.1 Layer 0 — Foundation (no Quarkus)
 
 - **`forvum-parent`** — the root reactor `pom`. Declares `<packaging>pom</packaging>`, the Java 25 compiler arguments, the binding of `quarkus-maven-plugin` and `jacoco-maven-plugin`, and imports `forvum-bom`.
-- **`forvum-bom`** — a `<dependencyManagement>`-only module that locks the versions of Quarkus, Quarkiverse `langchain4j-*` extensions, Langchain4j core, LangGraph4j, Xerial SQLite JDBC, JLine, Flyway, OpenTelemetry, and test libraries. Every downstream module imports this BOM, so there is exactly one place to bump a version.
+- **`forvum-bom`** — a `<dependencyManagement>`-only module that is the single version bump point. It imports `quarkus-bom` (Quarkus 3.33.x LTS) and `io.quarkiverse.langchain4j:quarkus-langchain4j-bom:1.11.0.CR1` (a pre-release / Candidate Release, which transitively governs LangChain4j core 1.15.1; stable fallback `:1.10.0` governs 1.14.1), and pins `org.bsc.langgraph4j:langgraph4j-core:1.8.17` and `org.xerial:sqlite-jdbc` (≥ 3.40.1.0, the first native-image-capable release). Quarkus-managed dependencies (Flyway via `quarkus-flyway`, OpenTelemetry via `quarkus-opentelemetry`) are governed by the Quarkus BOM and are not pinned independently; JLine 3 and the test libraries are pinned here. LangChain4j core is never pinned independently of the `quarkus-langchain4j-bom`. Every downstream module imports this BOM, so there is exactly one place to bump a version. See the §3.9 version table.
 - **`forvum-core`** — pure Java domain. Records and sealed interfaces for `AgentId`, `Identity`, `Persona`, `ChannelMessage`, `ToolSpec`, `ModelRef`, `AgentEvent`, `FallbackChain`, `CostBudget`, and `MemoryPolicy`. No Quarkus dependency at all, so tests and prototypes outside the container can depend on these types directly.
 
 ### 2.2 Layer 1 — Public SDK (the only extension contract)
 
-- **`forvum-sdk`** — sealed interfaces that plugins implement: `ChannelProvider`, `ModelProvider`, `ToolProvider`, `MemoryProvider`. Each one permits a `non-sealed abstract` base (`AbstractChannelProvider`, and so on) that third parties extend, which is how we reconcile sealed hierarchies with open extension. Also houses the `@ForvumExtension` plugin marker annotation and a re-export of `@RegisterForReflection` so plugin authors do not need to pull in `quarkus-core` directly. This module is the one and only artifact a third-party plugin compiles against.
+- **`forvum-sdk`** — sealed interfaces that plugins implement: `ChannelProvider`, `ModelProvider`, `ToolProvider`, `MemoryProvider`. Each one permits a `non-sealed abstract` base (`AbstractChannelProvider`, and so on) that third parties extend, which is how we reconcile sealed hierarchies with open extension. `MemoryProvider` is the Select-pillar SPI: implementations choose vector, graph, metadata, or hybrid retrieval so that only ultra-relevant memory reaches the prompt window, without coupling the agent to a retrieval strategy. Also houses the `@ForvumExtension` plugin marker annotation and a re-export of `@RegisterForReflection` so plugin authors do not need to pull in `quarkus-core` directly. This module is the one and only artifact a third-party plugin compiles against.
 
 ### 2.3 Layer 2 — Engine (Quarkus application code, extension-agnostic)
 
@@ -87,7 +91,7 @@ All first-party extensions depend only on `forvum-sdk`. They are separate Maven 
 - **`forvum-provider-anthropic`** — wraps `quarkus-langchain4j-anthropic` and exposes a `ModelProvider` SPI bean.
 - **`forvum-provider-openai`** — wraps `quarkus-langchain4j-openai`.
 - **`forvum-provider-ollama`** — wraps `quarkus-langchain4j-ollama`.
-- **`forvum-provider-google`** — wraps `quarkus-langchain4j-vertex-ai-gemini`.
+- **`forvum-provider-google`** — wraps `quarkus-langchain4j-vertex-ai-gemini`. If the Vertex gRPC/protobuf and Google-auth transitive stack blocks the native build, this module switches to the REST `quarkus-langchain4j-ai-gemini` (Google GenAI) extension, which avoids that stack and is the native-first alternative; switching extensions is preferred over a JVM-only carve-out (see §8 Risk #5).
 
 **Tools**
 
@@ -98,11 +102,28 @@ All first-party extensions depend only on `forvum-sdk`. They are separate Maven 
 
 ### 2.5 Layer 4 — Assembly
 
-- **`forvum-app`** — the only module that produces runnable artifacts. Depends on `forvum-engine` plus every first-party channel, provider, and tool module. The `quarkus-maven-plugin` binding here produces both the JVM fast-jar (`mvn package`) and, under the `-Pnative` profile, the GraalVM native binary. A single `main()`.
+- **`forvum-app`** — the only module that produces runnable artifacts. Depends on `forvum-engine` plus every first-party channel, provider, and tool module. The `quarkus-maven-plugin` binding here produces the GraalVM native binary under the `-Pnative` profile (the primary, mandatory release target) and the JVM fast-jar (`mvn package`) as the development target and the only artifact that loads runtime drop-in plugins from `~/.forvum/plugins/`. A single `main()`.
 
 ### 2.6 Bounded contexts
 
 The Maven split also delimits bounded contexts for contribution purposes: **Config Management**, **Identity & Persona**, **Agent Runtime**, **Conversation & Memory**, **Tool Execution**, **Model Routing**, **Channel I/O**, and **Observability**. Each maps to either a module or a cohesive sub-package within `forvum-engine` (for example `forvum-engine/src/main/java/ai/forvum/engine/routing/` for Model Routing), so an external contributor can focus on one bounded context without touching anything else.
+
+### 2.7 Context Engineering pillar ownership
+
+The module split is also the Context Engineering split. Each pillar from `CONTEXT-ENGINEERING.md` has a structural owner, so "where does Compress live?" has a one-module answer:
+
+| Pillar / principle | Owning module(s) / package | Realized by |
+|---|---|---|
+| **Write** | `forvum-engine/persistence` + `~/.forvum/` files | SQLite `messages`/`episodic_memory`/`semantic_memory` tiers (§4.2); files as the user-editable Write surface (§4.1) |
+| **Select** | `forvum-sdk` (`MemoryProvider`) + `forvum-engine/tools` (`AgentToolBelt`) + `forvum-engine/routing` | retrieval-strategy SPI (§2.2); tool filtering (§5.3); `route` node (§5.5) |
+| **Compress** | `forvum-engine/graph` (`reduce`) + `forvum-core.budget` + `forvum-core` enums | `reduce` summarization (§5.5); `Usage` one-trip snapshot (§4.3.5.2); SQL-mirror enums (§4.3.3); proxy middleware v1.0+ (§7.3-8) |
+| **Isolate** | `forvum-engine/context` (`@AgentScoped`) | custom `InjectableContext` + `ScopedValue` (§5.1) |
+| **Orchestrator-Workers** | `forvum-engine/graph` (`SupervisorGraph`) | LangGraph4j `StateGraph` spawn/worker fan-out (§5.5) |
+| **Small-and-fast routing** | `forvum-engine/routing` + `forvum-engine/model` | `route` node + `FallbackChain` escalation ladder (§5.4, §5.5) |
+| **Governance day one** | `forvum-core` (`PermissionScope`) + `forvum-engine/tools` (`ToolExecutor`) | scope enforcement, approval hooks, output guard (§4.3.4, §5.3, §7.2) |
+| **Observability / CAPR** | `forvum-engine/observability` + `capr_events` schema | OTel spans + CAPR (§3.6, §4.2) |
+
+The §2.6 bounded contexts map 1:1 onto these pillars — **Conversation & Memory** = Write+Select, **Tool Execution** = Select+Governance, **Model Routing** = Select+small-and-fast, **Agent Runtime** = Isolate+Orchestrator-Workers, **Observability** = CAPR — so a contributor who owns a bounded context owns a Context Engineering pillar.
 
 ---
 
@@ -112,7 +133,7 @@ The Maven split also delimits bounded contexts for contribution purposes: **Conf
 
 Java 25 LTS. We use its modern surface deliberately:
 
-- **Scoped Values** carry the current `AgentId` across virtual-thread continuations without the leakage issues of `ThreadLocal`. The custom `@AgentScoped` CDI context is backed by a `ScopedValue<AgentId>` set at request entry through `ScopedValue.callWhere(CURRENT_AGENT, id, body)`.
+- **Scoped Values** (JEP 506, final in Java 25 — not a preview feature) carry the current `AgentId` across virtual-thread continuations without the leakage issues of `ThreadLocal`. The custom `@AgentScoped` CDI context is backed by a `ScopedValue<AgentId>` set at request entry through `ScopedValue.where(CURRENT_AGENT, id).call(body)` (and `.run(body)` for void work); no `--enable-preview` flag is required.
 - **Sealed interfaces** on every extension point (`ChannelProvider`, `ModelProvider`, `ToolProvider`, `MemoryProvider`) and on the event hierarchy (`AgentEvent permits TokenDelta, ToolInvoked, ToolResult, FallbackTriggered, Done, ErrorEvent`). This gives exhaustive pattern matching in channels and compiler-enforced completeness in event handlers.
 - **Records** for every DTO and value object. Records also minimize the GraalVM reflection surface, since each record has a documented canonical constructor.
 - **Pattern matching for switch** over sealed types in channel, router, and event-handling code paths, replacing visitor boilerplate.
@@ -120,22 +141,23 @@ Java 25 LTS. We use its modern surface deliberately:
 
 ### 3.2 Application framework
 
-Quarkus 3.31.x. Provides build-time CDI (Arc), native OpenTelemetry integration, WebSockets Next, `quarkus-scheduler` for cron-expression jobs, `quarkus-rest-client-reactive` for Telegram, and the Dev UI as an admin and debugging surface during development. We deliberately avoid Mutiny / reactive streams in engine-level code — virtual threads plus `Flow.Publisher` cover our concurrency needs with simpler stack traces and easier debugging.
+Quarkus 3.33.x LTS. Provides build-time CDI (Arc), native OpenTelemetry integration, WebSockets Next, `quarkus-scheduler` for cron-expression jobs, `quarkus-rest-client-reactive` for Telegram, and the Dev UI as an admin and debugging surface during development. We deliberately avoid Mutiny / reactive streams in engine-level code — virtual threads plus `Flow.Publisher` cover our concurrency needs with simpler stack traces and easier debugging.
 
 ### 3.3 AI layer
 
-- **Quarkiverse `quarkus-langchain4j-*` extensions**, one per provider (`anthropic`, `openai`, `ollama`, `vertex-ai-gemini`). They expose `ChatModel` and `StreamingChatModel` as CDI beans, provide declarative `@RegisterAiService` tool-calling when we want it, and ship an MCP client that is already build-time wired and native-compatible.
-- **Langchain4j 1.12 core.** Supplies the `ChatMemory` contract (we implement a SQLite-backed variant over the `messages` table), the `ToolSpecification` / `ToolExecutor` surface, structured-output decoding via `@Description` and `@StructuredPrompt`, and the generic `ChatModel` / `StreamingChatModel` interfaces that our `FallbackChatModel` decorates.
-- **LangGraph4j.** Supplies the `StateGraph` abstraction — cyclic, state-oriented graphs of `BiFunction<State, RunContext, NodeResult>` nodes with conditional edges. It integrates with Langchain4j via `LC4jToolService` and `MessagesState`. This is the primitive that materializes the hub-and-spoke Orchestrator-Workers pattern from `CONTEXT-ENGINEERING.md`.
+- **Quarkiverse `quarkus-langchain4j-*` extensions** (1.11.0.CR1, aligned to Quarkus 3.33.1), one per provider (`anthropic`, `openai`, `ollama`, `vertex-ai-gemini`). They expose `ChatModel` and `StreamingChatModel` as CDI beans, provide declarative `@RegisterAiService` tool-calling when we want it, and supply the MCP client through the Quarkiverse `quarkus-langchain4j-mcp` extension — build-time wired and native-ready (this is the extension we use, not the standalone `dev.langchain4j:langchain4j-mcp` artifact, which is still published `-beta`). For Google, the REST `quarkus-langchain4j-ai-gemini` (Google GenAI) extension is the native-first alternative to `vertex-ai-gemini` and is adopted if the Vertex gRPC stack blocks native (see §2.4, §8 Risk #5).
+- **LangChain4j 1.15.x core** (governed transitively by `quarkus-langchain4j-bom:1.11.0.CR1`, not pinned independently). Supplies the `ChatMemory` contract (we implement a SQLite-backed variant over the `messages` table), the `ToolSpecification` / `ToolExecutor` surface (including the `ToolArgumentsErrorHandler` / `ToolExecutionErrorHandler` hooks used by the tool loop in §5.5), structured-output decoding via `@Description` and `@StructuredPrompt`, the centralized `dev.langchain4j.exception` typed hierarchy the `FailureClassifier` maps (§5.4), and the generic `ChatModel` / `StreamingChatModel` interfaces that our `FallbackChatModel` decorates.
+- **LangGraph4j 1.8.17** (stable 1.8.x series; Java 17+). Supplies the `StateGraph` abstraction — cyclic, state-oriented graphs of `BiFunction<State, RunContext, NodeResult>` nodes with conditional edges. It integrates with LangChain4j via `LC4jToolService` and `MessagesState`. This is the primitive that materializes the hub-and-spoke Orchestrator-Workers pattern from `CONTEXT-ENGINEERING.md`.
+- **Write-time compression (Compress pillar).** Tool results and retrieved memory whose serialized size exceeds a configured threshold are summarized through the small-and-fast model (the local Ollama `qwen3:1.7b` named in §1.4) before they re-enter the context window. Compress therefore applies at every write-back from the MVP onward, not only as the Phase-3 proxy-model middleware (§7.3); only the compressed digest is persisted to the window, never the raw payload.
 
 ### 3.4 Persistence
 
-- **Xerial SQLite JDBC driver + Hibernate ORM + Panache + Flyway.** WAL mode is enabled explicitly in the JDBC URL for acceptable single-writer concurrency in personal-use scenarios. The schema is managed through forward-only Flyway migrations in `forvum-engine/src/main/resources/db/migration/`. Panache keeps the repository code concise without sacrificing type safety.
+- **Xerial SQLite JDBC driver + Hibernate ORM + Panache + Flyway.** WAL mode is enabled explicitly in the JDBC URL for acceptable single-writer concurrency in personal-use scenarios. The driver (≥ 3.40.1.0) ships native-image support and its own JNI configuration; the native profile sets `org.sqlite.lib.exportPath` so the bundled native library is extracted at run time (see §6.3). The schema is managed through forward-only Flyway migrations in `forvum-engine/src/main/resources/db/migration/`, registered as native resources. Panache keeps the repository code concise without sacrificing type safety. The virtual-thread pinning posture of the JDBC layer is a runtime concern finalized at M5 (§3.8, Risk #11), independent of native compilation.
 - **`java.nio.file.WatchService`** inside a `ConfigWatcher` bean fires a CDI `ConfigurationChangedEvent` whenever files under `~/.forvum/` change, enabling hot reload of agent specs, personas, skills, crons, and MCP-server definitions in both dev mode and production fast-jar.
 
 ### 3.5 Channels
 
-- **TUI.** JLine 3 with its bundled GraalVM reflection hints. A `--no-ansi` degraded mode ships from the MVP to cover environments where terminal-capability detection fails on first boot (a known JLine quirk).
+- **TUI.** JLine 3 with its bundled GraalVM reflection hints; the M15 native smoke path is mandatory (§10). A `--no-ansi` degraded mode ships from the MVP to cover environments where terminal-capability detection fails on first boot (a known JLine quirk).
 - **Web.** Quarkus WebSockets Next for bidirectional streaming. The initial UI is a minimal hand-written HTML/JS page shipped as classpath static resources. A natural evolution path is Qute templates plus HTMX fragments for richer server-driven UI without adopting a full SPA toolchain.
 - **Telegram.** Long-poll mode via `quarkus-rest-client-reactive` calling the Telegram Bot API. Webhook mode is an opt-in variant for deployments behind a public URL.
 
@@ -147,13 +169,14 @@ Quarkus 3.31.x. Provides build-time CDI (Arc), native OpenTelemetry integration,
   - `forvum.tool.call` — one per `tool_invocations` row.
   - `forvum.graph.node` — one per LangGraph4j node execution.
 - **CAPR** (Cost-Aware Pass Rate) is computed from a Panache aggregate over `provider_calls` joined with `capr_events`. It is exposed as a JSON endpoint at `/q/dashboard/capr` and rendered as a Dev UI card in development mode. The per-turn pass/fail verdict is produced by a cheap "judge" model (by default a local Ollama `qwen3:1.7b`), off by default in production and enabled selectively for evaluation runs.
+- The span set and CAPR aggregate are the operational-traceability foundation of the Context Engineering discipline (§1.4, §2.7): the four `forvum.*` spans make the Write/Select/Compress/Isolate boundaries observable per turn (which window was written, which tools/memory were selected, where the digest replaced raw context, where a worker boundary was crossed), so CE is a measured runtime property rather than a design intention.
 
 ### 3.7 Build and distribution
 
-- **Maven 3.9+** as the build tool; the `quarkus-maven-plugin` produces the `quarkus-app/` fast-jar and, under `-Pnative`, a single native executable.
-- **GraalVM CE 24+** is required for the native profile. Quarkus' `container-build=true` lets CI cross-compile native images via a builder container when local GraalVM is unavailable.
+- **Maven 3.9+** as the build tool; the `quarkus-maven-plugin` produces the `quarkus-app/` fast-jar and, under `-Pnative`, a single native executable. The native executable is the shipped product and the default acceptance gate; the fast-jar is the development build and the JVM drop-in-plugin runtime.
+- **GraalVM for JDK 25 (Community Edition 25+)** is required for the native profile; native builds use **Mandrel 25.0.x-Final** (Temurin-25-based) as the Quarkus-preferred `native-image` distribution, with the exact patch pinned in CI. The native build is `--enable-preview`-free by construction (§3.8). Quarkus' `container-build=true` lets CI cross-compile native images via a builder container when local GraalVM is unavailable.
 - **JaCoCo** enforces an 80% line-coverage threshold on `mvn verify` at the parent level.
-- **GitHub Actions CI** runs a matrix of `linux-amd64` and `macos-arm64`, building both JVM and native targets on every pull request. A `@QuarkusIntegrationTest` smoke-runs the native binary and fails the build if cold-start exceeds 200 ms.
+- **GitHub Actions CI** runs a matrix of `linux-amd64` and `macos-arm64`, building both JVM and native targets on every pull request. Native parity is mandatory: every milestone native-compiles and runs its native smoke path (§6.4, §10). A `@QuarkusIntegrationTest` smoke-runs the native binary and fails the build if cold-start exceeds 200 ms.
 - **Release channels.** The JVM jar and an OCI container image ship to GitHub Releases and Docker Hub. Platform-specific native binaries ship to GitHub Releases. A Homebrew tap and a Scoop bucket follow from v0.5 onward.
 
 ### 3.8 Concurrency Discipline
@@ -161,17 +184,45 @@ Quarkus 3.31.x. Provides build-time CDI (Arc), native OpenTelemetry integration,
 Forvum runs every per-request workflow on virtual threads. The choice is not cosmetic — `@AgentScoped` (§5.1), `ScopedValue<AgentId>` propagation, and the orchestrator-workers spawn pattern (§5.5) all assume virtual-thread semantics. The rules below codify the implementation discipline so the assumption holds in practice.
 
 - **Virtual-thread placement by layer.** Channel inbound REST and WebSocket handlers (`forvum-channel-*`), the engine turn orchestrator (`forvum-engine`), and `quarkus-scheduler`-fired cron entries (M19) all run on virtual threads. Inbound REST/WebSocket handlers and `@Scheduled` methods (the M19 cron entries) carry `@RunOnVirtualThread`; engine-internal fan-out injects or constructs `Executors.newVirtualThreadPerTaskExecutor()` explicitly. The default Quarkus worker pool is the *exception*; any use is commented at the call site with a rationale.
-- **Spawn fan-out (StructuredTaskScope, preview caveat).** §5.5 `spawn_worker → worker_run` is the natural fit for Java 25's `StructuredTaskScope.ShutdownOnFailure` / `ShutdownOnSuccess`, which gives structured cancellation and exception propagation across sub-agent boundaries. `StructuredTaskScope` is JEP 505 — *fifth preview* in Java 25 LTS — so it requires `--enable-preview` at compile and run time, with attendant restrictions on GraalVM native-image. The binding commitment is gated on a spike during M18 — where the supervisor graph's `spawn_worker → worker_run` actually exercises fan-out — that confirms StructuredTaskScope produces a working native image. On spike failure, Forvum ships v0.1 with a manual `Thread.ofVirtual().start(...)` fan-out plus explicit `CompletionStage` join, and revisits when the JEP exits preview.
+- **Spawn fan-out — virtual-thread executors are the chosen design.** §5.5 `spawn_worker → worker_run` fans out over `Executors.newVirtualThreadPerTaskExecutor()` in a try-with-resources block, joined via `CompletionStage`. This is the committed v0.1 design, not a fallback: it keeps the native build `--enable-preview`-free by construction, which the native-mandatory target (§6) requires. `StructuredTaskScope` (JEP 505) is **not** adopted — it is the *fifth preview* in Java 25 (JEP 525 targets a sixth preview at JDK 26), so it would force `--enable-preview` across javac, the native-image builder, and the runtime JDK in lockstep, tainting the flag-free native build. Structured cancellation and exception propagation across sub-agent boundaries are handled by the executor's shutdown semantics and explicit `CompletionStage` composition. Re-evaluating `StructuredTaskScope` is a forward-looking roadmap note for after the JEP finalizes (post-JDK 26), not a v0.1 spike.
 - **Pinning detection.** Dev and test profiles enable `-Djdk.tracePinnedThreads=full`. A CI step greps test output for `Thread pinned` and fails the build on any new occurrence. `forvum-engine/src/test/resources/pinning-allowlist.txt` enumerates documented carve-outs (each entry cites the upstream issue or PR); the CI step suppresses only matches whose stack-trace fingerprint is on that allowlist.
 - **`synchronized` forbidden in hot paths.** A CI grep over `forvum-engine/src/main/java` and (when they exist) `forvum-channel-*/src/main/java` fails the build on any `synchronized` keyword. Use `java.util.concurrent.locks.ReentrantLock`, `java.util.concurrent` collections, or `java.util.concurrent.atomic` primitives. Modules not yet created are exempt until they appear; the rule applies forward, not retroactively.
 - **JDBC and virtual threads — posture finalized at M5.** Xerial SQLite JDBC uses `synchronized` JNI native methods and will pin virtual threads. Rather than pre-commit a mitigation against an unfinalized connection-pool choice, this section records the *symptom* and defers the resolution to M5 (see Risk #11). M5 picks among (a) a managed platform-thread executor for transactions, (b) explicit `@Blocking` on Hibernate-bound code paths, or (c) a loom-friendly driver if one becomes available; the chosen pattern is back-filled here.
 - **Observability marker.** Every `forvum.*` OTel span carries a `thread.is_virtual` boolean attribute. Dev UI exposes a Concurrency card showing VT-vs-PT carrier counts and pin-detection events; it lands as part of the `forvum-engine` Dev UI surface (§3.2) without a dedicated milestone. The same data exports via OTLP in Phase 2 (§7.2 item 15).
 
+### 3.9 Development Workflow (`quarkus-agentic` plugin)
+
+Forvum is built with the `quarkus-agentic@eldermoraes` plugin as the canonical tooling across every milestone. Two pieces apply throughout: the **`quarkus-langchain4j-scaffolding` skill** (templates and layout for new Quarkus/LangChain4j modules) and the **Quarkus Agent Dev MCP** (`quarkus/*` tools: `create`, `update`, `start`, `skills`, `searchDocs`, `searchTools`, `callTool`). The plugin's drop-in `CLAUDE.md` conventions are the authoritative coding-style source and are not restated here.
+
+- **Mandatory tooling.** Every Quarkus task — module creation, extension selection, configuration, version checks, API usage, troubleshooting — goes through the Quarkus Agent Dev MCP. Never create a module or add an extension by hand. LangChain4j, LangGraph4j, JLine, and other non-Quarkus library APIs are looked up with `context7`; Quarkus APIs with `quarkus/searchDocs`. If a required tool is unavailable, stop and report rather than fall back to model memory.
+- **Per-module scaffolding (reactor is hand-authored).** The skill's templates are a per-module starting point, **not** the reactor skeleton. The reactor topology (parent pom, `forvum-bom`, the four layers of §2) is authoritative, owned by M1, and hand-authored. For each new Quarkus-bearing module (`forvum-engine`, every `forvum-provider-*`, `forvum-channel-web`, `forvum-tools-*`), run `quarkus/create` to harvest the *current* Quarkus platform version and correct extension wiring into a throwaway single-module app, then **transplant**: lift the dependency coordinates into `forvum-bom`/the module pom (versions managed by the imported BOMs, never pinned), adopt the matching template class as the module's starter, and discard the generated parent pom, wrapper, and app packaging. The `native` profile, `-parameters` flag, surefire/failsafe wiring, and Dev-Services-off property are lifted into the parent pom once, not per module. Quarkus-free modules (`forvum-core`, `forvum-sdk`) do not use the skill.
+- **Extension patterns.** Before writing code against any Quarkus extension, call `quarkus/skills` for that extension — `quarkus-langchain4j-ollama` / `-anthropic` / `-openai` / `-vertex-ai-gemini` (and `-ai-gemini` / `-mcp`), `quarkus-hibernate-orm-panache`, `quarkus-flyway`, `quarkus-websockets-next`, `quarkus-rest-client-reactive`, `quarkus-scheduler`, and ArC (`InjectableContext` / `BuildStep`). LangGraph4j is **not** a Quarkus extension, so its API is learned through `context7`, not `quarkus/skills`; at M18 the supervisor graph reuses the scaffolding template's sub-agent and streaming-bridge shapes but orchestrates with LangGraph4j `StateGraph`, **not** the declarative `@SequenceAgent` / `@SupervisorAgent` annotations (§3.3, §5.5).
+- **Testing.** JVM-mode tests run through the Dev MCP via a subagent: `quarkus/callTool` with `devui-testing_runTests` (all) or `devui-testing_runTest` (one class). The main session never invokes `mvn test` / `./mvnw test` for JVM-mode tests. Each milestone's `Verify` command in §7.1 remains the contract the run must satisfy; the Dev MCP is the execution mechanism. Native integration tests (`-Pnative`, `@QuarkusIntegrationTest`) remain a Maven/failsafe step — the mandatory native parity of §6 and §10 and the M20 gate.
+- **Error triage.** On any compile, deploy, or runtime failure, call `quarkus/callTool` `devui-exceptions_getLastException` for structured detail, fix, then `devui-exceptions_clearLastException`. (If an app fails on its very first deploy, before the Dev MCP handler registers, read the dev-mode console instead.)
+
+**`forvum-bom` pin table** (the single bump point of §2.1; versions observed 2026-06-02, governed by the imported BOMs except where pinned directly):
+
+| Dependency | Pin | Source of truth |
+|---|---|---|
+| Quarkus platform | 3.33.x LTS — 3.33.1 (import `quarkus-bom`) | imported BOM |
+| quarkus-langchain4j (Quarkiverse) | 1.11.0.CR1 (PRE-RELEASE; import `quarkus-langchain4j-bom:1.11.0.CR1`) — stable fallback 1.10.0 | imported BOM — single AI-classpath governor |
+| LangChain4j core | 1.15.1 (transitive via qlc4j 1.11.0.CR1; 1.14.1 on the stable-1.10.0 fallback) | not pinned independently |
+| LangGraph4j | `org.bsc.langgraph4j:langgraph4j-core:1.8.17` | pinned directly |
+| GraalVM / Mandrel | GraalVM CE 25+ / Mandrel 25.0.x-Final | CI toolchain (exact patch pinned in CI) |
+| JDK | Java 25 (LTS) | toolchain |
+| Xerial SQLite JDBC | `org.xerial:sqlite-jdbc` ≥ 3.40.1.0 | pinned directly |
+| JLine | 3.x | pinned directly |
+| Flyway | via `quarkus-flyway` | Quarkus BOM — not pinned independently |
+| OpenTelemetry | via `quarkus-opentelemetry` | Quarkus BOM — not pinned independently |
+| Maven | 3.9+ (committed wrapper) | build wrapper |
+
+The v0.1 baseline adopts the PRE-RELEASE `quarkus-langchain4j` 1.11.0.CR1 (brings LangChain4j core 1.15.1, still targets Quarkus 3.33.1) to meet the LangChain4j ≥ 1.15.1 floor; the stable-only fallback is `quarkus-langchain4j` 1.10.0 (LangChain4j core 1.14.1). When `quarkus-langchain4j` 1.11.0 ships FINAL (GA), bump the pin from 1.11.0.CR1 to 1.11.0 and drop the pre-release caveat; the `maxSequentialToolsInvocations` → `maxToolCallingRounds` rename already applies on the 1.15.x surface (§5.5).
+
 ---
 
 ## 4. Storage (Files + SQLite Schema)
 
-Forvum uses a hybrid persistence model: human-editable configuration and intent live as Markdown and JSON files under `~/.forvum/`, while operational and append-only state (sessions, messages, memory, tool invocations, provider calls, CAPR events) lives in a single embedded SQLite database. This split keeps user-facing artifacts diffable and friendly to version control, while giving the engine a queryable, transactional store for runtime data. It also maps cleanly onto the Context Engineering Write/Select/Compress/Isolate pillars: files carry the Write surface users edit directly; SQLite carries the Select surface the engine scans, filters, and aggregates.
+Forvum uses a hybrid persistence model: human-editable configuration and intent live as Markdown and JSON files under `~/.forvum/`, while operational and append-only state (sessions, messages, memory, tool invocations, provider calls, CAPR events) lives in a single embedded SQLite database. This split keeps user-facing artifacts diffable and friendly to version control, while giving the engine a queryable, transactional store for runtime data. It also maps cleanly onto the Context Engineering Write/Select/Compress/Isolate pillars: files carry the Write surface users edit directly; SQLite carries the Select surface the engine scans, filters, and aggregates; the typed SQL-mirror enums and one-trip `Usage` snapshot (§4.3) are the Compress surface that keeps stored state classification-dense rather than narrative-heavy; and the `agent_id` column on every operational row is the Isolate surface that keeps one agent's state queryable in isolation from its siblings.
 
 ### 4.1 On-disk layout under `~/.forvum/`
 
@@ -358,6 +409,8 @@ CREATE INDEX idx_capr_turn  ON capr_events(turn_id);
 ```
 
 The `provider_calls` table is deliberately denormalized — it stores the model name and provider as plain strings rather than a foreign key into a providers table — because CAPR queries aggregate over time windows and a string scan is cheaper than a join on a small dimension table. The `is_fallback = 1` flag on a call indicates that this call only happened because an earlier call in the fallback chain failed; querying `SELECT agent_id, COUNT(*) FROM provider_calls WHERE is_fallback = 1 GROUP BY agent_id` immediately surfaces agents whose primary model is unreliable.
+
+The three memory tiers — `messages` (short-term conversational), `episodic_memory` (procedural: observation/decision/reflection), and `semantic_memory` (long-term facts) — are the Write pillar's tiered scratchpad surface: reasoning state never depends solely on the prompt window, and each tier is read back on the next turn with its own retrieval scope governed by the agent's `MemoryPolicy` (§4.3.6).
 
 The `semantic_memory.embedding` column stores a raw `float32` vector as a BLOB. For the MVP we scan linearly (row counts in a single-user deployment are small); when the row count justifies it, we add a `vec0` virtual table via the `sqlite-vec` extension in a later Flyway migration (V3 or later) without changing the surrounding schema. The engine never rewrites history — Flyway is locked forward-only and a CI check fails the build if any existing migration file is modified.
 
@@ -1018,9 +1071,9 @@ The single hardest architectural problem Forvum solves is running many agents in
 
 ### 5.1 The `@AgentScoped` custom CDI context
 
-`@AgentScoped` is a `@NormalScope` annotation declared in `forvum-core`. Its backing context is an implementation of Quarkus ArC's `InjectableContext` SPI, registered via a `BuildStep` in `forvum-engine` so ArC discovers it at build time and generates the correct native reflection hints. A `ScopedValue<AgentId> CURRENT_AGENT` is the context's identity key — every CDI bean annotated `@AgentScoped` resolves to the bean instance keyed by the current scoped value at injection time.
+`@AgentScoped` is a `@NormalScope` annotation declared in `forvum-core`. Its backing context is an implementation of Quarkus ArC's `InjectableContext` SPI, registered via a `BuildStep` in `forvum-engine` so ArC discovers it at build time and generates the correct native reflection hints. `ScopedValue` is a final API in Java 25 (JEP 506), so no preview flag is involved and the native build path stays `--enable-preview`-free; the only native-specific work is registering the custom `InjectableContext` at build time. A `ScopedValue<AgentId> CURRENT_AGENT` is the context's identity key, bound at request entry through `ScopedValue.where(CURRENT_AGENT, id).call(body)` (or `.run(...)` for void) — every CDI bean annotated `@AgentScoped` resolves to the bean instance keyed by the current scoped value at injection time.
 
-`ScopedValue` over `ThreadLocal` is not a cosmetic choice. Virtual threads fanned out from an orchestrator carry the bound value through continuations without the inheritance semantics of `InheritableThreadLocal`, which the JDK now explicitly discourages for virtual threads. Binding and unbinding is stack-scoped: `ScopedValue.callWhere(CURRENT_AGENT, agentId, () -> agent.run(turn))` guarantees the binding is torn down when the lambda returns, even on exceptions, so no agent ever observes a stale identity. The `InjectableContext` implementation stores per-agent bean instances in a `ConcurrentHashMap<AgentId, ContextInstances>` and evicts entries when the registry removes an agent.
+`ScopedValue` over `ThreadLocal` is not a cosmetic choice. Virtual threads fanned out from an orchestrator carry the bound value through continuations without the inheritance semantics of `InheritableThreadLocal`, which the JDK now explicitly discourages for virtual threads. Binding and unbinding is stack-scoped: `ScopedValue.where(CURRENT_AGENT, agentId).call(() -> agent.run(turn))` guarantees the binding is torn down when the lambda returns, even on exceptions, so no agent ever observes a stale identity. The `InjectableContext` implementation stores per-agent bean instances in a `ConcurrentHashMap<AgentId, ContextInstances>` and evicts entries when the registry removes an agent.
 
 Alongside `CURRENT_AGENT`, the scope carries a second binding `ScopedValue<UUID> CURRENT_TURN`. It is bound at the start of every turn using nested `ScopedValue.where(...)` builders, *before* the user message is inserted into `messages`. Every write path inside the scope that touches `messages`, `tool_invocations`, `provider_calls`, or `capr_events` reads `CURRENT_TURN.get()` and populates that row's `turn_id` column (see §4.3.1 for the contract and §4.2 V2 for the schema). `CURRENT_TURN.get()` is also the source of the `turnId` field on the `Done` and `ErrorEvent` `AgentEvent` records. Together, `CURRENT_AGENT` and `CURRENT_TURN` give every piece of per-turn state a pair of stable identifiers — agent-scope for isolation, turn-scope for structural correlation.
 
@@ -1050,7 +1103,7 @@ File-driven creation means the user can create or rename an agent by editing `~/
 
 ### 5.3 Tool filtering and identity resolution
 
-The global `ToolRegistry` knows every `ToolSpec` contributed by every `ToolProvider` plugin. When an agent is materialized, the registry intersects those specs against the agent's `allowedTools` glob list. The result is an immutable `List<ToolSpec>` cached on the `@AgentScoped AgentToolBelt`. The LLM only ever sees this filtered list; there is no code path that bypasses the filter to grant "just this one call" access — that kind of ad-hoc elevation is what leads to tool-misuse incidents and is explicitly forbidden by the design.
+The global `ToolRegistry` knows every `ToolSpec` contributed by every `ToolProvider` plugin. When an agent is materialized, the registry intersects those specs against the agent's `allowedTools` glob list. The result is an immutable `List<ToolSpec>` cached on the `@AgentScoped AgentToolBelt`. The LLM only ever sees this filtered list; there is no code path that bypasses the filter to grant "just this one call" access — that kind of ad-hoc elevation is what leads to tool-misuse incidents and is explicitly forbidden by the design. Tool filtering is the Select pillar applied to capability: each agent's window is offered only the ultra-relevant subset of the global `ToolRegistry`, keeping the tool-spec block in the prompt small and on-topic.
 
 Identity resolution happens at channel-message entry. Each channel's inbound handler translates its native user id (Telegram user id, web session cookie, OS username) into a Forvum `Identity` by consulting `identities/<id>.json`. The resolved `Identity` is bound to a `ScopedValue<Identity>` for the duration of the turn, parallel to `CURRENT_AGENT`. Sub-agents inherit their parent's identity — a sub-agent does not "become" a different user, and there is no API to override identity across the spawn boundary. This is a security property, not just a convenience: tools that use `Identity` for authorization cannot be tricked by a spawned sub-agent.
 
@@ -1060,18 +1113,20 @@ Identity resolution happens at channel-message entry. Each channel's inbound han
 
 Per-agent selection: the agent's `.json` names a primary model and a fallback list, resolved against `ModelProvider` beans at materialization time. Per-cron selection: each `crons/<cronId>.json` declares its own chain, independent of the invoked agent's default. This matters because a nightly summarization cron might want to pin a cheap local Ollama model for cost, while the same agent during interactive use fronts a premium hosted model for quality.
 
-Classification of "retryable" is codified as a sealed `FailureClass permits Retryable, NonRetryable, Unknown` pattern — we never let "unknown" silently retry, because that has historically caused runaway spend. `Unknown` surfaces to an operator alert and is treated as non-retryable until a human classifies it. Every Langchain4j provider exception type is mapped to a `FailureClass` in a central `FailureClassifier`, and adding a new provider requires updating that classifier as part of the PR (enforced by a compile-time check on the sealed hierarchy).
+Classification of "retryable" is codified as a sealed `FailureClass permits Retryable, NonRetryable, Unknown` pattern — we never let "unknown" silently retry, because that has historically caused runaway spend. `Unknown` surfaces to an operator alert and is treated as non-retryable until a human classifies it. The central `FailureClassifier` classifies against Langchain4j's typed `dev.langchain4j.exception` hierarchy rather than string-matched HTTP codes, mirroring the core `ExceptionMapper` mapping: `RateLimitException`, `TimeoutException`, and `InternalServerException` (the 429 / 408 / 5xx surface) are `Retryable`; `AuthenticationException`, `ModelNotFoundException`, and `InvalidRequestException` (the 401/403 / 404 / other-4xx surface) are `NonRetryable`; the `LangChain4jException` root falls through to `Unknown` and the operator alert. The failing exception's FQCN is recorded in the existing nullable `provider_calls.error` column (§4.2) for later triage — no schema change is needed. Adding a new provider requires updating that classifier as part of the PR (enforced by a compile-time check on the sealed hierarchy).
 
 ### 5.5 LangGraph4j supervisor-workers graph
 
 The Orchestrator-Workers topology from `CONTEXT-ENGINEERING.md` materializes as a `StateGraph` in `forvum-engine`. The graph is compiled once per main-agent turn and has the following nodes:
 
-- **`route`** — a cheap local model (default `qwen3:1.7b` via Ollama) classifies the inbound message into: direct-answer, tool-loop, spawn-worker, or delegate-to-named-agent. This is the "small-and-fast" principle from `CONTEXT-ENGINEERING.md` applied to orchestration, not to final generation.
+- **`route`** — a cheap local model (default `qwen3:1.7b` via Ollama) classifies the inbound message into: direct-answer, tool-loop, spawn-worker, or delegate-to-named-agent. This is the "small-and-fast" principle from `CONTEXT-ENGINEERING.md` applied to orchestration, not to final generation; routing is also the Select pillar at the orchestration layer, deciding which path and downstream context the turn needs before any expensive generation runs.
 - **`generate`** — the direct-answer node; calls `AgentChatModel` and returns a final message.
 - **`tool_loop`** — iterates tool calls until the LLM emits no more calls or the tool budget is exhausted. Each call goes through `ToolExecutor`, which enforces `PermissionScope` and `USER_CONFIRM_REQUIRED` hooks.
 - **`spawn_worker`** — materializes a sub-agent via `AgentRegistry.spawn(parentId, spec)` with a narrowed tool belt and a child `CostBudget`. The sub-agent runs its own mini-graph inside its own `@AgentScoped` context.
 - **`worker_run`** — drives the child agent's turn and returns the final message upstream.
-- **`reduce`** — merges worker outputs into the main agent's context, compressing them through a small summarization pass if the combined size exceeds a threshold (the "proxy model" compression pattern).
+- **`reduce`** — merges worker outputs into the main agent's context. When the combined size exceeds the agent's `MemoryPolicy` compression threshold, it routes the merge through the small-and-fast model (default `qwen3:1.7b`) for a structured summarization pass — the proxy-model Compress pattern from `CONTEXT-ENGINEERING.md`, landing at MVP (M18) in its summarization form and generalized to the standalone middleware in v1.0+ (§7.3 item 8). `reduce` is also the single sanctioned point where isolated worker contexts merge back into the parent, so the summarization pass doubles as the Isolate-defense boundary and the cross-agent-injection guardrail: only the compressed digest crosses, never a worker's raw window, which prevents sibling context clash and stops a poisoned worker output from injecting into the parent.
+
+Workers spawned by `spawn_worker` execute in parallel on virtual threads (fan-out per §3.8); this is the latency rationale for the Orchestrator-Workers topology in `CONTEXT-ENGINEERING.md` — parallel specialist workers replace a single agent's serial cascade, and each worker's isolated window lets the engine use a smaller model at the edge. The `tool_loop` cap and per-agent `toolBudget` are enforced through Langchain4j's idiomatic `ToolArgumentsErrorHandler` / `ToolExecutionErrorHandler` hooks rather than ad-hoc try/catch around each call; the round cap binds to `maxToolCallingRounds` on the Langchain4j 1.15.1 core pinned for v0.1 via quarkus-langchain4j 1.11.0.CR1 (the property renamed from `maxSequentialToolsInvocations`); the legacy name applies only on the stable-1.10.0 / 1.14.1 fallback.
 
 Conditional edges route between these nodes based on the sealed `AgentEvent` type emitted at each step. A turn ends when `generate` emits a `Done` event. The graph is strictly acyclic at the top level — we do not rely on LangGraph4j's cycle support there, but we do use cycles inside `tool_loop`.
 
@@ -1081,9 +1136,9 @@ JavaClaw's `base/src/main/java/ai/javaclaw/channels/ChannelRegistry.java` mainta
 
 ---
 
-## 6. Build Targets (Fast-Jar + Native)
+## 6. Build Targets (Native-First; Fast-Jar for Development)
 
-Forvum ships two build targets from the MVP and keeps both gated in CI. Neither is a fallback for the other: the JVM fast-jar is the canonical target for development and for deployments that need runtime jar drop-in plugins; the GraalVM native binary is the canonical target for end-user install, especially on the TUI channel where cold-start latency is felt directly by the user on every invocation.
+The GraalVM native binary is the **primary, mandatory** build target — the shipped product and the default acceptance gate. The JVM fast-jar is the development convenience and the only runtime that loads drop-in jar plugins; it is not a co-equal shipping target. Every milestone M1–M20 produces a native-buildable artifact and runs the native smoke path in CI on every pull request (§6.4, §10); the sole sanctioned carve-out is a *behavioral* native assertion skip, never a native-compile skip, justified in writing in the milestone's Verify block (the one defensible case today is M4 `WatchService` OS-polling semantics). The native binary is what the end-user installs, where cold-start latency is felt directly on every invocation, especially on the TUI channel.
 
 ### 6.1 JVM fast-jar
 
@@ -1093,14 +1148,14 @@ Forvum ships two build targets from the MVP and keeps both gated in CI. Neither 
 - Runs Dev UI at `/q/dev/` in dev mode (`mvn -f forvum-app quarkus:dev`), including Forvum-specific cards for live agent reload, a CAPR dashboard, and a provider-call inspector backed by `provider_calls`.
 - Supports live-reload of Java sources during dev, which is critical when building new plugins or iterating on engine code.
 
-This is the target a contributor runs locally while developing Forvum itself, and the target a power user runs when they want to drop in a compiled third-party plugin without rebuilding Forvum end-to-end.
+This is the development target a contributor runs locally while building Forvum itself, and the JVM runtime a power user runs when they want to drop in a compiled third-party plugin without rebuilding the native binary end-to-end. It is a convenience layer over the shipped native product, not an alternative shipping target.
 
 ### 6.2 GraalVM native binary
 
-`mvn -f forvum-app -Pnative package` produces a single executable at `forvum-app/target/forvum-app-<version>-runner`. Startup target is under 200 ms, resident memory under 50 MB, single binary with zero JVM dependency at the end-user machine. This target:
+`mvn -f forvum-app -Pnative package` produces a single executable at `forvum-app/target/forvum-app-<version>-runner`, built with **Mandrel 25.0.x-Final** (GraalVM CE 25, JDK 25-based) and **no `--enable-preview`** (§3.8). Startup target is under 200 ms, resident memory under 50 MB, single binary with zero JVM dependency at the end-user machine. This is the primary, mandatory target. It:
 
-- Is what we recommend to end users installing Forvum as a personal tool.
-- Loads all plugins that were on the compile classpath at build time — not from `~/.forvum/plugins/`.
+- Is what we ship and what end users install as a personal tool.
+- Loads all plugins that were on the compile classpath at build time — not from `~/.forvum/plugins/`. The runtime drop-in path is a documented JVM-fast-jar-only architectural property, not a carve-out from the native mandate.
 - Cross-compiles via Quarkus `container-build=true` on CI runners that lack a local GraalVM.
 - Is smoke-tested on every pull request via `@QuarkusIntegrationTest`; the CI step fails if cold-start exceeds 200 ms.
 
@@ -1115,10 +1170,13 @@ Native compatibility is not retrofitted late. Every contribution is written as i
 - **No dynamic class loading** outside the drop-in plugin path, which is explicitly JVM-only.
 - **Vetoed dependencies.** Any library that relies on `sun.misc.Unsafe`, runtime bytecode generation (CGLib, Javassist at runtime), or un-hinted reflection is excluded from the compile classpath via `<exclusions>` in `forvum-bom`. A CI check greps for banned imports (`sun.misc.Unsafe`, `net.sf.cglib`, `javassist.util.proxy`) and fails the build if any appear.
 - **`@RegisterForReflection` audit.** A custom Maven enforcer rule walks the DTO packages and fails the build if a record is missing the annotation. Records do not technically need reflection for their canonical constructor, but Jackson and Langchain4j both use it for field access, so the annotation is mandatory and enforced.
+- **SQLite JDBC native loading.** Xerial `sqlite-jdbc` (≥ 3.40.1.0; pin the latest, currently ~3.53.x) ships its own native-image JNI configuration. The native profile sets `-Dorg.sqlite.lib.exportPath=${project.build.directory}` so the JNI library is exported at build time rather than embedded-then-extracted, with `org.sqlite.lib.path` pinned at runtime. This is a native-config requirement, not a blocker.
+- **Flyway native resources.** `quarkus-flyway` migrations under `db/migration/` are registered as native resources; the native build includes only the SQLite migration SQL, so the image carries no unreachable dialect resources.
+- **LangGraph4j reachability metadata.** LangGraph4j is a plain library, not a Quarkus extension, so it ships no build-time native hints. The engine carries hand-authored reachability metadata under `forvum-engine/src/main/resources/META-INF/native-image/`; every graph-state type (§5.5) is a record annotated `@RegisterForReflection`. The native graph smoke (the supervisor turn) must pass on both CI platforms before LangGraph4j is on the default native path (Risk #13).
 
 ### 6.4 CI matrix and distribution
 
-GitHub Actions runs a matrix of `linux-amd64` and `macos-arm64` on every pull request. Each matrix cell builds both JVM and native, runs unit tests and integration tests, and executes a native smoke test that:
+GitHub Actions runs a matrix of `linux-amd64` and `macos-arm64` on every pull request. Native parity is mandatory, not selective: every matrix cell builds both JVM and native, and every milestone M1–M20 native-compiles and runs its native smoke path. A milestone may skip only a *behavioral* native assertion (never the native compile), with a written justification in its Verify block; the sole defensible case today is M4 `WatchService` OS-polling semantics. A per-provider native failure (Risk #5) is marked JVM-only in release notes only with an upstream issue filed. Each matrix cell runs unit tests and integration tests, and executes a native smoke test that:
 
 1. Starts the native binary with a canned `~/.forvum/` layout.
 2. Sends a scripted TUI interaction through stdin.
@@ -1147,7 +1205,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Files:** `forvum/pom.xml` (parent), `forvum/forvum-bom/pom.xml`, `forvum/forvum-core/pom.xml`, `forvum/forvum-sdk/pom.xml`, `forvum/forvum-engine/pom.xml`, `forvum/forvum-app/pom.xml`, `.gitignore`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties`.
   - **Note:** The Maven Wrapper (`mvnw`, `mvnw.cmd`, `.mvn/wrapper/`) is generated via `mvn wrapper:wrapper -Dmaven=3.9.14` and committed so contributors and CI invoke an identical Maven version — OSS convention for JVM projects and eliminates a source of "works on my machine" drift.
   - **Note:** Compiler config (release=25, encoding=UTF-8) consolidated in parent pom.xml — no `.mvn/maven-compiler.config` needed.
-  - **Deps:** locks Java 25 (`maven.compiler.release=25`), Quarkus 3.31.x platform BOM, Maven 3.9+.
+  - **Deps:** locks Java 25 (`maven.compiler.release=25`), Quarkus 3.33.x LTS platform BOM, Maven 3.9+.
   - **Verify:** `cd forvum && ./mvnw -N verify` succeeds on every module; `./mvnw -pl forvum-app -am package` produces `forvum-app/target/quarkus-app/quarkus-run.jar`.
   - **Commit:** `chore: bootstrap multi-module reactor`.
 
@@ -1261,7 +1319,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
 
 - [ ] **M20 — GraalVM native image + CI matrix.**
   - **Files:** `forvum-app/src/main/resources/application.properties` (native-specific flags), `.github/workflows/ci.yml` (matrix: `linux-amd64`, `macos-arm64`; JVM and native builds; native smoke test with 200 ms cold-start gate), `Dockerfile.jvm`, `Dockerfile.native`.
-  - **Deps:** `quarkus-container-image-docker`; GraalVM CE 24+ on runners.
+  - **Deps:** `quarkus-container-image-docker`; GraalVM CE 25 / Mandrel 25.0.x-Final on runners.
   - **Verify:** `mvn -f forvum-app -Pnative package -Dquarkus.native.container-build=true` succeeds on a clean CI runner; `./forvum-app-<version>-runner --help` prints help in < 200 ms measured from process start.
   - **Commit:** `feat(app): add GraalVM native image profile and CI matrix`.
 
@@ -1284,6 +1342,14 @@ Goal: match OpenClaw's feature set so a user currently on OpenClaw can migrate t
 13. **MCP server registry enrichments.** `forvum mcp add <url>` and `forvum mcp list`; remote MCP tools appear in `ToolRegistry` within seconds.
 14. **User-approval queue UI.** Dev UI and web-channel cards that show pending `USER_CONFIRM_REQUIRED` tool calls and let the user approve or reject them.
 15. **Telemetry export.** OpenTelemetry OTLP exporter on by default when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; default off; zero-config path for Honeycomb, Grafana Tempo, and Datadog.
+16. **Additional first-party channels.** Discord, Slack, WhatsApp, Matrix, and Signal as `forvum-channel-*` modules. The long tail (iMessage/BlueBubbles, Teams, Google Chat, Mattermost, Feishu, LINE, QQ, Zalo/ZaloUser, IRC, Nostr, Tlon, Twitch, Synology Chat, Nextcloud Talk, telephony voice-call) is explicitly out of v0.5 scope and is community-plugin territory delivered through the item 6 marketplace.
+17. **GitHub Copilot model provider.** `forvum-provider-copilot` against Copilot's OpenAI-compatible endpoint, with Copilot OAuth/device-code authorization wired into the provider onboarding wizard (item 10).
+18. **QA scenario suite.** `forvum qa suite` / `forvum qa <channel>` runs a scripted scenario pack against the running assistant; fails by default on any unverified scenario. The scenario pack ships in the release and the suite is a CI gate.
+19. **Device pairing with scope-upgrade approval.** Extends item 4: a paired device requests a `PermissionScope` set, the owner approves or rejects with reason codes, and requested-vs-approved scopes are visible in the Dev UI and `forvum devices`. `forvum doctor` surfaces requested-vs-granted drift.
+20. **Session compaction.** When a session approaches the model's context window, compaction caps a reserve-token floor, mutates the oldest turns first to preserve the cached prefix, and strips orphaned reasoning/tool blocks. This is the Context Engineering Compress pillar (§1.4, §2.7) realized on the live session window.
+21. **Detached task runtime registration.** A `TaskExecutor` SPI in `forvum-sdk` plus a SQLite `tasks` ledger that unifies cron entries, sub-agent runs, and background tasks under one queryable record.
+22. **Cron isolated-agent delivery modes.** `delivery.mode: none | last | explicit-to` on cron entries, with per-execution dedupe and ambiguous delivery rejected at add/update time. Folds into the item 11 RBAC `cron` role.
+23. **`OutputGuard` SPI.** An outbound sensitive-data (secret/PII) filter on every channel egress surface — the v0.5 realization of the §1.4 outbound-filter promise. Full contract is specified via design-round Group 6a (§9.2, once the §9 Security section lands).
 
 ### 7.3 Phase 3 — v1.0+ (differentiators)
 
@@ -1306,10 +1372,10 @@ Each item is a bet that the Java/Quarkus foundation either strictly enables or m
 
 Each item below is either a technical risk to validate early or a decision deferred pending evidence. Every entry includes **Context** (what the concern is), **Mitigation** (how we reduce blast radius ahead of a decision), and **Decision trigger** (what must be true for us to resolve it one way or the other).
 
-1. **Quarkus ArC `InjectableContext` + Java 25 `ScopedValue` interoperability in native image.**
-   - **Context:** The custom `@AgentScoped` context is implemented via ArC SPI; ScopedValue is a Java 25 preview feature that may require specific native-image flags.
-   - **Mitigation:** A spike during M6 validates the full path (bind `ScopedValue`, inject `@AgentScoped` bean, unbind) both in JVM and in a native image. If native fails, we fall back to `ThreadLocal` inside a virtual-thread-pinning guard and accept the performance cost.
-   - **Decision trigger:** M6 CI green on both JVM and native; a two-thread test asserts isolation. If red, we file a Quarkus issue and ship the `ThreadLocal` variant in v0.1.
+1. **Quarkus ArC `InjectableContext` build-time registration in native image.**
+   - **Context:** The custom `@AgentScoped` context is implemented via the ArC SPI, registered through a build-time `BuildStep`. `ScopedValue` (JEP 506) is **final** in Java 25 — a permanent standard API needing no `--enable-preview` and no preview-gated native flag — so the residual native risk is purely whether the ArC `InjectableContext` and its reflection hints are generated correctly at build time for the native image.
+   - **Mitigation:** A spike during M6 validates the full path (bind `ScopedValue.where(KEY, v).call(body)`, inject the `@AgentScoped` bean, unbind) in both JVM and native, exercising the ArC build-step registration. No `ThreadLocal`/preview-flag fallback is contemplated; the build stays `--enable-preview`-free.
+   - **Decision trigger:** M6 CI green on both JVM and native; a two-thread test asserts per-agent isolation. If the ArC build-step path is red in native, file a Quarkus issue and resolve before M6 ships (it is a native-mandatory milestone).
 
 2. **`sqlite-vec` native-image compatibility.**
    - **Context:** `sqlite-vec` is a C extension loaded as a shared library. Native-image static linking varies by platform.
@@ -1321,15 +1387,15 @@ Each item below is either a technical risk to validate early or a decision defer
    - **Mitigation:** Plugins implement the `non-sealed abstract AbstractXProvider`, which is a concrete class from ArC's perspective. M3 includes a compile-time test that asserts this contract.
    - **Decision trigger:** M3 passes on native; if ArC emits warnings about sealed interfaces we investigate before M7.
 
-4. **LangGraph4j maturity and version stability.**
-   - **Context:** LangGraph4j is pre-1.0 at time of writing; API changes between minor versions are possible.
+4. **LangGraph4j version stability.**
+   - **Context:** LangGraph4j is a stable 1.8.x release (pin `langgraph4j-core:1.8.17`); it is no longer pre-1.0, but minor-version API drift within the 1.8.x series is still possible.
    - **Mitigation:** Pin the exact version in `forvum-bom`. Keep the engine's coupling to LangGraph4j concentrated in `forvum-engine/src/main/java/ai/forvum/engine/graph/` so an upgrade or a replacement is a module-local change.
    - **Decision trigger:** if LangGraph4j breaks API twice within a v0.1 → v0.5 cycle, evaluate replacing it with a small in-house `StateGraph` implementation on the same `AgentEvent` sealed type.
 
 5. **Quarkiverse `quarkus-langchain4j-*` native readiness per provider.**
-   - **Context:** Extensions vary in their native-image readiness; Ollama and OpenAI are well-exercised; Vertex AI Gemini less so.
-   - **Mitigation:** Native smoke test runs every provider against a canned scripted turn in CI. If a provider fails native, it is still available in the fast-jar build and clearly marked as such in docs.
-   - **Decision trigger:** provider smoke test red in native for two weeks → file upstream issue, mark the provider JVM-only in release notes, unblock other work.
+   - **Context:** Extensions vary in their native-image readiness; Ollama, OpenAI, and Anthropic are well-exercised; the Vertex AI Gemini gRPC/Google-auth stack is less so under native.
+   - **Mitigation:** A per-provider native smoke test against a canned scripted turn is **mandatory** in CI for every provider milestone (M9–M12), not selective. For Vertex/Gemini, the preferred remedy if the gRPC stack blocks native is switching to the REST `quarkus-langchain4j-ai-gemini` (Google GenAI) extension rather than carving the provider out to JVM-only.
+   - **Decision trigger:** provider native smoke red for two weeks → first attempt the REST-extension remedy where one exists (Vertex → `ai-gemini`); only if no native path exists, file an upstream issue and mark the provider JVM-only in release notes with that issue linked.
 
 6. **JLine 3 on Windows under GraalVM.**
    - **Context:** JLine 3 has edge cases on Windows consoles (especially legacy cmd.exe) that differ from macOS/Linux.
@@ -1357,7 +1423,7 @@ Each item below is either a technical risk to validate early or a decision defer
     - **Decision trigger:** the evaluation harness in v1.0+ measures judge-vs-human agreement; if agreement falls below 0.7 on our suite, we either replace the judge model or invest in calibration.
 
 11. **JDBC/SQLite pinning under virtual threads.**
-    - **Context:** Xerial SQLite JDBC uses `synchronized` JNI native methods, which pin virtual threads. The engine runs on virtual threads end-to-end (§3.8); without mitigation, every Hibernate transaction blocks a carrier thread.
+    - **Context:** Xerial SQLite JDBC uses `synchronized` JNI native methods, which pin virtual threads. The engine runs on virtual threads end-to-end (§3.8); without mitigation, every Hibernate transaction blocks a carrier thread. This is a runtime virtual-thread-pinning concern only — it is independent of native-image viability, which compiles fine either way (§6.3).
     - **Mitigation:** M5 chooses among (a) a managed platform-thread executor for transactions, (b) explicit `@Blocking` posture on Hibernate-bound code paths, or (c) a loom-friendly JDBC driver if one becomes available. The selection is recorded back into §3.8 once locked.
     - **Decision trigger:** an M5 spike measures pin events under steady-state load (a synthetic 100-turn run hitting `messages` and `provider_calls`); the option that produces zero unbounded pins wins. If all three options have unbounded pin events, ship the least-bad option in v0.1 and file an issue capping the regression.
 
@@ -1365,6 +1431,11 @@ Each item below is either a technical risk to validate early or a decision defer
     - **Context:** `forvum-channel-telegram` (M17) uses `quarkus-rest-client-reactive`, which is Mutiny-based. The rest of the engine — including all `@AgentScoped` work — runs on virtual threads with no Mutiny exposure. Without an explicit seam, Mutiny types could leak into engine code and create dual-paradigm code paths.
     - **Mitigation:** `UpdateProcessor` (M17) is the seam: it consumes the Mutiny `Uni<Update>` stream from the REST client, `await().indefinitely()`s within a virtual-thread scope, and hands `ChannelMessage` records (only `forvum-core` / `forvum-sdk` types) to the engine. The boundary is enforced at build time via the `maven-enforcer-plugin` `bannedDependencies` rule in `forvum-engine/pom.xml`, banning `io.smallrye.mutiny:*` from the compile classpath.
     - **Decision trigger:** the `bannedDependencies` enforcement step in M17's CI build fails if any engine code introduces a Mutiny type. If the seam leaks, redesign `UpdateProcessor` before M17 ships.
+
+13. **LangGraph4j native reachability metadata.**
+    - **Context:** LangGraph4j is a plain library, not a Quarkus extension, so it ships no build-time native hints. The `StateGraph`, its node `BiFunction`s, and the Jackson-serialized graph state use reflection and the lambda metafactory, which native-image cannot infer automatically.
+    - **Mitigation:** Hand-authored reachability metadata lives under `forvum-engine/src/main/resources/META-INF/native-image/`; every graph-state type (§5.5) is a record annotated `@RegisterForReflection`. Coupling stays concentrated in `engine/graph/` (Risk #4) so the metadata is module-local and tracks any version bump.
+    - **Decision trigger:** the native graph smoke (the supervisor turn at M18) is green on both `linux-amd64` and `macos-arm64`. If red, the missing metadata is added before LangGraph4j is on the default native path; it does not regress the native-mandatory gate.
 
 ---
 
@@ -1376,7 +1447,8 @@ Forvum's test surface is part of the spec, not relegated to CONTRIBUTING. Each P
 - **Test pyramid.** Three layers: unit tests (`*Test`, fast, no Quarkus boot, no I/O — Maven Surefire), integration tests (`*IT`, Quarkus DevServices, real SQLite via `@TempDir`, `@QuarkusTest` — Maven Failsafe), and end-to-end scenarios (the ten scripts under `forvum-app/src/test/java/ai/forvum/e2e/` declared in "End-to-End Verification", landing milestone by milestone). Surefire and Failsafe split the lifecycle so a fast inner loop never waits on integration cost.
 - **Coverage policy.** §3.7's JaCoCo 80 % line gate stays at the parent level. Add a 75 % branch-coverage gate alongside. Mutation testing (Pitest) lands in `forvum-core` first because its Quarkus-free domain types are mutation-friendly. (`forvum-sdk` is also Quarkus-free but is dominated by sealed interfaces and abstract classes — little behavior to mutate; mutation joins it in Phase 2 alongside `forvum-engine`.) Initial target is **50 % mutation-killed** (industry-typical greenfield baseline), raised toward 70 % in Phase 2 once a measured baseline exists. Coverage gates are gates; mutation thresholds are signals until a baseline is in hand.
 - **Property-based tests with jqwik.** Mandatory for parsers and records: `ModelRef.parse` roundtrip (§4.3.5.1), `AgentEvent` Jackson roundtrip (§4.3.2), `CostBudget` validation invariants (§4.3.5.2), `PermissionScope.fromName` failure modes (§4.3.4). Property tests catch regressions JaCoCo never will because they generate inputs the author didn't think of.
-- **Native-mode parity — selective.** Each milestone's Verify declares whether it must run on the native binary in addition to fast-jar. Default: parser/record milestones (M2), provider HTTP-stack milestones (M9-M12), TUI rendering (M15), web channel (M16), Telegram (M17), and the M20 cold-start gate **must** run native. Milestones whose risk is dominated by JVM behavior (e.g., M4 `WatchService` semantics) **may** skip native parity. Milestones not enumerated above default to JVM-only; the milestone owner justifies the choice in their Verify block during PR review. Doubling CI minutes is real; selectivity is deliberate.
+- **Native-mode parity — MANDATORY.** Native is the primary shipped target, so every milestone M1–M20 native-compiles and runs its native smoke path in CI on every pull request (§6.4). A milestone may skip only a *behavioral* native assertion — never the native compile — with a written justification in its Verify block. The single sanctioned skip today is M4 `WatchService`, whose OS-polling semantics are provably JVM-host behavior; M4 must still native-compile and may only omit the behavioral native assertion. A per-provider native failure (Risk #5) is JVM-only in release notes only with an upstream issue filed, and Vertex/Gemini's preferred remedy is the REST `quarkus-langchain4j-ai-gemini` extension before any carve-out. There is no other default-to-JVM path; the doubled CI cost is the price of a native-mandatory product.
+- **Test execution via the Quarkus Agent Dev MCP.** JVM-mode tests are run through the Quarkus Agent Dev MCP (`devui-testing_runTests` / `runTest`) via a subagent (§3.9); the §7.1 Verify command remains the contract the run must satisfy. Native integration tests (`-Pnative`, `@QuarkusIntegrationTest`) remain a Maven/Failsafe step and are the M20 gate.
 - **Performance gates per turn — initial targets, baselined at M5/M6.** Suggested p95 first-token latency excluding model inference: TUI ≤ 200 ms, Web ≤ 300 ms, Telegram ≤ 500 ms. These are *initial targets* to be confirmed by M5 (persistence) and M6 (`@AgentScoped` context) baselines; if measurements show them infeasible, this section is amended before they are enforced. Measurement uses a `FakeProvider` returning deterministic tokens so the gate measures Forvum, not the LLM.
 - **Flaky-test quarantine.** Live-provider tests live in `*-LiveTest` classes tagged `@Tag("live")`. Default-off in CI; a nightly workflow runs them with retry budget 1 and fails fast on the second failure. Live tests catch real regressions but do not gate every PR.
 - **Security-test layer.** Negative integration tests under `forvum-app/src/test/java/ai/forvum/security/` cover: prompt injection in user message → no tool-call escalation; path traversal in fs tool args → denied; spawn-boundary identity override attempt → rejected; `PermissionScope` mismatch → denied and audited. The directory and tests land milestone by milestone alongside the security amendments to M3 / M13 / M14 / M16 / M17 (see §9 once it lands).
