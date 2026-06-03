@@ -26,4 +26,42 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-engine-extension-agnostic</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- forvum-engine is Layer 2: among ai.forvum modules it may depend
+                                         ONLY on forvum-core + forvum-sdk — never a concrete Layer-3
+                                         extension or the app. Allowlist form (ban every ai.forvum:*,
+                                         re-allow core + sdk) so a future module that does not match a
+                                         naming convention cannot slip through. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-core</include>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>forvum-engine must remain extension-agnostic (Layer 2): among ai.forvum modules it may depend only on forvum-core + forvum-sdk, never a concrete channel/provider/tool module or forvum-app. See CLAUDE.md sections 3 and 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

@@ -633,21 +633,22 @@ per-socket sessions.
 **Labels:** `phase-1`, `channel`, `native`, `security`, `plugin-tooling` · **Milestone:** `v0.1 MVP`
 
 **Context.** First messaging channel (§7.1 M17). Tied to Risk #8 (long-poll vs webhook) and Risk #12
-(Mutiny ↔ virtual-thread boundary).
+(reactive client → resolved by a blocking client on a virtual thread, §3.8).
 
-**Scope / Deliverables.** `forvum-channel-telegram`: long-poll bot via `quarkus-rest-client-reactive`;
-webhook opt-in; `allowedUserIds` gate; `UpdateProcessor` as the Mutiny↔virtual-thread seam.
+**Scope / Deliverables.** `forvum-channel-telegram`: long-poll bot via a blocking `quarkus-rest-client`
+on a virtual thread (`@RunOnVirtualThread`); webhook opt-in; `allowedUserIds` gate.
 
-**Files.** `forvum-channel-telegram/.../TelegramChannel.java`, `TelegramBotApi.java` (REST client),
-`UpdateProcessor.java`, manifest.
+**Files.** `forvum-channel-telegram/.../TelegramChannel.java`, `TelegramBotApi.java` (blocking REST
+client), manifest.
 
 **Acceptance Criteria.**
 - With a bot token in the keychain, a live DM produces a reply within the turn-latency budget;
-  `allowedUserIds` refuses other users with a friendly message. The `bannedDependencies` enforcer step
-  fails if any engine code introduces `io.smallrye.mutiny:*` (Risk #12).
-- **[NATIVE]** §10 lists M17 must-run-native (REST-client reactive stack must compile native).
+  `allowedUserIds` refuses other users with a friendly message. No Mutiny in channel/engine source —
+  the blocking client keeps the path virtual-thread-native (Risk #12); the M5/M6 import-grep guards
+  against reactive creep.
+- **[NATIVE]** §10 lists M17 must-run-native (REST-client stack must compile native).
 - Security negative test (X5/TEST-SEC): a spawn-boundary identity-override attempt is rejected.
-- **[PLUGIN]** `quarkus/skills` for `rest-client-reactive`; `context7` for Telegram Bot API shapes;
+- **[PLUGIN]** `quarkus/skills` for `rest-client`; `context7` for Telegram Bot API shapes;
   add the extension via the MCP.
 
 **Dependencies.** M3, M7, M8. Unblocks: nothing downstream blocks on it.
