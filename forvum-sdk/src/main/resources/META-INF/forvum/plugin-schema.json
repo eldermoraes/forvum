@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forvum.ai/schema/plugin.json",
+  "title": "Forvum plugin manifest",
+  "description": "Static manifest a Forvum plugin ships at META-INF/forvum/plugin.json. It is scanned at build time (ULTRAPLAN section 6.3) to record the contributed providers and emit native-image reflection hints before any plugin code runs; ServiceLoader is a fast-jar-only fallback. This file documents the v0.1 contract — the parser lives in the forvum-engine BuildStep (a later milestone), not in the SDK.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "provides"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Stable plugin id, matching the extensionId() returned by each contributed provider."
+    },
+    "version": {
+      "type": "string",
+      "description": "Plugin version (informational; Forvum's own versions are governed by forvum-bom)."
+    },
+    "provides": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["channel", "model", "tool", "memory"]
+      },
+      "description": "Which provider SPIs this plugin contributes (ChannelProvider / ModelProvider / ToolProvider / MemoryProvider)."
+    }
+  }
+}
