@@ -1063,6 +1063,55 @@ public final class SpawnConfigurationException extends RuntimeException {
 
 *TBD (Group 5).*
 
+#### 4.3.7 Identity, message, persona, and tool-spec records
+
+`AgentId`, `Identity`, `ChannelMessage`, `Persona`, and `ToolSpec` are listed in the Layer-0 inventory
+(§2.1) and the M2 file manifest (§7.1) but were not shape-frozen above. Their shapes are specified here
+as the M2 amendment (this section is the "amend §4.3 first" step required before M2 writes the records).
+They follow the same conventions as the frozen Tier-1 types: pure-Java records with canonical-constructor
+validation throwing `IllegalStateException` with triage-oriented, origin-naming messages (the `ModelRef` /
+`CostBudget` idiom). **Nullable fields are used in preference to `Optional`** — consistent with the
+`CostBudget`/`Spend` nullable convention, and simpler for Jackson round-trip and native image.
+
+```java
+// ai.forvum.core.id.AgentId  — ScopedValue<AgentId> key; SQL agent_id column.
+public record AgentId(String value) {}                      // non-blank, no edge whitespace; toString() == value
+
+// ai.forvum.core.id.Identity  — materialized from identities/<id>.json (§4.1, §5.3).
+public record Identity(String id, String displayName,
+                       Map<String, String> channelAccounts) {}  // channelId -> native user id; copied to an immutable map
+
+// ai.forvum.core.ChannelMessage  — inbound only; outbound flows as AgentEvent.TokenDelta (§5.3).
+public record ChannelMessage(String channelId, String nativeUserId,
+                             String content, Instant timestamp) {}  // content may be empty; the rest are required
+
+// ai.forvum.core.Persona  — spec.md (systemPrompt) + spec.json structural config (§5.2).
+public record Persona(AgentId id, String systemPrompt, List<String> allowedTools,
+                      ModelRef primaryModel, AgentId parent,
+                      CostBudget costBudget, Long toolBudget) {}  // allowedTools copied immutable; last three nullable
+
+// ai.forvum.core.ToolSpec  — registry entry filtered by allowedTools globs (§5.3).
+public record ToolSpec(String name, String description,
+                       PermissionScope requiredScope, String parametersJsonSchema) {}  // raw JSON Schema; "{}" for none
+```
+
+**Conventions and rationale:**
+
+- **`AgentId` / `Identity` live in `ai.forvum.core.id`; `ChannelMessage` / `Persona` / `ToolSpec` in
+  `ai.forvum.core`.** `Identity.channelAccounts` and `Persona.allowedTools` are defensively copied to
+  immutable collections in the canonical constructor; a null collection is rejected (use an empty one).
+- **`Persona` omits the LLM fallback chain and the memory policy by design.** It carries only
+  `primaryModel` today; the chain field arrives with `FallbackChain` (§4.3.5.3, DR-4c) and the retrieval
+  field with `MemoryPolicy` (§4.3.6, DR-5). `Persona` must not reference either TBD type at M2. `parent`
+  null means a top-level agent; null `costBudget`/`toolBudget` mean uncapped; a non-null `toolBudget` must
+  be non-negative.
+- **`ToolSpec` is a Forvum-native record, not a wrapper over LangChain4j's `ToolSpecification`.** The
+  parameter schema is carried as a raw JSON Schema string so Layer 0 stays free of any AI-library
+  dependency; adaptation to `ToolSpecification` happens in the SDK/engine. `requiredScope` is the
+  capability the `ToolExecutor` enforces (§4.3.4).
+- **Native reflection for these records (and every other Layer-0 type) is registered from the engine, not
+  here.** See §6.3: Layer 0 cannot carry `@RegisterForReflection`.
+
 ---
 
 ## 5. Sub-agents and CDI Isolation
@@ -1169,7 +1218,7 @@ Native compatibility is not retrofitted late. Every contribution is written as i
 - **Build-time plugin discovery.** `@ForvumExtension` plus `META-INF/forvum/plugin.json` manifests are scanned by a Quarkus `BuildStep` that records the set of contributed `ChannelProvider`, `ModelProvider`, `ToolProvider`, and `MemoryProvider` beans and emits the necessary reflection hints. `ServiceLoader` is a fallback for the fast-jar only and is not exercised in the native image.
 - **No dynamic class loading** outside the drop-in plugin path, which is explicitly JVM-only.
 - **Vetoed dependencies.** Any library that relies on `sun.misc.Unsafe`, runtime bytecode generation (CGLib, Javassist at runtime), or un-hinted reflection is excluded from the compile classpath via `<exclusions>` in `forvum-bom`. A CI check greps for banned imports (`sun.misc.Unsafe`, `net.sf.cglib`, `javassist.util.proxy`) and fails the build if any appear.
-- **`@RegisterForReflection` audit.** A custom Maven enforcer rule walks the DTO packages and fails the build if a record is missing the annotation. Records do not technically need reflection for their canonical constructor, but Jackson and Langchain4j both use it for field access, so the annotation is mandatory and enforced.
+- **`@RegisterForReflection` audit.** A custom Maven enforcer rule walks the DTO packages and fails the build if a record is missing the annotation. Records do not technically need reflection for their canonical constructor, but Jackson and Langchain4j both use it for field access, so the annotation is mandatory and enforced. **This audit applies to DTO records in Quarkus-bearing modules (Layer 2+); `forvum-core` (Layer 0) is exempt.** Core bans `io.quarkus*` and cannot depend upward on `forvum-sdk`, so its records cannot carry the annotation — it lives in `io.quarkus.runtime.annotations`, and the SDK re-export (§2.2) sits *above* Layer 0, not below it. Layer-0 types that the engine serializes in native are instead registered from `forvum-engine` via a single `@RegisterForReflection(targets = { … })` holder enumerating the core records (compile-time-checked `.class` references, so a rename or removal breaks the build). That holder lands in the milestone that first serializes those types in native (M5/M6); M2 ships pure records with no annotation.
 - **SQLite JDBC native loading.** Xerial `sqlite-jdbc` (≥ 3.40.1.0; pin the latest, currently ~3.53.x) ships its own native-image JNI configuration. The native profile sets `-Dorg.sqlite.lib.exportPath=${project.build.directory}` so the JNI library is exported at build time rather than embedded-then-extracted, with `org.sqlite.lib.path` pinned at runtime. This is a native-config requirement, not a blocker.
 - **Flyway native resources.** `quarkus-flyway` migrations under `db/migration/` are registered as native resources; the native build includes only the SQLite migration SQL, so the image carries no unreachable dialect resources.
 - **LangGraph4j reachability metadata.** LangGraph4j is a plain library, not a Quarkus extension, so it ships no build-time native hints. The engine carries hand-authored reachability metadata under `forvum-engine/src/main/resources/META-INF/native-image/`; every graph-state type (§5.5) is a record annotated `@RegisterForReflection`. The native graph smoke (the supervisor turn) must pass on both CI platforms before LangGraph4j is on the default native path (Risk #13).

@@ -23,6 +23,8 @@
         <langgraph4j.version>1.8.17</langgraph4j.version>
         <tamboui.version>0.3.0</tamboui.version>
         <sqlite-jdbc.version>3.53.1.0</sqlite-jdbc.version>
+        <!-- Property-based test library (mandatory for parsers/records, ULTRAPLAN section 10). -->
+        <jqwik.version>1.10.1</jqwik.version>
     </properties>
 
     <dependencyManagement>
@@ -63,6 +65,16 @@
                 <groupId>org.xerial</groupId>
                 <artifactId>sqlite-jdbc</artifactId>
                 <version>${sqlite-jdbc.version}</version>
+            </dependency>
+
+            <!-- jqwik property-based testing (test scope in consumers). Manage the aggregator
+                 directly: there is no published jqwik-bom artifact. jqwik 1.10.1 targets the
+                 JUnit 5 platform line (junit-platform 1.14.x); Quarkus-free modules that use it
+                 must keep JUnit 5 on their test classpath (see forvum-core/pom.xml). -->
+            <dependency>
+                <groupId>net.jqwik</groupId>
+                <artifactId>jqwik</artifactId>
+                <version>${jqwik.version}</version>
             </dependency>
 
             <dependency>
