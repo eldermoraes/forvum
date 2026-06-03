@@ -13,22 +13,18 @@ import java.lang.annotation.Target;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.Map;
-
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Surface contract for the plugin SPI (ULTRAPLAN section 7.1, the M3 Verify). Asserts, via
  * reflection, that each provider interface is sealed and permits ONLY its {@code Abstract*} base —
- * so external code cannot implement the interface directly, it must extend the non-sealed base,
- * keeping the implementation set closed and build-time-known for native-image discovery. The four
- * pairs are exercised as a jqwik property (this module pins the JUnit 5 platform line in its pom,
- * CLAUDE.md section 11).
+ * so external code cannot implement the interface directly, it must extend the non-sealed base —
+ * and that the base is genuinely extendable (public, non-private no-arg constructor). The four
+ * pairs run as a parameterized test; the annotation markers are checked directly.
  */
 class SdkSurfaceTest {
 
@@ -39,14 +35,13 @@ class SdkSurfaceTest {
         ToolProvider.class, AbstractToolProvider.class,
         MemoryProvider.class, AbstractMemoryProvider.class);
 
-    @Provide
-    Arbitrary<Class<?>> providerSpi() {
-        return Arbitraries.of(
-            ChannelProvider.class, ModelProvider.class, ToolProvider.class, MemoryProvider.class);
+    static Stream<Class<?>> providerSpis() {
+        return SPI_TO_BASE.keySet().stream();
     }
 
-    @Property
-    void interfaceIsSealedAndPermitsOnlyItsAbstractBase(@ForAll("providerSpi") Class<?> spi) {
+    @ParameterizedTest
+    @MethodSource("providerSpis")
+    void interfaceIsSealedAndPermitsOnlyItsAbstractBase(Class<?> spi) {
         assertTrue(spi.isInterface(), () -> spi.getName() + " must be an interface");
         assertTrue(spi.isSealed(), () -> spi.getName() + " must be sealed");
         Class<?>[] permitted = spi.getPermittedSubclasses();
@@ -56,9 +51,9 @@ class SdkSurfaceTest {
             () -> spi.getName() + " must permit only its Abstract base");
     }
 
-    @Property
-    void abstractBaseIsNonSealedAbstractAndImplementsTheSpi(@ForAll("providerSpi") Class<?> spi)
-            throws NoSuchMethodException {
+    @ParameterizedTest
+    @MethodSource("providerSpis")
+    void abstractBaseIsNonSealedAbstractAndImplementsTheSpi(Class<?> spi) throws NoSuchMethodException {
         Class<?> base = SPI_TO_BASE.get(spi);
         assertTrue(Modifier.isAbstract(base.getModifiers()),
             () -> base.getName() + " must be abstract");
@@ -66,9 +61,6 @@ class SdkSurfaceTest {
             () -> base.getName() + " must be non-sealed (open for third-party extension)");
         assertTrue(spi.isAssignableFrom(base),
             () -> base.getName() + " must implement " + spi.getName());
-        // The base must be genuinely extendable by an external plugin (the documented "only way to
-        // implement the SPI"): public, with a reachable (non-private) no-arg constructor. Without
-        // these, a base could stay abstract+non-sealed yet silently un-extendable from outside.
         assertTrue(Modifier.isPublic(base.getModifiers()),
             () -> base.getName() + " must be public so external plugins can extend it");
         assertFalse(Modifier.isPrivate(base.getDeclaredConstructor().getModifiers()),

@@ -3,7 +3,9 @@ package ai.forvum.core.event;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.time.Instant;
+import java.util.Random;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -11,90 +13,135 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import ai.forvum.core.InvocationStatus;
 import ai.forvum.core.ModelRef;
 
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.Combinators;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /** Jackson round-trip for every {@link AgentEvent} permit (mandatory per ULTRAPLAN section 10). */
 class AgentEventJacksonPropertyTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper().registerModule(new JavaTimeModule());
+    private static final long SEED = 20260603L;
+    private static final int CASES = 50;
 
     private static <T> void assertRoundTrip(T value, Class<T> type) throws Exception {
         assertEquals(value, MAPPER.readValue(MAPPER.writeValueAsString(value), type));
     }
 
-    @Provide
-    Arbitrary<Instant> instants() {
-        // Include a sub-second component so the round-trip exercises nanosecond precision, not just
-        // whole seconds (every AgentEvent carries an Instant timestamp).
-        Arbitrary<Long> seconds = Arbitraries.longs().between(0L, 4_102_444_800L);
-        Arbitrary<Integer> nanos = Arbitraries.integers().between(0, 999_999_999);
-        return Combinators.combine(seconds, nanos).as((s, n) -> Instant.ofEpochSecond(s, n));
+    static Stream<TokenDelta> tokenDeltas() {
+        Random r = new Random(SEED);
+        return Stream.generate(() -> new TokenDelta(instant(r), text(r), modelRef(r))).limit(CASES);
     }
 
-    @Provide
-    Arbitrary<ModelRef> modelRefs() {
-        Arbitrary<String> provider = Arbitraries.strings().withCharRange('a', 'z').ofMinLength(1).ofMaxLength(8);
-        Arbitrary<String> model = Arbitraries.strings()
-            .withCharRange('a', 'z').withCharRange('0', '9').ofMinLength(1).ofMaxLength(8);
-        return Combinators.combine(provider, model).as(ModelRef::new);
+    @ParameterizedTest
+    @MethodSource("tokenDeltas")
+    void tokenDeltaRoundTrips(TokenDelta ev) throws Exception {
+        assertRoundTrip(ev, TokenDelta.class);
     }
 
-    /**
-     * Printable ASCII plus the control characters ({@code \n}, {@code \t}, {@code \r}) that
-     * {@code ErrorEvent.stackTraceText} always carries — so the round-trip exercises JSON escaping of
-     * realistic multi-line values — while staying clear of unpaired-surrogate edge cases.
-     */
-    @Provide
-    Arbitrary<String> texts() {
-        return Arbitraries.strings().withCharRange(' ', '~').withChars('\n', '\t', '\r').ofMaxLength(40);
+    static Stream<ToolInvoked> toolInvokeds() {
+        Random r = new Random(SEED + 1);
+        return Stream.generate(() -> new ToolInvoked(instant(r), r.nextLong(), text(r), text(r))).limit(CASES);
     }
 
-    @Provide
-    Arbitrary<String> nullableTexts() {
-        return texts().injectNull(0.3);
+    @ParameterizedTest
+    @MethodSource("toolInvokeds")
+    void toolInvokedRoundTrips(ToolInvoked ev) throws Exception {
+        assertRoundTrip(ev, ToolInvoked.class);
     }
 
-    @Property
-    void tokenDeltaRoundTrips(@ForAll("instants") Instant ts, @ForAll("texts") String text,
-                              @ForAll("modelRefs") ModelRef model) throws Exception {
-        assertRoundTrip(new TokenDelta(ts, text, model), TokenDelta.class);
+    static Stream<ToolResult> toolResults() {
+        Random r = new Random(SEED + 2);
+        InvocationStatus[] statuses = InvocationStatus.values();
+        return Stream.generate(() -> new ToolResult(
+            instant(r), r.nextLong(), text(r), statuses[r.nextInt(statuses.length)], r.nextLong())).limit(CASES);
     }
 
-    @Property
-    void toolInvokedRoundTrips(@ForAll("instants") Instant ts, @ForAll long invocationId,
-                              @ForAll("texts") String toolName, @ForAll("texts") String arguments) throws Exception {
-        assertRoundTrip(new ToolInvoked(ts, invocationId, toolName, arguments), ToolInvoked.class);
+    @ParameterizedTest
+    @MethodSource("toolResults")
+    void toolResultRoundTrips(ToolResult ev) throws Exception {
+        assertRoundTrip(ev, ToolResult.class);
     }
 
-    @Property
-    void toolResultRoundTrips(@ForAll("instants") Instant ts, @ForAll long invocationId,
-                              @ForAll("texts") String result, @ForAll InvocationStatus status,
-                              @ForAll long latencyMs) throws Exception {
-        assertRoundTrip(new ToolResult(ts, invocationId, result, status, latencyMs), ToolResult.class);
+    static Stream<FallbackTriggered> fallbacks() {
+        Random r = new Random(SEED + 3);
+        return Stream.generate(() -> new FallbackTriggered(instant(r), modelRef(r), modelRef(r), text(r))).limit(CASES);
     }
 
-    @Property
-    void fallbackTriggeredRoundTrips(@ForAll("instants") Instant ts, @ForAll("modelRefs") ModelRef failed,
-                                     @ForAll("modelRefs") ModelRef next, @ForAll("texts") String reason)
-            throws Exception {
-        assertRoundTrip(new FallbackTriggered(ts, failed, next, reason), FallbackTriggered.class);
+    @ParameterizedTest
+    @MethodSource("fallbacks")
+    void fallbackTriggeredRoundTrips(FallbackTriggered ev) throws Exception {
+        assertRoundTrip(ev, FallbackTriggered.class);
     }
 
-    @Property
-    void doneRoundTrips(@ForAll("instants") Instant ts, @ForAll("texts") String finalMessage) throws Exception {
-        assertRoundTrip(new Done(ts, UUID.randomUUID(), finalMessage), Done.class);
+    static Stream<Done> dones() {
+        Random r = new Random(SEED + 4);
+        return Stream.generate(() -> new Done(instant(r), UUID.randomUUID(), text(r))).limit(CASES);
     }
 
-    @Property
-    void errorEventRoundTrips(@ForAll("instants") Instant ts, @ForAll("texts") String code,
-                              @ForAll("texts") String message, @ForAll("nullableTexts") String exceptionClass,
-                              @ForAll("nullableTexts") String stackTraceText) throws Exception {
-        assertRoundTrip(new ErrorEvent(ts, UUID.randomUUID(), code, message, exceptionClass, stackTraceText),
-            ErrorEvent.class);
+    @ParameterizedTest
+    @MethodSource("dones")
+    void doneRoundTrips(Done ev) throws Exception {
+        assertRoundTrip(ev, Done.class);
+    }
+
+    static Stream<ErrorEvent> errors() {
+        Random r = new Random(SEED + 5);
+        return Stream.generate(() -> new ErrorEvent(
+            instant(r), UUID.randomUUID(), text(r), text(r), nullableText(r), nullableText(r))).limit(CASES);
+    }
+
+    @ParameterizedTest
+    @MethodSource("errors")
+    void errorEventRoundTrips(ErrorEvent ev) throws Exception {
+        assertRoundTrip(ev, ErrorEvent.class);
+    }
+
+    // --- seeded generators (mirror the former jqwik @Provide methods) ---
+
+    private static Instant instant(Random r) {           // epoch second in [0, 4_102_444_800] + nanos
+        long seconds = (long) (r.nextDouble() * 4_102_444_800L);
+        int nanos = r.nextInt(1_000_000_000);
+        return Instant.ofEpochSecond(seconds, nanos);
+    }
+
+    private static ModelRef modelRef(Random r) {
+        return new ModelRef(lower(r, 1, 8), alnum(r, 1, 8));
+    }
+
+    private static String text(Random r) {               // printable ASCII + \n \t \r, length 0..40
+        int len = r.nextInt(41);
+        StringBuilder sb = new StringBuilder(len);
+        for (int i = 0; i < len; i++) {
+            int pick = r.nextInt(98);                     // 0..94 -> ' '..'~'; 95/96/97 -> \n \t \r
+            if (pick < 95) {
+                sb.append((char) (' ' + pick));
+            } else {
+                sb.append(pick == 95 ? '\n' : pick == 96 ? '\t' : '\r');
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String nullableText(Random r) {       // ~30% null, like jqwik injectNull(0.3)
+        return r.nextDouble() < 0.3 ? null : text(r);
+    }
+
+    private static String lower(Random r, int min, int max) {
+        int len = min + r.nextInt(max - min + 1);
+        StringBuilder sb = new StringBuilder(len);
+        for (int i = 0; i < len; i++) {
+            sb.append((char) ('a' + r.nextInt(26)));
+        }
+        return sb.toString();
+    }
+
+    private static String alnum(Random r, int min, int max) {
+        int len = min + r.nextInt(max - min + 1);
+        StringBuilder sb = new StringBuilder(len);
+        for (int i = 0; i < len; i++) {
+            int n = r.nextInt(36);
+            sb.append(n < 26 ? (char) ('a' + n) : (char) ('0' + n - 26));
+        }
+        return sb.toString();
     }
 }
