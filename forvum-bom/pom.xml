@@ -16,6 +16,15 @@
     <name>Forvum BOM</name>
     <description>Bill of Materials: locks Quarkus platform, Quarkiverse langchain4j extensions, Langchain4j, LangGraph4j, and Forvum module versions for internal and external consumers.</description>
 
+    <properties>
+        <!-- Single bump point for extension/library versions (CLAUDE.md section 2, ULTRAPLAN section 3.9). -->
+        <!-- quarkus-langchain4j 1.11.0.CR1 is a PRE-RELEASE; the stable fallback is 1.10.0. -->
+        <quarkus-langchain4j.version>1.11.0.CR1</quarkus-langchain4j.version>
+        <langgraph4j.version>1.8.17</langgraph4j.version>
+        <tamboui.version>0.3.0</tamboui.version>
+        <sqlite-jdbc.version>3.53.1.0</sqlite-jdbc.version>
+    </properties>
+
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -24,6 +33,36 @@
                 <version>${quarkus.platform.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <!-- Quarkiverse LangChain4j BOM (brings LangChain4j core transitively; do not pin core independently). -->
+            <dependency>
+                <groupId>io.quarkiverse.langchain4j</groupId>
+                <artifactId>quarkus-langchain4j-bom</artifactId>
+                <version>${quarkus-langchain4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- TamboUI BOM: Toolkit + JLine 3 backend for the native TUI channel. -->
+            <dependency>
+                <groupId>dev.tamboui</groupId>
+                <artifactId>tamboui-bom</artifactId>
+                <version>${tamboui.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- LangGraph4j (orchestration); not a Quarkus extension, pinned directly. -->
+            <dependency>
+                <groupId>org.bsc.langgraph4j</groupId>
+                <artifactId>langgraph4j-core</artifactId>
+                <version>${langgraph4j.version}</version>
+            </dependency>
+            <!-- Embedded SQLite JDBC (ships its own native-image JNI configuration). -->
+            <dependency>
+                <groupId>org.xerial</groupId>
+                <artifactId>sqlite-jdbc</artifactId>
+                <version>${sqlite-jdbc.version}</version>
             </dependency>
 
             <dependency>

@@ -1,0 +1,64 @@
+name: CI
+
+# Native is the primary, mandatory build target (CLAUDE.md section 5, ULTRAPLAN section 6).
+# Every push/PR builds JVM + native on linux-amd64 (ubuntu-latest) and macos-arm64 (macos-14).
+# The 200 ms cold-start gate is M20; at M1 the native leg only proves the reactor native-compiles
+# to a runner binary that runs and exits 0 (via the @QuarkusMainIntegrationTest smoke).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  jvm:
+    name: JVM (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]   # linux-amd64 + macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build + test reactor (JVM)
+        run: ./mvnw -B verify
+      - name: Smoke-test fast-jar (must start and exit 0)
+        run: |
+          test -f forvum-app/target/quarkus-app/quarkus-run.jar
+          java -jar forvum-app/target/quarkus-app/quarkus-run.jar
+
+  native:
+    name: Native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]   # linux-amd64 + macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: mandrel          # Mandrel 25.0.x-Final (CLAUDE.md section 2 / M1)
+          java-version: '25'
+          version: mandrel-25.0.3.0-Final
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      - name: Build native binary + run native smoke (Failsafe @QuarkusMainIntegrationTest)
+        run: ./mvnw -B -Pnative verify
+      - name: Assert runner binary exists and runs
+        run: |
+          BIN=$(ls forvum-app/target/forvum-app-*-runner)
+          test -x "$BIN"
+          "$BIN"
