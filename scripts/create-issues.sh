@@ -398,21 +398,21 @@ create_issue "M14: add filesystem read/write/list tools with FS permission scope
 **Suggested commit.** `feat(tools-fs): add filesystem read/write/list tools with FS permission scope`
 BODY
 
-create_issue "M15: add JLine-based TUI channel with streaming rendering" "phase-1,channel,native,plugin-tooling" "v0.1 MVP" <<'BODY'
-**Context.** The terminal REPL (§3.5, §7.1 M15): the channel where native cold-start matters most. Tied to Risk #6 (JLine 3 on Windows under GraalVM).
+create_issue "M15: add TamboUI-based TUI channel with streaming rendering" "phase-1,channel,native,plugin-tooling" "v0.1 MVP" <<'BODY'
+**Context.** The terminal REPL (§3.5, §7.1 M15): the channel where native cold-start matters most. Built with the TamboUI Toolkit (declarative widgets + TCSS) on the tamboui-jline3-backend. Tied to Risk #6 (TamboUI/JLine on Windows under GraalVM) and Risk #14 (TamboUI pre-1.0 maturity).
 
-**Scope / Deliverables.** forvum-channel-tui: JLine 3 interactive REPL, streaming token rendering, `--no-ansi` fallback (first-class from M15), JLine GraalVM reflect-config bundle; manifest.
+**Scope / Deliverables.** forvum-channel-tui: a TamboUI Toolkit view with streaming token rendering, a TCSS theme, `--no-ansi` fallback (first-class from M15), and the TamboUI + JLine-backend GraalVM reachability metadata; manifest. Evaluate the tamboui-panama-backend (Java FFM, no external dep, best startup) as the native-first alternative.
 
-**Files.** `forvum-channel-tui/.../TuiChannel.java`, `TuiStreamingRenderer.java`, the `--no-ansi` path, `META-INF/native-image/.../reflect-config.json`, manifest.
+**Files.** `forvum-channel-tui/.../TuiChannel.java`, `TuiView.java` (TamboUI component tree), `src/main/resources/tui.tcss`, the `--no-ansi` path, `META-INF/native-image/.../reachability-metadata.json`, manifest.
 
 **Acceptance Criteria.**
-- Integration test pipes scripted stdin through the binary and asserts the rendered output contains the assistant reply; `-Dforvum.no-ansi=true < input.txt` is identical.
-- [NATIVE] §10 lists M15 must-run-native; native cold-start is the headline metric here. Windows CI runs the TUI smoke in ANSI and no-ANSI; no-ANSI default on Windows if red (Risk #6).
-- [PLUGIN] quarkus/skills for any Quarkus extension used; context7 for JLine native-image hints.
+- Integration test pipes scripted stdin through the binary and asserts the rendered TamboUI output contains the assistant reply; `-Dforvum.no-ansi=true < input.txt` is identical.
+- [NATIVE] §10 lists M15 must-run-native; native cold-start is the headline metric (TamboUI is GraalVM-native-first, sub-100 ms). Windows CI runs the TUI smoke in ANSI and no-ANSI; no-ANSI default on Windows if red (Risk #6).
+- [PLUGIN] TamboUI is NOT a Quarkus extension -> use context7 for the TamboUI Toolkit / TCSS / backend API and for JLine native-image hints; quarkus/skills for any Quarkus extension used.
 
 **Dependencies.** M3, M7, M8.
 
-**Suggested commit.** `feat(channel-tui): add JLine-based TUI channel with streaming rendering`
+**Suggested commit.** `feat(channel-tui): add TamboUI-based TUI channel with streaming rendering`
 BODY
 
 create_issue "M16: add WebSockets Next chat channel with minimal UI" "phase-1,channel,native,plugin-tooling" "v0.1 MVP" <<'BODY'

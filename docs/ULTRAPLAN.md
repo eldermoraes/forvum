@@ -6,7 +6,7 @@
 
 **Architecture:** Maven multi-module, CDI-first with a custom `@AgentScoped` context for in-process sub-agent isolation. The core stays extension-agnostic; every channel, provider, and tool is a module that implements a sealed-interface SDK contract. Hybrid persistence — human-editable markdown and JSON files under `~/.forvum/` for intent, embedded SQLite for operational state, memory, and metrics. GraalVM native is the primary, mandatory build target — every milestone is native-buildable and native parity is enforced in CI on every PR; the JVM fast-jar is the development target and the only path that loads runtime drop-in plugins.
 
-**Tech Stack:** Java 25 · Maven · Quarkus 3.33.x LTS · Quarkiverse `quarkus-langchain4j-*` 1.11.0.CR1 · LangChain4j 1.15.1 (transitive via quarkus-langchain4j 1.11.0.CR1) · LangGraph4j 1.8.17 · Xerial SQLite JDBC · Hibernate ORM + Panache + Flyway · JLine 3 · Quarkus WebSockets Next · Quarkus Scheduler · OpenTelemetry · GraalVM for JDK 25 (Community Edition 25+); native builds use Mandrel 25.0.x-Final as the Quarkus-preferred `native-image` distribution · JaCoCo · GitHub Actions.
+**Tech Stack:** Java 25 · Maven · Quarkus 3.33.x LTS · Quarkiverse `quarkus-langchain4j-*` 1.11.0.CR1 · LangChain4j 1.15.1 (transitive via quarkus-langchain4j 1.11.0.CR1) · LangGraph4j 1.8.17 · Xerial SQLite JDBC · Hibernate ORM + Panache + Flyway · TamboUI 0.3.0 (Toolkit on the JLine 3 backend) · Quarkus WebSockets Next · Quarkus Scheduler · OpenTelemetry · GraalVM for JDK 25 (Community Edition 25+); native builds use Mandrel 25.0.x-Final as the Quarkus-preferred `native-image` distribution · JaCoCo · GitHub Actions.
 
 **Implementation-language policy:** Forvum is open-source, so every artifact inside the repository (code, identifiers, JavaDoc, comments, commit messages, PR descriptions, documentation, config file keys, log messages, error strings, file and directory names) is in English. That is a non-negotiable collaboration requirement, not a stylistic preference.
 
@@ -65,7 +65,7 @@ The project is a Maven multi-module reactor under `groupId = ai.forvum`, organiz
 ### 2.1 Layer 0 — Foundation (no Quarkus)
 
 - **`forvum-parent`** — the root reactor `pom`. Declares `<packaging>pom</packaging>`, the Java 25 compiler arguments, the binding of `quarkus-maven-plugin` and `jacoco-maven-plugin`, and imports `forvum-bom`.
-- **`forvum-bom`** — a `<dependencyManagement>`-only module that is the single version bump point. It imports `quarkus-bom` (Quarkus 3.33.x LTS) and `io.quarkiverse.langchain4j:quarkus-langchain4j-bom:1.11.0.CR1` (a pre-release / Candidate Release, which transitively governs LangChain4j core 1.15.1; stable fallback `:1.10.0` governs 1.14.1), and pins `org.bsc.langgraph4j:langgraph4j-core:1.8.17` and `org.xerial:sqlite-jdbc` (≥ 3.40.1.0, the first native-image-capable release). Quarkus-managed dependencies (Flyway via `quarkus-flyway`, OpenTelemetry via `quarkus-opentelemetry`) are governed by the Quarkus BOM and are not pinned independently; JLine 3 and the test libraries are pinned here. LangChain4j core is never pinned independently of the `quarkus-langchain4j-bom`. Every downstream module imports this BOM, so there is exactly one place to bump a version. See the §3.9 version table.
+- **`forvum-bom`** — a `<dependencyManagement>`-only module that is the single version bump point. It imports `quarkus-bom` (Quarkus 3.33.x LTS) and `io.quarkiverse.langchain4j:quarkus-langchain4j-bom:1.11.0.CR1` (a pre-release / Candidate Release, which transitively governs LangChain4j core 1.15.1; stable fallback `:1.10.0` governs 1.14.1), and pins `org.bsc.langgraph4j:langgraph4j-core:1.8.17` and `org.xerial:sqlite-jdbc` (≥ 3.40.1.0, the first native-image-capable release). Quarkus-managed dependencies (Flyway via `quarkus-flyway`, OpenTelemetry via `quarkus-opentelemetry`) are governed by the Quarkus BOM and are not pinned independently; the TUI stack is governed by `dev.tamboui:tamboui-bom:0.3.0` (which manages `tamboui-toolkit` and the `tamboui-jline3-backend`, and transitively the JLine 3 version), and the test libraries are pinned here. LangChain4j core is never pinned independently of the `quarkus-langchain4j-bom`. Every downstream module imports this BOM, so there is exactly one place to bump a version. See the §3.9 version table.
 - **`forvum-core`** — pure Java domain. Records and sealed interfaces for `AgentId`, `Identity`, `Persona`, `ChannelMessage`, `ToolSpec`, `ModelRef`, `AgentEvent`, `FallbackChain`, `CostBudget`, and `MemoryPolicy`. No Quarkus dependency at all, so tests and prototypes outside the container can depend on these types directly.
 
 ### 2.2 Layer 1 — Public SDK (the only extension contract)
@@ -82,7 +82,7 @@ All first-party extensions depend only on `forvum-sdk`. They are separate Maven 
 
 **Channels**
 
-- **`forvum-channel-tui`** — JLine 3 interactive REPL; streams tokens to stdout; fallback `--no-ansi` plain-stdin mode; GraalVM reflection hints bundled.
+- **`forvum-channel-tui`** — interactive REPL built with the **TamboUI Toolkit** (declarative widgets + TCSS styling) on the `tamboui-jline3-backend`; streams tokens into a TamboUI view; fallback `--no-ansi` plain-stdin mode; GraalVM reflection/reachability hints (TamboUI + the JLine backend) bundled. The dependency-light `tamboui-panama-backend` (Java FFM, no external library) is the native-first alternative evaluated at M15.
 - **`forvum-channel-web`** — Quarkus WebSockets Next server; a minimal static HTML/JS bundle served from classpath resources; streaming via server-pushed WS frames.
 - **`forvum-channel-telegram`** — long-poll bot (webhook available as an opt-in alternative); uses `quarkus-rest-client-reactive`.
 
@@ -157,7 +157,7 @@ Quarkus 3.33.x LTS. Provides build-time CDI (Arc), native OpenTelemetry integrat
 
 ### 3.5 Channels
 
-- **TUI.** JLine 3 with its bundled GraalVM reflection hints; the M15 native smoke path is mandatory (§10). A `--no-ansi` degraded mode ships from the MVP to cover environments where terminal-capability detection fails on first boot (a known JLine quirk).
+- **TUI.** The **TamboUI Toolkit** (declarative terminal UI + TCSS styling, in the spirit of Rust's `ratatui` / Python's `textual`) on the `tamboui-jline3-backend`, with its bundled GraalVM reachability hints; the M15 native smoke path is mandatory (§10). TamboUI is GraalVM-native-first (sub-100 ms startup), comfortably inside the §6.2 cold-start budget. A `--no-ansi` degraded mode ships from the MVP to cover environments where terminal-capability detection fails on first boot (a known JLine quirk). The `tamboui-panama-backend` (Java FFM — a final API on Java 25, so the native build stays `--enable-preview`-free — with no external dependency and the best startup) is the alternative backend evaluated at M15.
 - **Web.** Quarkus WebSockets Next for bidirectional streaming. The initial UI is a minimal hand-written HTML/JS page shipped as classpath static resources. A natural evolution path is Qute templates plus HTMX fragments for richer server-driven UI without adopting a full SPA toolchain.
 - **Telegram.** Long-poll mode via `quarkus-rest-client-reactive` calling the Telegram Bot API. Webhook mode is an opt-in variant for deployments behind a public URL.
 
@@ -211,7 +211,7 @@ Forvum is built with the `quarkus-agentic@eldermoraes` plugin as the canonical t
 | GraalVM / Mandrel | GraalVM CE 25+ / Mandrel 25.0.x-Final | CI toolchain (exact patch pinned in CI) |
 | JDK | Java 25 (LTS) | toolchain |
 | Xerial SQLite JDBC | `org.xerial:sqlite-jdbc` ≥ 3.40.1.0 | pinned directly |
-| JLine | 3.x | pinned directly |
+| TamboUI (TUI) | `tamboui-bom:0.3.0` → `tamboui-toolkit` + `tamboui-jline3-backend` | imported BOM (transitively manages JLine 3) |
 | Flyway | via `quarkus-flyway` | Quarkus BOM — not pinned independently |
 | OpenTelemetry | via `quarkus-opentelemetry` | Quarkus BOM — not pinned independently |
 | Maven | 3.9+ (committed wrapper) | build wrapper |
@@ -1287,11 +1287,11 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Verify:** integration test against a `@TempDir`; read/write/list round-trip asserted; a write outside the configured workspace root is denied.
   - **Commit:** `feat(tools-fs): add filesystem read/write/list tools with FS permission scope`.
 
-- [ ] **M15 — TUI channel (JLine 3).**
-  - **Files:** `forvum-channel-tui/src/main/java/ai/forvum/channel/tui/TuiChannel.java`, `TuiStreamingRenderer.java`, a `--no-ansi` fallback path, `META-INF/native-image/.../reflect-config.json` from the JLine 3 GraalVM bundle; manifest.
-  - **Deps:** `org.jline:jline` 3.x (pinned in `forvum-bom`).
-  - **Verify:** an integration test pipes scripted input through the binary's stdin and asserts the rendered output contains the assistant's reply; `forvum-app -Dforvum.no-ansi=true < input.txt` works identically.
-  - **Commit:** `feat(channel-tui): add JLine-based TUI channel with streaming rendering`.
+- [ ] **M15 — TUI channel (TamboUI on the JLine 3 backend).**
+  - **Files:** `forvum-channel-tui/src/main/java/ai/forvum/channel/tui/TuiChannel.java`, `TuiView.java` (TamboUI Toolkit component tree), `forvum-channel-tui/src/main/resources/tui.tcss` (TamboUI TCSS theme), a `--no-ansi` fallback path, `META-INF/native-image/.../reachability-metadata.json` (TamboUI + JLine-backend GraalVM hints); manifest.
+  - **Deps:** `dev.tamboui:tamboui-toolkit` + `dev.tamboui:tamboui-jline3-backend` (managed by `tamboui-bom:0.3.0` in `forvum-bom`). The `tamboui-panama-backend` (Java FFM) is evaluated as the dependency-light native-first alternative.
+  - **Verify:** an integration test pipes scripted input through the binary's stdin and asserts the rendered TamboUI output contains the assistant's reply; `forvum-app -Dforvum.no-ansi=true < input.txt` works identically; the native smoke renders a TamboUI frame within the §6.2 cold-start budget.
+  - **Commit:** `feat(channel-tui): add TamboUI-based TUI channel with streaming rendering`.
 
 - [ ] **M16 — Web channel (WebSockets Next).**
   - **Files:** `forvum-channel-web/src/main/java/ai/forvum/channel/web/WebChannel.java`, `ChatSocket.java` (WebSocket endpoint), `src/main/resources/META-INF/resources/index.html` (minimal chat UI), `chat.js`; manifest.
@@ -1397,8 +1397,8 @@ Each item below is either a technical risk to validate early or a decision defer
    - **Mitigation:** A per-provider native smoke test against a canned scripted turn is **mandatory** in CI for every provider milestone (M9–M12), not selective. For Vertex/Gemini, the preferred remedy if the gRPC stack blocks native is switching to the REST `quarkus-langchain4j-ai-gemini` (Google GenAI) extension rather than carving the provider out to JVM-only.
    - **Decision trigger:** provider native smoke red for two weeks → first attempt the REST-extension remedy where one exists (Vertex → `ai-gemini`); only if no native path exists, file an upstream issue and mark the provider JVM-only in release notes with that issue linked.
 
-6. **JLine 3 on Windows under GraalVM.**
-   - **Context:** JLine 3 has edge cases on Windows consoles (especially legacy cmd.exe) that differ from macOS/Linux.
+6. **TamboUI / JLine 3 on Windows under GraalVM.**
+   - **Context:** The TUI runs on the TamboUI `jline3-backend`, and JLine 3 has edge cases on Windows consoles (especially legacy cmd.exe) that differ from macOS/Linux. (The `tamboui-panama-backend` is an alternative if the JLine backend proves problematic on Windows.)
    - **Mitigation:** The `--no-ansi` fallback is a first-class mode from M15, not a retrofit. Windows CI job runs the TUI smoke test in both ANSI and no-ANSI modes.
    - **Decision trigger:** Windows CI red → document no-ANSI as the default on Windows in v0.1, investigate fully in v0.5.
 
@@ -1436,6 +1436,11 @@ Each item below is either a technical risk to validate early or a decision defer
     - **Context:** LangGraph4j is a plain library, not a Quarkus extension, so it ships no build-time native hints. The `StateGraph`, its node `BiFunction`s, and the Jackson-serialized graph state use reflection and the lambda metafactory, which native-image cannot infer automatically.
     - **Mitigation:** Hand-authored reachability metadata lives under `forvum-engine/src/main/resources/META-INF/native-image/`; every graph-state type (§5.5) is a record annotated `@RegisterForReflection`. Coupling stays concentrated in `engine/graph/` (Risk #4) so the metadata is module-local and tracks any version bump.
     - **Decision trigger:** the native graph smoke (the supervisor turn at M18) is green on both `linux-amd64` and `macos-arm64`. If red, the missing metadata is added before LangGraph4j is on the default native path; it does not regress the native-mandatory gate.
+
+14. **TamboUI maturity (pre-1.0).**
+    - **Context:** TamboUI is a young library (0.3.0, announced 2026-02) on a pre-1.0 line; API drift between 0.x releases is possible, and the TUI is the channel where native cold-start is felt most.
+    - **Mitigation:** Pin the exact version via `tamboui-bom` in `forvum-bom` (§2.1) and concentrate all TamboUI coupling in `forvum-channel-tui`. TamboUI runs on the `jline3-backend`, so the escape hatch is a raw JLine 3 REPL in the same module (a module-local change); the `tamboui-panama-backend` is the alternative if the JLine backend is the problem.
+    - **Decision trigger:** if TamboUI breaks API twice within a v0.1 → v0.5 cycle, or its native build regresses, fall back to a raw JLine 3 renderer in `forvum-channel-tui` (TamboUI is confined to that module by design).
 
 ---
 
