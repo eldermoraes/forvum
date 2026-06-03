@@ -266,8 +266,8 @@ until DR-4c/DR-5 land (they carry the predating `*TBD*` markers — do not inven
   produces no runnable artifact and hosts no `@QuarkusTest`/`@QuarkusIntegrationTest`, so there is no
   per-module native image at M2. Its types are records/sealed/enum (reflection-free) — native-compatible
   by construction — and their native execution is exercised by the M20 app native smoke (and by M5/M6 once
-  a Quarkus module first serializes them). M2's gate is JVM unit + jqwik property tests.
-- jqwik property tests for `ModelRef.parse`, `AgentEvent` Jackson roundtrip, `CostBudget` invariants,
+  a Quarkus module first serializes them). M2's gate is JVM unit + JUnit 5 property-style tests.
+- JUnit 5 property-style tests for `ModelRef.parse`, `AgentEvent` Jackson roundtrip, `CostBudget` invariants,
   `PermissionScope.fromName` (X3).
 - **[PLUGIN]** `context7` for Jackson/record-serialization API; no Quarkus extension here (JVM-domain
   module; `quarkus/skills` N/A).
@@ -1236,8 +1236,8 @@ renders VT/PT + pin data. **Dependencies.** M5, M6 (the pinning posture finalize
 ## X3 — Test pyramid, coverage/mutation/property gates (§10)
 **Labels:** `ci-infra`, `native` · **Milestone:** `CI/Test Infra`
 **Context.** §10 Testing Discipline. **Scope.** TDD process; test pyramid (`*Test` Surefire / `*IT`
-Failsafe / e2e); JaCoCo 80% line + 75% branch gate; Pitest mutation ramp (core first, 50%→70%); jqwik
-property tests for `ModelRef.parse`, `AgentEvent` Jackson roundtrip, `CostBudget` invariants,
+Failsafe / e2e); JaCoCo 80% line + 75% branch gate; Pitest mutation ramp (core first, 50%→70%); JUnit 5 property-style tests
+for `ModelRef.parse`, `AgentEvent` Jackson roundtrip, `CostBudget` invariants,
 `PermissionScope.fromName`; flaky `@Tag("live")` quarantine + nightly; `FakeProvider` + `*Fixtures`.
 **Acceptance.** **The single most important §10 edit: amend "Native-mode parity — selective" to
 "MANDATORY"** (done in the spec by the §10 author; operationalized at M20). Coverage/mutation gates fail

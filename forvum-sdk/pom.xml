@@ -17,18 +17,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Pin the JUnit 5 platform line for this Quarkus-free module: forvum-bom pulls the
-                 Quarkus platform BOM which manages JUnit to the 6.x line, but jqwik 1.10.1 targets
-                 junit-platform 1.14.x (JUnit 5). forvum-sdk never boots Quarkus, so JUnit 5 is
-                 correct here. This import MUST precede forvum-bom so the JUnit 5 versions win for
-                 forvum-sdk only (same rule as forvum-core; CLAUDE.md section 11 — it recurs at M3). -->
-            <dependency>
-                <groupId>org.junit</groupId>
-                <artifactId>junit-bom</artifactId>
-                <version>5.14.4</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
             <dependency>
                 <groupId>ai.forvum</groupId>
                 <artifactId>forvum-bom</artifactId>
@@ -40,18 +28,13 @@
     </dependencyManagement>
 
     <!-- Layer 1 SPI: the only production dependency is forvum-core (the contracts the sealed
-         interfaces build on; version managed by forvum-bom). Test scope adds jqwik + JUnit 5. No
+         interfaces build on; version managed by forvum-bom). Test scope adds junit-jupiter. No
          quarkus-core in any scope — @RegisterForReflection is re-declared in this module, not
          imported from Quarkus. The enforce-sdk-layering rule (below) validates the ai.forvum edge. -->
     <dependencies>
         <dependency>
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.jqwik</groupId>
-            <artifactId>jqwik</artifactId>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
