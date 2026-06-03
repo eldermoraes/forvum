@@ -86,7 +86,7 @@ turn a leg red to be caught.
 ### 3.4 Test quality (beyond coverage)
 - Look for: the Verify-script test landed first (Red → Green); tests assert behavior and error
   messages, not implementation detail.
-- Look for: property-based tests (jqwik) for parsers/records (`ModelRef.parse` roundtrip, event Jackson
+- Look for: property-style tests (JUnit 5, @ParameterizedTest) for parsers/records (`ModelRef.parse` roundtrip, event Jackson
   roundtrip, budget/scope invariants) — mandatory once those types exist.
 - Look for: native parity — anything risky on native has an `*IT` that runs under `-Pnative`.
 - Red flag: happy-path-only tests; canonical-constructor validation with no failing test for the

@@ -289,13 +289,12 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **Coverage gates:** JaCoCo 80% line (parent) + 75% branch. Pitest mutation testing starts in
   `forvum-core` (50% killed greenfield → 70% Phase 2); mutation thresholds are signals until a baseline
   exists, coverage gates are gates.
-- **Property-based tests (jqwik) MANDATORY for parsers/records:** `ModelRef.parse` roundtrip,
+- **Property-style tests (JUnit 5) MANDATORY for parsers/records:** `ModelRef.parse` roundtrip,
   `AgentEvent` Jackson roundtrip, `CostBudget` invariants, `PermissionScope.fromName` failure modes.
-  jqwik is managed in `forvum-bom` (the `net.jqwik:jqwik` aggregator — there is no `jqwik-bom`). A
-  Quarkus-free module that uses jqwik must import `org.junit:junit-bom:5.x` **before** `forvum-bom` in
-  its `dependencyManagement`: jqwik targets the JUnit 5 platform, but `quarkus-bom` pins JUnit 6, and
-  mixing the two platform lines breaks test discovery (done in `forvum-core` at M2; recurs in
-  `forvum-sdk` at M3).
+  Expressed with `@ParameterizedTest` + `@EnumSource`/`@MethodSource` over curated edge cases plus
+  seeded-random inputs (a fixed `Random` seed keeps failures reproducible) — **no third-party
+  property library**. Quarkus-free modules (`forvum-core`, `forvum-sdk`) use the JUnit line from
+  `quarkus-bom`; no `junit-bom` override is needed.
 - **Native-mode parity — MANDATORY** (§5). Parser/record (M2), provider HTTP (M9–M12), TUI (M15), web
   (M16), Telegram (M17), and the M20 cold-start gate run native.
 - **Per-turn performance gates** (excluding inference, via `FakeProvider`): TUI ≤200 ms, Web ≤300 ms,
