@@ -98,6 +98,34 @@ Milestones used: `v0.1 MVP`, `v0.5 Parity`, `v1.0+`, `Design & Contracts`, `CI/T
 
 ---
 
+## GitHub issue-number map (one issue per step — never open ad-hoc)
+
+Every roadmap step already exists as a GitHub issue (created by `scripts/create-issues.sh`). At each
+step, **close its issue — do not open a new one.** Phase-1 rule: `Mn → #(n+5)`; the milestone PR
+carries `Closes #(n+5)`. (Numbers reflect the current tracker; re-running the script renumbers, so
+re-sync via `gh issue list --state all`. `✓` = closed.)
+
+| Milestone | Issue | Milestone | Issue | Milestone | Issue | Milestone | Issue |
+|---|---|---|---|---|---|---|---|
+| M1 | #6 ✓ | M6 | #11 | M11 | #16 | M16 | #21 |
+| M2 | #7 ✓ | M7 | #12 | M12 | #17 | M17 | #22 |
+| M3 | #8 | M8 | #13 | M13 | #18 | M18 | #23 |
+| M4 | #9 | M9 | #14 | M14 | #19 | M19 | #24 |
+| M5 | #10 | M10 | #15 | M15 | #20 | M20 | #25 |
+
+**Non-milestone items** (closed on their own track, **not** by an `Mn`):
+
+- **Epic parents:** EPIC-1 #1 · EPIC-2 #2 · EPIC-3 #3 · EPIC-DR #4 · EPIC-X #5.
+- **Cross-cutting (EPIC-X):** X1 #67 · X2 #68 · X3 #69 · X4 #70 · X5 #71 · X6 #72 · X7 #73 · X8 #74.
+- **Design & contracts (EPIC-DR):** DR-6a #59 · DR-6b #60 · DR-6c #61 · DR-4c #62 · DR-5 #63 ·
+  DR-8 #64 · TEST-SEC #65 · BR-CLEANUP #66.
+- **Phase 2 (EPIC-2):** P2-1…P2-15 #26–#40 · P2-CH #41 · P2-COPILOT #42 · P2-QA #43 ·
+  P2-PAIR-SCOPE #44 · P2-COMPACT #45 · P2-TASKLEDGER #46 · P2-CRON-DELIVERY #47 · P2-OUTPUTGUARD #48.
+- **Phase 3 (EPIC-3):** P3-1…P3-10 #49–#58.
+- **Loose:** quarkus-langchain4j GA bump #75 · TamboUI backend spike #76.
+
+---
+
 # EPIC PARENTS
 
 ## EPIC-1 — Phase 1 MVP (v0.1)
