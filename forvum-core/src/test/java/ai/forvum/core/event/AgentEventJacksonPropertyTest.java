@@ -96,7 +96,7 @@ class AgentEventJacksonPropertyTest {
         assertRoundTrip(ev, ErrorEvent.class);
     }
 
-    // --- seeded generators (mirror the former jqwik @Provide methods) ---
+    // --- seeded generators (reproduce the original property-test value spaces) ---
 
     private static Instant instant(Random r) {           // epoch second in [0, 4_102_444_800] + nanos
         long seconds = (long) (r.nextDouble() * 4_102_444_800L);
@@ -122,7 +122,7 @@ class AgentEventJacksonPropertyTest {
         return sb.toString();
     }
 
-    private static String nullableText(Random r) {       // ~30% null, like jqwik injectNull(0.3)
+    private static String nullableText(Random r) {       // ~30% null (nullable ErrorEvent fields)
         return r.nextDouble() < 0.3 ? null : text(r);
     }
 
