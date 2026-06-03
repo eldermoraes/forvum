@@ -153,9 +153,13 @@ contribution as if native is the only target; CI enforces it.
   LangGraph4j orchestration — the committed design, not a fallback. Re-evaluate only after the JEP
   finalizes (post-JDK 26).
 - **No runtime reflection** outside framework-managed paths: every JSON-serialized type is a record
-  (reflection-free canonical constructor); every DTO carries `@RegisterForReflection` (a Maven
-  enforcer, landing at M2, fails the build if one is missing); tool-spec lookup goes through a build-time registry,
-  not classpath scanning.
+  (reflection-free canonical constructor); every DTO in a Quarkus-bearing module (Layer 2+) carries
+  `@RegisterForReflection` (a Maven enforcer, planned from M3+ once the SDK re-exports the annotation,
+  fails the build if one is missing). **`forvum-core` (Layer 0) is exempt** — it bans `io.quarkus*` and
+  cannot depend upward on `forvum-sdk`, so its records cannot carry the annotation; Layer-0 types are
+  registered for native from `forvum-engine` via a `@RegisterForReflection(targets = { … })` holder
+  (§6.3 of `docs/ULTRAPLAN.md`). Tool-spec lookup goes through a build-time registry, not classpath
+  scanning.
 - **Build-time plugin discovery:** `@ForvumExtension` + `META-INF/forvum/plugin.json` scanned by a
   Quarkus `BuildStep` that records providers and emits reflection hints. `ServiceLoader` is a
   fast-jar-only fallback, not exercised in native. The `~/.forvum/plugins/` drop-in path is
@@ -309,7 +313,10 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - Do **not** import core internals from a plugin — plugins compile only against `forvum-sdk`.
 - Do **not** introduce runtime reflection, dynamic class loading (outside the JVM-only drop-in path),
   `sun.misc.Unsafe`, CGLib, or runtime Javassist — they break the native binary and are CI-banned.
-- Do **not** ship a DTO record without `@RegisterForReflection` (the enforcer, from M2, fails the build).
+- Do **not** ship a DTO record in a Quarkus-bearing module (Layer 2+) without `@RegisterForReflection`
+  (the enforcer, from M3+, fails the build). Conversely, do **not** add the annotation to a `forvum-core`
+  (Layer 0) record — core bans `io.quarkus*`; its native reflection is registered from `forvum-engine`
+  (§6.3 of `docs/ULTRAPLAN.md`).
 - Do **not** use `--enable-preview` on the native path or adopt `StructuredTaskScope` in v0.1.
 - Do **not** create/run a Quarkus project or add an extension by hand, or answer a Quarkus question from
   model memory — go through the Quarkus Agent Dev MCP (and `context7` for library docs).

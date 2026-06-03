@@ -48,7 +48,7 @@ These are machine-checked. If any is red, stop: the PR is not reviewable yet.
 | Native compile + native smoke, both platforms | `.github/workflows/ci.yml` (`native`) | active |
 | Module layering (core pure-Java; engine extension-agnostic) | `maven-enforcer-plugin` `bannedDependencies` | **active (M1)** |
 | Maven ≥ 3.9, Java ≥ 25 | `maven-enforcer-plugin` `requireMavenVersion`/`requireJavaVersion` | active |
-| `@RegisterForReflection` on every DTO/record | custom enforcer rule | planned: **M2** |
+| `@RegisterForReflection` on every DTO/record in Quarkus modules (Layer 2+); `forvum-core` (Layer 0) exempt | custom enforcer rule | planned: **M3+** |
 | 80% line / 75% branch coverage | JaCoCo gates | planned: **M2** |
 | No thread pinning · no `synchronized` in engine/channel hot paths · no reactive-where-VT-suffices | CI grep + allowlist | planned: **M5/M6** |
 | 200 ms cold-start | native smoke latency assertion | planned: **M20** |
@@ -116,7 +116,9 @@ the dependency would break the build. The boundary is a **source-level** concern
 now and by an import grep with an allowlist when the concurrency greps land (M5/M6).
 
 ### 3.6 Native-first correctness
-- Look for: every JSON/DTO type is a record carrying `@RegisterForReflection`.
+- Look for: every JSON/DTO type is a record carrying `@RegisterForReflection` — in Quarkus-bearing
+  modules (Layer 2+). `forvum-core` (Layer 0) records are exempt and must NOT carry it (core bans
+  `io.quarkus*`); they are registered for native from `forvum-engine` via a `@RegisterForReflection(targets={…})` holder.
 - Look for: `ScopedValue` (not `ThreadLocal`); fan-out via `newVirtualThreadPerTaskExecutor()`, not
   `StructuredTaskScope` (still preview in JDK 25).
 - Red flag: `--enable-preview` on the native path; `sun.misc.Unsafe`, CGLib, runtime Javassist, ad-hoc

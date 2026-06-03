@@ -234,7 +234,11 @@ until DR-4c/DR-5 land (they carry the predating `*TBD*` markers — do not inven
   `default` branch.
 - `mvn dependency:analyze` confirms zero Quarkus dependency in `forvum-core`.
 - **[NATIVE]** §10 marks M2 (parser/record milestone) a must-run-native milestone; native parity is
-  non-negotiable. The 6 `AgentEvent` permits must match the §4.3.2 list verbatim.
+  non-negotiable. The 6 `AgentEvent` permits must match the §4.3.2 list verbatim. Note: `forvum-core`
+  produces no runnable artifact and hosts no `@QuarkusTest`/`@QuarkusIntegrationTest`, so there is no
+  per-module native image at M2. Its types are records/sealed/enum (reflection-free) — native-compatible
+  by construction — and their native execution is exercised by the M20 app native smoke (and by M5/M6 once
+  a Quarkus module first serializes them). M2's gate is JVM unit + jqwik property tests.
 - jqwik property tests for `ModelRef.parse`, `AgentEvent` Jackson roundtrip, `CostBudget` invariants,
   `PermissionScope.fromName` (X3).
 - **[PLUGIN]** `context7` for Jackson/record-serialization API; no Quarkus extension here (JVM-domain

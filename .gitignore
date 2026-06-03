@@ -1,6 +1,9 @@
 # Maven
 target/
 
+# jqwik (failed-sample database; regenerated per run)
+.jqwik-database
+
 # Quarkus
 .quarkus/
 *-runner
