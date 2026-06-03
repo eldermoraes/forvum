@@ -29,7 +29,7 @@ The result is not an orchestrator that commands silently from the center. It is 
 
 ## Status
 
-In active design and early implementation. `main` ships the multi-module Maven reactor (M1 complete) and the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Not yet production-ready.
+In active design and early implementation. `main` ships the multi-module Maven reactor and the core domain contracts (M1–M2 complete) and the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Not yet production-ready.
 
 ## Quick demo
 
