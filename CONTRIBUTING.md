@@ -63,7 +63,7 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
 # No local GraalVM? Build the native image in a container:
 ./mvnw -f forvum-app -Pnative package -Dquarkus.native.container-build=true
 
-# Reactor verify — runs the test suite + coverage gates
+# Reactor verify — runs the test suite (JaCoCo coverage gates land at M2)
 ./mvnw verify
 ```
 
@@ -76,7 +76,7 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
   - **Integration** (`*IT`) — `@QuarkusTest` against real SQLite via `@TempDir`.
   - **E2E** — scripts under `forvum-app/.../e2e/`.
 - Run everything with `./mvnw verify`.
-- **Coverage gates (JaCoCo):** 80% line at the parent, 75% branch.
+- **Coverage gates (JaCoCo):** 80% line at the parent, 75% branch — enforced from M2.
 - **Live-provider tests** are tagged `live` and are **default-off** (they hit real model providers);
   they run in nightly CI only.
 
@@ -87,14 +87,19 @@ only target.
 
 - **No runtime reflection** outside framework-managed paths.
 - **Every JSON-serialized / DTO type is a record carrying `@RegisterForReflection`** — a build
-  enforcer fails the build if one is missing.
+  enforcer (from M2) fails the build if one is missing.
 - **No `--enable-preview` on the native path.** Preview features are prohibited there.
 - **`StructuredTaskScope` is NOT used in v0.1** (it is still preview in JDK 25).
 - **No `sun.misc.Unsafe`, CGLib, or runtime Javassist** — they break the native binary and are
   CI-banned.
 - **No `synchronized` in `forvum-engine` / `forvum-channel-*` hot paths** — use `ReentrantLock`,
   `java.util.concurrent`, or atomics.
-- **Virtual threads per request.**
+- **Virtual threads first.** Blocking, imperative code on virtual threads is the default concurrency
+  model — not reactive programming. Use `@RunOnVirtualThread` (inbound handlers, scheduled jobs) and
+  `Executors.newVirtualThreadPerTaskExecutor()` (engine fan-out). Reactive types (Mutiny `Uni`/`Multi`,
+  Reactor) are allowed **only** at a framework-mandated boundary with no VT-friendly API, bridged to a
+  virtual thread there and justified at the call site. **Reactive code anywhere a virtual thread would
+  have worked is grounds to reject the PR.**
 
 ## Coding conventions
 
@@ -117,6 +122,17 @@ only target.
 - **English only for every repository artifact:** code, identifiers, comments, docs, commit
   messages, config keys, and log messages. Use American spelling (`color`, `behavior`, `analyze`).
 - **Keep PRs focused and surgical** — one logical change per PR, with tests.
+
+## Code review
+
+Every PR is reviewed AI-assisted and approved by the maintainer before merge — the procedure and the
+full rubric live in [docs/CODE-REVIEW.md](docs/CODE-REVIEW.md).
+
+- Run `/code-review` on the branch diff (`/code-review ultra` for milestone PRs), then walk the rubric.
+- **Merge gate:** CI green (JVM + native, both platforms) **and** the rubric walked **and** maintainer
+  approval. The checklist in `.github/PULL_REQUEST_TEMPLATE.md` maps to the three review pillars —
+  tests pass, maximum decoupling, simplest possible code — plus the virtual-threads-first and
+  native-first invariants.
 
 ## License
 

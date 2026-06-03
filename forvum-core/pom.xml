@@ -26,4 +26,37 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-core-purity</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <!-- forvum-core is Layer 0: pure Java, no Quarkus / Quarkiverse.
+                                             Group-wildcards cover the bare group and every sub-namespace
+                                             (io.quarkus, io.quarkus.platform, io.quarkus.arc, io.quarkiverse.*). -->
+                                        <exclude>io.quarkus*:*</exclude>
+                                        <exclude>io.quarkiverse*:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>forvum-core must stay pure Java (Layer 0): no Quarkus / Quarkiverse dependencies. See CLAUDE.md section 3.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

@@ -147,7 +147,7 @@ contribution as if native is the only target; CI enforces it.
   finalizes (post-JDK 26).
 - **No runtime reflection** outside framework-managed paths: every JSON-serialized type is a record
   (reflection-free canonical constructor); every DTO carries `@RegisterForReflection` (a Maven
-  enforcer fails the build if one is missing); tool-spec lookup goes through a build-time registry,
+  enforcer, landing at M2, fails the build if one is missing); tool-spec lookup goes through a build-time registry,
   not classpath scanning.
 - **Build-time plugin discovery:** `@ForvumExtension` + `META-INF/forvum/plugin.json` scanned by a
   Quarkus `BuildStep` that records providers and emits reflection hints. `ServiceLoader` is a
@@ -224,7 +224,10 @@ reference it, do not restate it.
 guide. Architectural changes — a contract, an SPI, a build tier, or anything in `docs/ULTRAPLAN.md` —
 start with a GitHub issue or discussion for design sign-off **before** the PR. Purely additive leaf
 changes (a new test, a typo, a small bug fix in merged code) go straight to a PR. `docs/ISSUES.md` is
-the per-step issue master index. Issues and PRs are never auto-created or pushed (§10).
+the per-step issue master index. Issues and PRs are never auto-created or pushed (§10). Code review is
+AI-assisted (`/code-review`, or `/code-review ultra` for milestone PRs) plus maintainer approval; the
+procedure and rubric live in `docs/CODE-REVIEW.md`, and the merge gate is CI green + rubric walked +
+approval.
 
 ---
 
@@ -280,9 +283,13 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **Security-test layer** under `forvum-app/.../security/`: prompt-injection → no tool escalation; path
   traversal → denied; spawn-boundary identity override → rejected; `PermissionScope` mismatch → denied
   + audited.
-- **Concurrency discipline (§3.8):** virtual threads per request; `-Djdk.tracePinnedThreads=full` in
-  dev/test + CI grep for `Thread pinned`; `synchronized` forbidden in `forvum-engine` /
-  `forvum-channel-*` hot paths (CI grep) — use `ReentrantLock` / `java.util.concurrent` / atomics.
+- **Concurrency discipline (§3.8):** **virtual threads first** — blocking, imperative code on virtual
+  threads is the default model, not reactive programming; reactive types (Mutiny/Reactor) are allowed
+  only at a framework-mandated boundary bridged to a VT, with a justification, and reactive code where
+  a VT would have worked is a PR rejection reason. Virtual threads per request;
+  `-Djdk.tracePinnedThreads=full` in dev/test + CI grep for `Thread pinned`; `synchronized` forbidden
+  in `forvum-engine` / `forvum-channel-*` hot paths (CI grep) — use `ReentrantLock` /
+  `java.util.concurrent` / atomics.
 
 ---
 
@@ -295,13 +302,17 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - Do **not** import core internals from a plugin — plugins compile only against `forvum-sdk`.
 - Do **not** introduce runtime reflection, dynamic class loading (outside the JVM-only drop-in path),
   `sun.misc.Unsafe`, CGLib, or runtime Javassist — they break the native binary and are CI-banned.
-- Do **not** ship a DTO record without `@RegisterForReflection` (the enforcer fails the build).
+- Do **not** ship a DTO record without `@RegisterForReflection` (the enforcer, from M2, fails the build).
 - Do **not** use `--enable-preview` on the native path or adopt `StructuredTaskScope` in v0.1.
 - Do **not** create/run a Quarkus project or add an extension by hand, or answer a Quarkus question from
   model memory — go through the Quarkus Agent Dev MCP (and `context7` for library docs).
 - Do **not** run raw `mvn test` — run tests through the Dev MCP (§4/§7).
 - Do **not** use `synchronized` in engine/channel hot paths, or introduce thread-pinning without an
   allowlist entry citing the upstream issue.
+- Do **not** introduce reactive code (Mutiny `Uni`/`Multi`, Reactor, a reactive client pipeline) where
+  virtual threads + blocking would work — virtual threads are the default model; reactive is allowed
+  only at a framework-mandated boundary, bridged to a VT, with a written justification, and
+  reactive-where-VT-suffices is a PR rejection reason.
 - Do **not** "improve" untouched prose/code — surgical edits only.
 - Do **not** treat native as optional or secondary — it is the primary, mandatory target.
 - Multi-agent git safety: do not `git stash`, switch branches, or touch `git worktree` checkouts unless
