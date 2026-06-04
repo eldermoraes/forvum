@@ -88,21 +88,62 @@ class AgentRegistryTest {
     @Test
     void hotReloadEvictsAChangedAgentSoTheNextGetOrCreateRereadsIt() throws Exception {
         Path agents = AgentRegistryTestHomeProfile.HOME.resolve("agents");
-        Files.writeString(agents.resolve("reloadable.md"), "persona");
-        Files.writeString(agents.resolve("reloadable.json"),
-                "{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"allowedTools\": [] }");
+        Path md = agents.resolve("reloadable.md");
+        Path json = agents.resolve("reloadable.json");
+        try {
+            Files.writeString(md, "persona");
+            Files.writeString(json, "{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"allowedTools\": [] }");
 
-        AgentId id = new AgentId("reloadable");
-        registry.getOrCreate(id);
-        assertEquals(ModelRef.parse("ollama:qwen3:1.7b"), registry.persona(id).primaryModel());
+            AgentId id = new AgentId("reloadable");
+            registry.getOrCreate(id);
+            assertEquals(ModelRef.parse("ollama:qwen3:1.7b"), registry.persona(id).primaryModel());
 
-        Files.writeString(agents.resolve("reloadable.json"),
-                "{ \"primaryModel\": \"fake:test-model\", \"allowedTools\": [] }");
-        configChanged.fire(new ConfigurationChangedEvent(
-                Path.of("agents", "reloadable.json"), ChangeType.MODIFIED));
+            Files.writeString(json, "{ \"primaryModel\": \"fake:test-model\", \"allowedTools\": [] }");
+            configChanged.fire(new ConfigurationChangedEvent(
+                    Path.of("agents", "reloadable.json"), ChangeType.MODIFIED));
 
-        registry.getOrCreate(id);
-        assertEquals(ModelRef.parse("fake:test-model"), registry.persona(id).primaryModel(),
-                "a changed agent file must be re-read on the next getOrCreate");
+            registry.getOrCreate(id);
+            assertEquals(ModelRef.parse("fake:test-model"), registry.persona(id).primaryModel(),
+                    "a changed agent file must be re-read on the next getOrCreate");
+        } finally {
+            // Keep the shared static seed home self-contained: drop this test's residue.
+            Files.deleteIfExists(md);
+            Files.deleteIfExists(json);
+            configChanged.fire(new ConfigurationChangedEvent(
+                    Path.of("agents", "reloadable.json"), ChangeType.DELETED));
+        }
+    }
+
+    @Test
+    void spawnRejectsAChildIdEqualToTheParent() {
+        AgentId main = new AgentId("main");
+        registry.getOrCreate(main);
+
+        assertThrows(IllegalStateException.class,
+                () -> registry.spawn(main, main, List.of("fs.read")),
+                "a child must be a distinct agent id, never the parent itself");
+    }
+
+    @Test
+    void spawnRejectsCollisionWithAnAlreadyRegisteredId() {
+        AgentId main = new AgentId("main");
+        registry.getOrCreate(main);
+        registry.getOrCreate(new AgentId("faker"));
+
+        assertThrows(IllegalStateException.class,
+                () -> registry.spawn(main, new AgentId("faker"), List.of()),
+                "spawn must not silently overwrite an already-registered agent");
+    }
+
+    @Test
+    void getOrCreateThrowsWhenTheAgentFilesAreAbsent() {
+        assertThrows(IllegalStateException.class,
+                () -> registry.getOrCreate(new AgentId("ghost")));
+    }
+
+    @Test
+    void personaThrowsForAnUnregisteredAgent() {
+        assertThrows(IllegalStateException.class,
+                () -> registry.persona(new AgentId("never-loaded")));
     }
 }

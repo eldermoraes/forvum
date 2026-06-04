@@ -9,9 +9,10 @@ import java.nio.file.Path;
 import java.util.Map;
 
 /**
- * Points {@code $FORVUM_HOME} at a throwaway temp directory seeded with a single {@code main} agent
- * ({@code agents/main.md} + {@code agents/main.json}) so {@link AgentRegistryTest} exercises the real
- * file-driven load path (M4 {@code AgentReader}) rather than a hand-built spec.
+ * Points {@code $FORVUM_HOME} at a throwaway temp directory seeded with two agents — {@code main}
+ * (pinned to {@code ollama:qwen3:1.7b}) and {@code faker} (pinned to the in-process
+ * {@link FakeModelProvider}) — so the registry/turn tests exercise the real file-driven load path
+ * (M4 {@code AgentReader}) rather than a hand-built spec.
  */
 public class AgentRegistryTestHomeProfile implements QuarkusTestProfile {
 
