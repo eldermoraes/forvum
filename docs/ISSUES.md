@@ -7,8 +7,9 @@ Files, Acceptance Criteria, Dependencies, Labels, Milestone). The companion scri
 
 **Repository:** `https://github.com/eldermoraes/forvum`
 **Source of truth:** `docs/ULTRAPLAN.md` (§§ referenced throughout).
-**Commit convention (every issue):** single-author (Elder Moraes), **NO `Co-Authored-By` trailer**,
-Conventional Commits, imperative mood.
+**Commit convention (every issue):** Conventional Commits, imperative mood. A `Co-Authored-By`
+trailer for AI-assisted commits is welcome (convention updated 2026-06-04; supersedes the prior
+single-author / no-trailer rule).
 
 ## Two acceptance rules that thread into EVERY code milestone
 

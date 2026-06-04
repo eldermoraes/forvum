@@ -28,6 +28,12 @@
     </dependencyManagement>
 
     <dependencies>
+        <!-- Layer-0 domain contracts (records, sealed events, budget types). Engine compiles against
+             core + sdk only (enforced below). Version managed by forvum-bom. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-core</artifactId>
+        </dependency>
         <!-- CDI (ArC): @Singleton, @Observes, Event<T>, StartupEvent. Versions via the platform BOM. -->
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -37,6 +43,26 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-jackson</artifactId>
+        </dependency>
+
+        <!-- M5 persistence: SQLite via Hibernate ORM Panache + Flyway. SQLite has no Quarkus JDBC
+             extension, so it is wired as an "Other database" (db-kind=other + bare Xerial driver +
+             explicit community SQLiteDialect). Agroal is pulled transitively by Panache. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-orm-panache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.hibernate.orm</groupId>
+            <artifactId>hibernate-community-dialects</artifactId>
         </dependency>
 
         <dependency>
@@ -75,6 +101,13 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <!-- forvum-engine is a headless Quarkus library with no `build` goal, so it has no
+                         Failsafe phase: its @QuarkusTest integration tests (*IT) run via Surefire too
+                         (CLAUDE.md section 4 exception). Include *IT alongside the default *Test. -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>

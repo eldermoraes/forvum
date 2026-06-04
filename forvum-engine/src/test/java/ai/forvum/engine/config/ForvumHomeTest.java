@@ -41,4 +41,11 @@ class ForvumHomeTest {
         assertTrue(resolved.isAbsolute(), "resolved root must be absolute");
         assertEquals(Path.of("/tmp/forvum"), resolved);
     }
+
+    @Test
+    void stateResolvesUnderRoot() {
+        ForvumHome home = new ForvumHome(Path.of("/tmp/forvum-x"));
+
+        assertEquals(Path.of("/tmp/forvum-x/state"), home.state());
+    }
 }
