@@ -31,6 +31,10 @@ public class AgentRegistryTestHomeProfile implements QuarkusTestProfile {
             Files.writeString(agents.resolve("faker.md"), "You are a test agent.");
             Files.writeString(agents.resolve("faker.json"),
                     "{ \"primaryModel\": \"fake:test-model\", \"allowedTools\": [] }");
+            // A third agent pinned to the always-throwing BoomModelProvider, for the failed-turn path.
+            Files.writeString(agents.resolve("boomer.md"), "You are a failing test agent.");
+            Files.writeString(agents.resolve("boomer.json"),
+                    "{ \"primaryModel\": \"boom:test-model\", \"allowedTools\": [] }");
             return home;
         } catch (IOException e) {
             throw new UncheckedIOException(e);

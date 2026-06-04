@@ -38,6 +38,19 @@ public class AgentMemory {
         persistMessage(sessionId, Role.ASSISTANT, content);
     }
 
+    /**
+     * Persist a completed turn atomically: the user message, the assistant reply, and a turn
+     * observation in one transaction. Called by {@link Agent#respond} only after a successful model
+     * call, so a failed turn leaves no orphan conversational rows (the failed attempt is still ledgered
+     * separately in {@code provider_calls} by the fallback decorator).
+     */
+    @Transactional
+    public void recordTurn(String sessionId, String userText, String assistantText) {
+        persistMessage(sessionId, Role.USER, userText);
+        persistMessage(sessionId, Role.ASSISTANT, assistantText);
+        persistObservation(sessionId, "turn completed");
+    }
+
     /** Conversational history for {@code sessionId}, oldest first, as LangChain4j messages. */
     public List<ChatMessage> messages(String sessionId) {
         List<MessageEntity> rows = MessageEntity.list(
@@ -56,21 +69,30 @@ public class AgentMemory {
 
     @Transactional
     public void recordObservation(String sessionId, String content) {
-        EpisodicMemoryEntity event = new EpisodicMemoryEntity();
-        event.agentId = agentId();
-        event.sessionId = sessionId;
-        event.eventType = EventType.OBSERVATION.dbValue();
-        event.content = content;
-        event.createdAt = System.currentTimeMillis();
-        event.persist();
+        persistObservation(sessionId, content);
     }
 
-    /** Record a long-term fact. The {@code embedding} vector is left null this cycle (M7 AC-7). */
+    /**
+     * Record a long-term fact, upserting on {@code (agent_id, key)} so a re-write updates the existing
+     * row rather than violating the table's UNIQUE constraint. The {@code embedding} vector is left null
+     * this cycle (M7 AC-7); {@code updated_at} is bumped on every update.
+     */
     @Transactional
     public void recordFact(String key, String value, String source) {
         long now = System.currentTimeMillis();
+        String agentId = agentId();
+        // Filter by key in-memory (per-agent fact sets are small in a single-user deployment) to avoid
+        // referencing the SQL-reserved column name "key" in a JPQL where-clause.
+        SemanticMemoryEntity existing = SemanticMemoryEntity.<SemanticMemoryEntity>list("agentId = ?1", agentId)
+                .stream().filter(fact -> fact.key.equals(key)).findFirst().orElse(null);
+        if (existing != null) {
+            existing.value = value;
+            existing.source = source;
+            existing.updatedAt = now;
+            return;
+        }
         SemanticMemoryEntity fact = new SemanticMemoryEntity();
-        fact.agentId = agentId();
+        fact.agentId = agentId;
         fact.key = key;
         fact.value = value;
         fact.embedding = null;
@@ -89,6 +111,16 @@ public class AgentMemory {
         message.tokens = null;
         message.createdAt = System.currentTimeMillis();
         message.persist();
+    }
+
+    private void persistObservation(String sessionId, String content) {
+        EpisodicMemoryEntity event = new EpisodicMemoryEntity();
+        event.agentId = agentId();
+        event.sessionId = sessionId;
+        event.eventType = EventType.OBSERVATION.dbValue();
+        event.content = content;
+        event.createdAt = System.currentTimeMillis();
+        event.persist();
     }
 
     private static String agentId() {

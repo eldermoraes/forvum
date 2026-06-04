@@ -61,6 +61,26 @@ class AgentMemoryTest {
 
         assertEquals(2, MessageEntity.count("sessionId = ?1 and agentId = ?2", sessionId, "main"));
         assertEquals(1, EpisodicMemoryEntity.count("agentId = ?1 and sessionId = ?2", "main", sessionId));
-        assertEquals(1, SemanticMemoryEntity.count("agentId = ?1", "main"));
+        // Scope to the fact this test wrote (the shared DB accumulates other agents'/keys' facts).
+        long userNameFacts = SemanticMemoryEntity.<SemanticMemoryEntity>list("agentId = ?1", "main")
+                .stream().filter(f -> "user.name".equals(f.key)).count();
+        assertEquals(1, userNameFacts, "exactly one 'user.name' fact for main");
+    }
+
+    @Test
+    @Transactional
+    void recordFactUpsertsByKeyRatherThanViolatingTheUniqueConstraint() throws Exception {
+        AgentId agentId = new AgentId("fact-upsert-agent");
+
+        ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId).run(() -> {
+            memory.recordFact("user.city", "Sao Paulo", "turn-1");
+            memory.recordFact("user.city", "Rio", "turn-2");
+        });
+
+        assertEquals(1, SemanticMemoryEntity.count("agentId = ?1", "fact-upsert-agent"),
+                "a second fact with the same key updates the row, not a second insert");
+        SemanticMemoryEntity row = SemanticMemoryEntity
+                .<SemanticMemoryEntity>find("agentId = ?1", "fact-upsert-agent").firstResult();
+        assertEquals("Rio", row.value, "the latest value wins on upsert");
     }
 }

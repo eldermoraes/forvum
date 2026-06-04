@@ -2,6 +2,7 @@ package ai.forvum.engine.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -48,5 +49,24 @@ class AgentTurnTest {
                 "one provider_calls ledger row");
         assertEquals(1, EpisodicMemoryEntity.count("agentId = ?1 and sessionId = ?2", "faker", sessionId),
                 "one episodic observation");
+    }
+
+    @Test
+    void respondPersistsNoConversationalRowsWhenTheModelFailsButStillLedgersTheAttempt() throws Exception {
+        AgentId boomer = new AgentId("boomer");
+        Agent agent = registry.getOrCreate(boomer);
+        String sessionId = "turn-boom";
+
+        // Deliberately NOT @Transactional: respond() owns the turn's transaction boundary.
+        assertThrows(RuntimeException.class, () ->
+                ScopedValue.where(CurrentAgent.CURRENT_AGENT, boomer)
+                        .call(() -> agent.respond(sessionId, "hi")));
+
+        assertEquals(0, MessageEntity.count("sessionId = ?1 and agentId = ?2", sessionId, "boomer"),
+                "a failed turn must leave no orphan user/assistant rows");
+        assertEquals(0, EpisodicMemoryEntity.count("agentId = ?1 and sessionId = ?2", "boomer", sessionId),
+                "no turn observation on failure");
+        assertEquals(1, ProviderCallEntity.count("sessionId = ?1 and agentId = ?2", sessionId, "boomer"),
+                "the failed attempt is still ledgered in provider_calls (audit survives)");
     }
 }
