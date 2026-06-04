@@ -29,7 +29,7 @@ The result is not an orchestrator that commands silently from the center. It is 
 
 ## Status
 
-In active design and early implementation. `main` ships the multi-module Maven reactor, the core domain contracts, and the plugin SDK (M1–M3 complete) plus the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Not yet production-ready.
+In active design and early implementation. `main` ships the multi-module Maven reactor, the core domain contracts, the plugin SDK, and the file-based config loader with `WatchService` hot reload (M1–M4 complete) plus the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Not yet production-ready.
 
 ## Quick demo
 
@@ -91,8 +91,8 @@ For the full architecture — decisions, tradeoffs, and deferred design — read
 
 Implementation proceeds in milestones M1 through M20:
 
-- **M1–M3 (complete)** — multi-module Maven reactor (M1), the Tier 1 core domain contracts (M2), and the plugin SDK — sealed provider interfaces + `@ForvumExtension` (M3).
-- **M4–M20 (planned)** — persistence, budget enforcement, fallback chains, observability, channels, DevUI, sub-agents, judging, and production hardening.
+- **M1–M4 (complete)** — multi-module Maven reactor (M1), the Tier 1 core domain contracts (M2), the plugin SDK — sealed provider interfaces + `@ForvumExtension` (M3), and the file-based config loader with `WatchService` hot reload (M4).
+- **M5–M20 (planned)** — persistence, budget enforcement, fallback chains, observability, channels, DevUI, sub-agents, judging, and production hardening.
 
 Detailed milestone scope is in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §7.
 

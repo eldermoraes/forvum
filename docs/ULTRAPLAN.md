@@ -1270,7 +1270,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Verify:** a `forvum-sdk/src/test/java/.../SdkSurfaceTest.java` asserts via reflection that only the `Abstract*` classes are direct permits and that external classes cannot implement the sealed interface directly.
   - **Commit:** `feat(sdk): define sealed provider interfaces and plugin marker`.
 
-- [ ] **M4 — Config loader with hot reload.**
+- [x] **M4 — Config loader with hot reload.**
   - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/config/ConfigLoader.java`, `ConfigWatcher.java`, `ConfigurationChangedEvent.java`, `ForvumHome.java`, plus Panache-less repository-style readers for each `~/.forvum/` subfolder.
   - **Deps:** `quarkus-core`, `quarkus-jackson`.
   - **Verify:** integration test uses `@TempDir`, writes a synthetic `~/.forvum/` layout, fires modifications, asserts `ConfigurationChangedEvent` observers receive the correct `path` and `type`.

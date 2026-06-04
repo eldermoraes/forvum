@@ -27,10 +27,12 @@ trade-off for a reflection-free native binary.
 - Docs: `docs/ULTRAPLAN.md` (source of truth, M1–M20 roadmap) · founding paradigm
   `docs/CONTEXT-ENGINEERING.md` (PT source) → `docs/CONTEXT-ENGINEERING-MAPPING.md` (EN mapping) ·
   `docs/ISSUES.md` (per-step issue master index) · `CONTRIBUTING.md` (full contributor guide).
-- Status: active design + early implementation. M1–M3 complete (multi-module reactor + Tier-1 domain
+- Status: active design + early implementation. M1–M4 complete (multi-module reactor + Tier-1 domain
   contracts: records, sealed `AgentEvent`, enums, `PermissionScope`, budget types; plus the Layer-1
-  plugin SDK: sealed provider interfaces, `@ForvumExtension`, re-exported `@RegisterForReflection`);
-  M4–M20 planned. A working vertical slice (one agent vs local Ollama via CLI) lives on
+  plugin SDK: sealed provider interfaces, `@ForvumExtension`, re-exported `@RegisterForReflection`;
+  plus the M4 file-based config loader with `WatchService` hot reload — `ForvumHome` + `ConfigWatcher`
+  firing a CDI `ConfigurationChangedEvent`, per-subfolder readers); M5–M20 planned. A working vertical
+  slice (one agent vs local Ollama via CLI) lives on
   `demo/conference-mvp`. Not production-ready.
 
 ---
@@ -132,9 +134,13 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
 `devui-testing_runTests` (all) or `devui-testing_runTest` with `{"className":"ai.forvum.…"}` (one). Each
 milestone's `Verify` script is the contract the run must satisfy. Native integration tests (`-Pnative`,
 `@QuarkusIntegrationTest`, Failsafe) remain a Maven step inside the native profile and are the M20 gate.
-**Exception — Quarkus-free modules (`forvum-core`, `forvum-sdk`):** they boot no Quarkus, so the Dev MCP
-test runner cannot start and does not apply; run their unit/property tests directly via Maven Surefire
-(`./mvnw -pl forvum-core test`). The "never raw `mvn test`" rule is scoped to Quarkus-bearing modules.
+**Exception — modules the Dev MCP runner cannot start:** (a) Quarkus-free modules (`forvum-core`,
+`forvum-sdk`) boot no Quarkus; (b) headless Quarkus *library* modules (`forvum-engine`) carry no
+`build` goal nor HTTP, so `quarkus:dev` is skipped ("assumed to be a support library") and the Dev-UI
+test runner cannot attach. Both run their tests directly via Maven Surefire (e.g.
+`./mvnw -pl forvum-engine test`) — a `@QuarkusTest` there still boots Quarkus in-JVM via
+`QuarkusTestExtension`. The "never raw `mvn test`" rule applies to Dev-MCP-startable Quarkus modules
+(e.g. the future HTTP-bearing web channel).
 
 Test layout: unit `*Test` (Surefire, no Quarkus boot/IO) → integration `*IT` (`@QuarkusTest`, real
 SQLite via `@TempDir`) → E2E under `forvum-app/src/test/java/ai/forvum/e2e/` (ten scripts, landing

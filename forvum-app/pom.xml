@@ -33,6 +33,13 @@
     </dependencyManagement>
 
     <dependencies>
+        <!-- The agent runtime (Layer 2). Brings the config loader + WatchService hot reload (M4) into
+             the only runnable artifact, so engine beans are augmented into the JVM and native images. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-engine</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
