@@ -360,3 +360,36 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
   then make it pass) and loop until it's green.
 
 For anything not covered here, defer to the workspace-level `CLAUDE.md` and to `docs/ULTRAPLAN.md`.
+
+---
+
+## 14. Implementation lessons (accumulated)
+
+Generalizable lessons from completed milestones; append here as milestones land.
+
+- **A module's code only native-COMPILES once `forvum-app` depends on it.** The native image is built
+  solely in `forvum-app`; a Layer-2/3 module not wired into the app never enters any native image, so
+  "native-compiles" is vacuous. Wire each new module into `forvum-app` in the same milestone, and make
+  every `@Startup` bean boot gracefully when its inputs are absent — the CI native smoke runs the binary
+  with **no `~/.forvum/`**, so a watcher/loader must warn + no-op (never crash, never block command-mode
+  exit) or it fails the smoke. [M4]
+- **New Quarkus-bearing *library* module recipe** (harvested via `quarkus/create`, §7): the test artifact
+  is `io.quarkus:quarkus-junit` (NOT `quarkus-junit5`); apply `quarkus-maven-plugin` with `generate-code`
+  + `generate-code-tests` only (NO `build` goal — a library is not a runnable app); add an empty
+  `META-INF/beans.xml` so the app's ArC discovers its `@Singleton` beans; add no native profile (native
+  builds only in `forvum-app`). Such a headless library cannot be `quarkus:dev`-ed, so its tests run via
+  Surefire — see the §4 exception. Resolve config home with `@ConfigProperty` (MP Config) so a
+  `QuarkusTestProfile` can redirect it to a `@TempDir`. [M4]
+- **`WatchService` file-watching discipline** (reused by M19 cron): register subfolders created *after*
+  boot (on a directory `ENTRY_CREATE`) and scan their already-present files; drop invalid keys on
+  `WatchKey.reset() == false`; recover from `OVERFLOW` by rescanning; isolate each synchronous CDI
+  `Event.fire()` in try/catch so one throwing observer cannot kill the watch loop; debounce + coalesce
+  per path. macOS uses ~2–10 s polling (Risk #7), so behavioral file-watch tests need a generous timeout
+  — keep the deterministic assertions in plain unit tests (debounce/coalesce, kind-mapping). [M4]
+- **Make test fixtures exercise the absent / created-later state, not just the happy pre-populated one.**
+  M4's `/code-review` caught a real gap (subfolders created after boot were never watched) that the
+  tests masked because the fixture pre-created every directory. Run `/code-review` (high or `ultra`)
+  before a milestone merge, and keep Javadoc/claims aligned with actual behavior. [M4]
+- **Harness note:** Maven/Quarkus console output carries ANSI/control chars that can break the agent
+  display — run Quarkus-bearing builds/tests with `-B -Dstyle.color=never` (and/or in the background),
+  then read the clean Surefire `*.txt` reports rather than the raw Maven log. [M4]
