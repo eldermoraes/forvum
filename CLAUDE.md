@@ -393,3 +393,22 @@ Generalizable lessons from completed milestones; append here as milestones land.
 - **Harness note:** Maven/Quarkus console output carries ANSI/control chars that can break the agent
   display — run Quarkus-bearing builds/tests with `-B -Dstyle.color=never` (and/or in the background),
   then read the clean Surefire `*.txt` reports rather than the raw Maven log. [M4]
+- **Register a custom CDI context from a plain library via a CDI Lite `BuildCompatibleExtension`, not a
+  deployment `@BuildStep`.** ArC's documented custom-context path (`ContextRegistrationPhaseBuildItem`
+  → `ContextConfiguratorBuildItem` + `CustomScopeBuildItem`) needs a `@BuildStep`, which only runs in a
+  deployment module — turning `forvum-engine` into a runtime+deployment extension and forcing its own
+  `@QuarkusTest`s out (deployment↔runtime reactor cycle), breaking the M4 headless-library setup. A
+  `BuildCompatibleExtension` whose `@Discovery` method calls `MetaAnnotations.addContext(scope, true,
+  CtxClass)` (declared in `META-INF/services/jakarta.enterprise.inject.build.compatible.spi.BuildCompatibleExtension`)
+  registers the scope from the plain library, makes the annotation bean-defining, and bakes into the
+  native image (BCEs run at augmentation). The backing `InjectableContext` lives in the library; the
+  scope annotation lives in `forvum-core` with a `provided` `jakarta.enterprise.cdi-api` dep (the
+  core enforcer bans only `io.quarkus*`/`io.quarkiverse*`, not `jakarta.*`). [M6]
+- **"Other database" (SQLite) needs Hibernate metadata access off + version-check off for a clean
+  boot.** With `db-kind=other` + an explicit dialect, set
+  `quarkus.hibernate-orm.unsupported-properties."hibernate.boot.allow_jdbc_metadata_access"=false` and
+  `quarkus.hibernate-orm.database.version-check.enabled=false`, else Hibernate opens an eager JDBC
+  connection on a startup thread (logging a spurious error, and failing the >=2.0.0 version check on a
+  not-yet-created DB). Trigger Flyway manually from a `StartupEvent` observer after ensuring the DB
+  directory exists — `quarkus.flyway.migrate-at-start` runs during RUNTIME_INIT, before any observer,
+  so it would open the file before the dir exists (SQLITE_CANTOPEN). [M5]
