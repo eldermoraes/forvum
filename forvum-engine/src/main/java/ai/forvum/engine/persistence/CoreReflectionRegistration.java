@@ -6,6 +6,7 @@ import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
 import ai.forvum.core.ToolSpec;
+import ai.forvum.core.event.FallbackTriggered;
 import ai.forvum.core.budget.CostBudget;
 import ai.forvum.core.budget.DayWindow;
 import ai.forvum.core.budget.ExhaustionCause;
@@ -39,7 +40,8 @@ import ai.forvum.core.id.Identity;
         Usage.class,
         DayWindow.class,
         SessionWindow.class,
-        ExhaustionCause.class
+        ExhaustionCause.class,
+        FallbackTriggered.class
 })
 public final class CoreReflectionRegistration {
     private CoreReflectionRegistration() {

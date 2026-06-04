@@ -65,6 +65,13 @@
             <artifactId>hibernate-community-dialects</artifactId>
         </dependency>
 
+        <!-- M8: FallbackChatModel decorates a LangChain4j ChatModel/StreamingChatModel. Core only;
+             version managed transitively by quarkus-langchain4j-bom (forvum-bom) — never pinned. -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-core</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
