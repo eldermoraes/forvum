@@ -1,23 +1,118 @@
-# Tier-A concurrent implementation plans — M5 · M6 · M8
+# Concurrent implementation plans (Tier-A · Tier-B)
 
-Status: **planning artifacts, not code.** Produced for the three milestones that can be implemented
-concurrently with M5 (per the parallelization analysis). These are uncommitted working-tree docs;
-the architectural decisions flagged below need maintainer sign-off before the PRs land (CLAUDE.md §8).
+A **tier** is a group of milestones implementable in one concurrent window — independent tracks joined
+by at most one soft (test-level) gating edge. Source of truth remains `docs/ULTRAPLAN.md`; issue map is
+`docs/ISSUES.md`. Each plan opens with an **AUTHORITATIVE CORRECTIONS** banner; where the banner
+conflicts with the plan body, the banner wins, and this README's cross-cutting decisions win over both.
 
-Source of truth remains `docs/ULTRAPLAN.md`; issue map is `docs/ISSUES.md`.
-
-| Plan | Milestone | Issue | Module surface |
+| Tier | Plans | Issues | Status |
 |---|---|---|---|
-| [M5-sqlite-flyway.md](M5-sqlite-flyway.md) | SQLite + Flyway V1 | #10 | `forvum-engine/persistence` + `db/migration` + engine `application.properties` |
-| [M6-agentscoped-context.md](M6-agentscoped-context.md) | `@AgentScoped` CDI context | #11 | `forvum-core` (`AgentScoped`) + `forvum-engine/context` (+ maybe `forvum-engine-deployment`) |
-| [M8-fallback-chatmodel.md](M8-fallback-chatmodel.md) | `FallbackChatModel` + `FailureClassifier` | #13 | `forvum-engine/model` |
-
-Each plan opens with an **AUTHORITATIVE CORRECTIONS** banner; where the banner conflicts with the
-plan body, the banner wins. This README's cross-cutting decisions win over both.
+| **A** | [M5](M5-sqlite-flyway.md) · [M6](M6-agentscoped-context.md) · [M8](M8-fallback-chatmodel.md) | #10 · #11 · #13 | **merged** (§0–§6 below, retained for reference) |
+| **B** | [M7](M7-agent-registry.md) · [M9](M9-ollama-provider.md) | #12 · #14 | **planning** (§B below) |
 
 ---
 
-## 0. Ground-truth corrections that reshape all three plans
+## B. Tier-B — M7 · M9 (next concurrent window)
+
+Status: **planning artifacts, not code.** The next window after Tier-A merged: the only two milestones
+startable immediately (M1–M6 + M8 done), joined by one soft edge. Architectural decisions flagged in
+each plan + below need maintainer sign-off before the PRs land (CLAUDE.md §8).
+
+| Plan | Milestone | Issue | Module surface |
+|---|---|---|---|
+| [M7-agent-registry.md](M7-agent-registry.md) | `AgentRegistry` + minimal turn (`LlmSelector`, `Agent.respond`) | #12 | new `forvum-engine/agent` + `forvum-engine/routing` |
+| [M9-ollama-provider.md](M9-ollama-provider.md) | Ollama provider (first Layer-3) + plugin-discovery `BuildStep` | #14 | new `forvum-provider-ollama` + `forvum-plugin-discovery(-deployment)` + SDK SPI + app wiring |
+
+### B.0 Ground-truth (verified against `main`, post-Tier-A)
+
+- **GT-B1 — no prelude needed.** `forvum-engine/pom.xml` already declares `forvum-core` (Tier-A prelude
+  landed, commit `1d85c83`). `forvum-app` depends on `forvum-engine` + tamboui only — no Layer-3 module
+  yet, so M9 is the first to wire one in.
+- **GT-B2 — the SDK `ModelProvider` has only `extensionId()`.** `resolve(ModelRef)→ChatModel` does not
+  exist yet; M9 adds it, and `forvum-sdk` gains a `langchain4j-core` dep (M9 plan AC-1). It stays
+  Quarkus-free.
+- **GT-B3 — the `AgentContext.get()` race is fixed.** `computeIfAbsent` (commit `1e6f58a`) + a
+  `CyclicBarrier` test. M7's concurrent same-agent resolution has no pending blocker.
+- **GT-B4 — `Persona` carries only `primaryModel`** (no `FallbackChain`, no `MemoryPolicy` type). M7's
+  `LlmSelector` wraps a one-link `FallbackChatModel`; real multi-provider fallback is M10.
+- **GT-B5 — zero file overlap.** M7 touches new `forvum-engine/agent` + `routing` packages; M9 creates
+  new modules + the SDK file + app/root poms. The only shared files are `pom.xml` (root) and
+  `forvum-app/pom.xml`, both edited only by M9 — orthogonal to M7's engine-internal work.
+
+### B.1 The single gating edge
+
+```
+M7 (#12) AgentRegistry + LlmSelector + Agent.respond()      M9 (#14) OllamaModelProvider + plugin.json
+   forvum-engine/agent + routing                               + forvum-plugin-discovery(-deployment)
+   tested with a FakeModelProvider (no M9)                     + SDK resolve(ModelRef) + app wiring
+        │                                                      contract test + native smoke (no M7)
+        └──────── GATING EDGE (only one) ───────────────────────────────┘
+            M9.OllamaTurnIT / OllamaScriptedTurnE2E ("scripted turn through AgentRegistry") needs M7.
+            Decouple exactly like Tier-A's M8.ProviderCallPersistenceIT → M5:
+            ship the e2e class-presence/@EnabledIf-gated until M7 lands, then un-gate.
+```
+
+Both sides agree the **`ModelProvider.resolve(ModelRef)→ChatModel` signature up front** (M9 plan AC-1):
+M7 codes its `LlmSelector` + `FakeModelProvider` against it; M9 implements it for Ollama. Each milestone
+is fully testable alone; only the real-Ollama turn needs both.
+
+### B.2 Branch / PR & merge order
+
+PRs target `main`; each carries `Closes #(n+5)`; Conventional Commits + `Co-Authored-By` trailer;
+English-only. Use `git worktree` for isolation (do not switch branches in place).
+
+- `feat/m7-agent-registry` → `Closes #12`
+- `feat/m9-ollama-provider` → `Closes #14`
+
+**Merge order: M7 first, then M9** — M7 provides the `AgentRegistry` + `LlmSelector` that M9's e2e
+un-gates against (the impl the other's IT needs merges first, exactly as M5 did in Tier-A). Agree the
+SPI signature before either branches so both compile in parallel.
+
+Per-PR gates (both): native compile via `forvum-app` (mandatory); native smoke boots with **no
+`~/.forvum/`** (registry/discovery warn + no-op); engine/library tests via **Surefire** (headless lib —
+not the Dev MCP) with `-B -Dstyle.color=never`; `/code-review` (high) before merge; `Thread pinned` grep
+clean. M9 adds the Risk #5 per-provider canned-turn native smoke (CI-runnable, local Ollama).
+
+### B.3 Cross-cutting decisions needing sign-off (CLAUDE.md §8)
+
+1. **SDK SPI extension** — add `resolve(ModelRef)→ChatModel`; `forvum-sdk` gains a versionless
+   `langchain4j-core` dep (managed via `forvum-bom`; no enforcer change — it governs only `ai.forvum:*`).
+   Doc-faithful (ULTRAPLAN §4.3.5.1). **Lands as the first commit of the M7 PR** (the shared prelude:
+   M7's `LlmSelector` consumes it and M7 merges first); M9 implements `resolve()` for Ollama.
+2. **Plugin-discovery `BuildStep` now, in a dedicated `forvum-plugin-discovery` extension** — not
+   `forvum-engine` (M6 lesson). CDI alone would suffice for M9; the BuildStep is an early investment with
+   a documented off-ramp (M9 D-2 / AC-5).
+3. **M7 turn ambition** — `LlmSelector` + `Agent.respond()` ship in M7 (M7 D-1); `AgentToolBelt` is a
+   stub until M13 (M7 D-2).
+4. **Three memory tiers written; semantic embeddings deferred (NULL)** — *decided 2026-06-04* (M7 D-3 /
+   AC-7); revisit when v0.1 first needs semantic search.
+5. **Doc sync** — amend the `ForvumExtension` javadoc + ULTRAPLAN §6.3 (discovery BuildStep location) and
+   §4.3.5.1 (SPI resolve) in the milestone PRs (M9 D-4).
+
+### B.4 Dependency / timeline
+
+```
+(no prelude — main is ready)
+        ├──────────────────────────────┐
+        ▼                               ▼
+   M7 (#12)                         M9 (#14)
+   AgentRegistry + LlmSelector      OllamaModelProvider + plugin.json + discovery extension
+   + Agent.respond() + AgentMemory  + SDK resolve(ModelRef) + app/root pom wiring
+   (FakeModelProvider-tested)       (contract test + native smoke; e2e gated on M7)
+        │   GATING EDGE (the only one):
+        └── M9's "scripted turn through AgentRegistry" e2e needs M7 → ship it gated, un-gate post-M7.
+```
+
+Fully parallel once both agree the `resolve(ModelRef)` signature. M7 merges first; M9 un-gates its e2e.
+
+---
+
+> The sections below (§0–§6) document the **completed Tier-A window (M5 · M6 · M8)**, retained for
+> reference and for the file-watching / reflection-holder conventions they established.
+
+---
+
+## 0. Ground-truth corrections that reshaped the Tier-A plans
 
 Verified against the repo at `main@04d94d2`. Settle these first or the tracks collide.
 
