@@ -34,6 +34,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-core</artifactId>
         </dependency>
+        <!-- Layer-1 plugin SPI: ModelProvider (resolve(ModelRef) -> ChatModel) that LlmSelector
+             discovers and calls; the engine stays extension-agnostic (it depends on the SPI, never a
+             concrete provider). Version managed by forvum-bom. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
         <!-- CDI (ArC): @Singleton, @Observes, Event<T>, StartupEvent. Versions via the platform BOM. -->
         <dependency>
             <groupId>io.quarkus</groupId>
