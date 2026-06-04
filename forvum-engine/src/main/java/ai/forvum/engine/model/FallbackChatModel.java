@@ -17,6 +17,11 @@ import java.util.function.Consumer;
  * {@link FailureClass#isRetryable() retryable} failure — surfacing non-retryable/unknown failures
  * immediately (ULTRAPLAN section 5.4). Stateless per call, no {@code synchronized}; runs on the
  * caller's (virtual) thread.
+ *
+ * <p>Only the main entry point {@code chat(ChatRequest)} is decorated — the path every AI-service and
+ * convenience caller routes through. The 1.13+ {@code chat(ChatRequest, ChatRequestOptions)} overload
+ * bypasses it (it calls {@code doChat} directly); override {@code doChat} here if that overload is ever
+ * adopted.
  */
 public final class FallbackChatModel implements ChatModel {
 
@@ -43,7 +48,6 @@ public final class FallbackChatModel implements ChatModel {
 
     @Override
     public ChatResponse chat(ChatRequest request) {
-        RuntimeException last = null;
         for (int i = 0; i < links.size(); i++) {
             FallbackLink link = links.get(i);
             boolean fallback = i > 0;
@@ -56,7 +60,6 @@ public final class FallbackChatModel implements ChatModel {
             } catch (RuntimeException e) {
                 recorder.record(ProviderCalls.failure(sessionId, agentId, link, fallback, e,
                         millisSince(start)));
-                last = e;
                 boolean hasNext = i < links.size() - 1;
                 if (classifier.classify(e).isRetryable() && hasNext) {
                     onEvent.accept(new FallbackTriggered(Instant.now(), link.ref(),
@@ -66,7 +69,7 @@ public final class FallbackChatModel implements ChatModel {
                 throw e;
             }
         }
-        throw last; // unreachable: the loop always returns or throws
+        throw new IllegalStateException("unreachable: a non-empty fallback chain returns or throws");
     }
 
     private static long millisSince(long startNanos) {

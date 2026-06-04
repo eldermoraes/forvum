@@ -18,6 +18,9 @@ import java.util.function.Consumer;
  * next link without surfacing the error — but only if no partial tokens have already reached the user
  * handler (once a stream starts emitting, the attempt is committed). Records a {@code provider_calls}
  * row per attempt. No {@code synchronized}.
+ *
+ * <p>Only {@code chat(ChatRequest, handler)} is decorated; the 1.13+ {@code ChatRequestOptions} overload
+ * bypasses the fallback (override {@code doChat} if it is ever adopted).
  */
 public final class FallbackStreamingChatModel implements StreamingChatModel {
 

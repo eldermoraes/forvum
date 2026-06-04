@@ -1,8 +1,10 @@
 package ai.forvum.engine.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 
@@ -27,6 +29,11 @@ class SchemaSmokeIT {
     private static final List<String> EXPECTED_TABLES = List.of(
             "sessions", "messages", "episodic_memory", "semantic_memory",
             "tool_invocations", "provider_calls", "capr_events");
+
+    private static final List<String> EXPECTED_INDEXES = List.of(
+            "idx_sessions_identity", "idx_sessions_lastseen", "idx_messages_session", "idx_messages_agent",
+            "idx_episodic_agent_session", "idx_semantic_agent", "idx_tool_session", "idx_tool_agent",
+            "idx_provider_session", "idx_provider_agent", "idx_provider_fallback", "idx_capr_agent");
 
     @Inject
     EntityManager em;
@@ -137,5 +144,85 @@ class SchemaSmokeIT {
         assertEquals(1, ToolInvocationEntity.count());
         assertEquals(1, ProviderCallEntity.count());
         assertEquals(1, CaprEventEntity.count());
+    }
+
+    @Test
+    void allV1IndexesExist() {
+        @SuppressWarnings("unchecked")
+        List<String> indexes = em.createNativeQuery(
+                "select name from sqlite_master where type = 'index' and name not like 'sqlite_%'")
+                .getResultList();
+        assertTrue(indexes.containsAll(EXPECTED_INDEXES), "expected all V1 indexes, found: " + indexes);
+    }
+
+    @Test
+    @Transactional
+    void deletingASessionCascadesToItsMessages() {
+        MessageEntity.deleteAll();
+        SessionEntity.deleteAll();
+        long now = System.currentTimeMillis();
+
+        SessionEntity session = new SessionEntity();
+        session.id = "cascade-s";
+        session.identityId = "i";
+        session.channelId = "tui";
+        session.agentId = "main";
+        session.startedAt = now;
+        session.lastSeenAt = now;
+        session.persist();
+        em.flush();
+
+        MessageEntity message = new MessageEntity();
+        message.sessionId = "cascade-s";
+        message.agentId = "main";
+        message.role = "user";
+        message.content = "hi";
+        message.createdAt = now;
+        message.persist();
+        em.flush();
+        assertEquals(1, MessageEntity.count());
+
+        // foreign_keys=on (JDBC URL) + ON DELETE CASCADE must remove the child messages.
+        SessionEntity.deleteById("cascade-s");
+        em.flush();
+
+        Number remaining = (Number) em.createNativeQuery(
+                "select count(*) from messages where session_id = 'cascade-s'").getSingleResult();
+        assertEquals(0L, remaining.longValue(), "messages must cascade-delete with their session");
+    }
+
+    @Test
+    void duplicateSemanticKeyViolatesTheUniqueConstraint() {
+        long now = System.currentTimeMillis();
+        // Separate transactions: the duplicate INSERT executes at persist() time (IDENTITY id) and marks
+        // its own tx rollback-only, so it must not poison a surrounding test transaction.
+        QuarkusTransaction.requiringNew().run(() -> {
+            SemanticMemoryEntity.deleteAll();
+            persistSemantic(now);
+        });
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> QuarkusTransaction.requiringNew().run(() -> persistSemantic(now)));
+        assertTrue(mentionsUniqueViolation(ex),
+                "expected a UNIQUE(agent_id, key) violation, got: " + ex);
+    }
+
+    private static boolean mentionsUniqueViolation(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c.getMessage() != null && c.getMessage().toUpperCase().contains("UNIQUE")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void persistSemantic(long now) {
+        SemanticMemoryEntity e = new SemanticMemoryEntity();
+        e.agentId = "dup-agent";
+        e.key = "dup-key";
+        e.value = "v";
+        e.createdAt = now;
+        e.updatedAt = now;
+        e.persist();
     }
 }

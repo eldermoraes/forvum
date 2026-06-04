@@ -117,4 +117,19 @@ class FallbackChatModelTest {
         assertNull(recorder.calls.get(0).error());
         assertEquals(5L, recorder.calls.get(0).tokensIn());
     }
+
+    @Test
+    void wholeChainFailingRetryablyRethrowsTheLastErrorAndRecordsEveryAttempt() {
+        var recorder = new InMemoryProviderCallRecorder();
+        var events = new ArrayList<AgentEvent>();
+        var primary = new FallbackLink(new ModelRef("anthropic", "claude"), throwing(new RateLimitException("first")), null);
+        var secondary = new FallbackLink(new ModelRef("ollama", "qwen"), throwing(new RateLimitException("second")), null);
+        var model = new FallbackChatModel(List.of(primary, secondary), "s", "a", classifier, recorder, events::add);
+
+        RateLimitException thrown = assertThrows(RateLimitException.class, () -> model.chat(request()));
+        assertEquals("second", thrown.getMessage(), "the last link's failure is the one surfaced");
+        assertEquals(2, recorder.calls.size());
+        assertTrue(recorder.calls.get(1).fallback());
+        assertEquals(1, events.size(), "exactly one FallbackTriggered (only the first->second advance)");
+    }
 }

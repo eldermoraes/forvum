@@ -14,6 +14,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.transaction.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 
 /**
@@ -72,7 +73,12 @@ public class PanacheBudgetMeter implements BudgetMeter {
         double sumUsd = ((Number) row[0]).doubleValue();
         long sumTokens = ((Number) row[1]).longValue();
 
-        BigDecimal spentUsd = usdActive ? BigDecimal.valueOf(sumUsd) : null;
+        // cost_usd is a REAL column summed in double, so an exact-cap total (e.g. ten 0.10 calls vs a
+        // 1.00 cap) can land one ULP short (0.9999999999999999). Round to micro-USD before the cap test
+        // so exact-cap sums classify as exhausted, without disturbing real cent/sub-cent values. (When a
+        // cost producer lands — providers currently write cost_usd=null — sum in BigDecimal end-to-end.)
+        BigDecimal spentUsd = usdActive
+                ? BigDecimal.valueOf(sumUsd).setScale(6, RoundingMode.HALF_UP) : null;
         Long spentTokens = tokActive ? sumTokens : null;
 
         boolean usdExhausted = usdActive && spentUsd.compareTo(budget.maxUsd()) >= 0;

@@ -13,12 +13,4 @@ import ai.forvum.core.ModelRef;
  * {@link FallbackStreamingChatModel}; either may be {@code null} for a link used in only one mode.
  */
 public record FallbackLink(ModelRef ref, ChatModel chat, StreamingChatModel streaming) {
-
-    public static FallbackLink sync(ModelRef ref, ChatModel chat) {
-        return new FallbackLink(ref, chat, null);
-    }
-
-    public static FallbackLink streaming(ModelRef ref, StreamingChatModel streaming) {
-        return new FallbackLink(ref, null, streaming);
-    }
 }

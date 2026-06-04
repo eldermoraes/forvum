@@ -126,11 +126,13 @@ class BudgetMeterIT {
     void sessionWindowFiltersBySessionAndAgent() {
         ProviderCallEntity.deleteAll();
         call("s1", "a1", 0.40, 0, 0); // counted
-        call("s2", "a2", 9.00, 0, 0); // excluded by window
+        call("s1", "a2", 9.00, 0, 0); // same session, different agent -> excluded by the agentId predicate
+        call("s2", "a1", 9.00, 0, 0); // same agent, different session -> excluded by the sessionId predicate
 
         Usage u = meter.usage(new CostBudget(new BigDecimal("1.00"), null, new SessionWindow("s1", "a1")));
 
-        assertEquals(0, new BigDecimal("0.40").compareTo(u.spent().usd()));
+        assertEquals(0, new BigDecimal("0.40").compareTo(u.spent().usd()),
+                "only the (s1,a1) row counts — both predicates of the conjunction must apply");
         assertFalse(u.exhausted());
     }
 }
