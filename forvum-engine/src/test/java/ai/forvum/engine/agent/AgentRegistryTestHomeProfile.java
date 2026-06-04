@@ -25,6 +25,11 @@ public class AgentRegistryTestHomeProfile implements QuarkusTestProfile {
             Files.writeString(agents.resolve("main.json"),
                     "{ \"primaryModel\": \"ollama:qwen3:1.7b\", "
                   + "\"allowedTools\": [\"fs.read\", \"web.search\"] }");
+            // A second agent pinned to the in-process FakeModelProvider so the turn path is exercisable
+            // without a real LLM (AgentTurnTest).
+            Files.writeString(agents.resolve("faker.md"), "You are a test agent.");
+            Files.writeString(agents.resolve("faker.json"),
+                    "{ \"primaryModel\": \"fake:test-model\", \"allowedTools\": [] }");
             return home;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
