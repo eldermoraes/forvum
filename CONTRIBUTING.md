@@ -123,6 +123,25 @@ only target.
   messages, config keys, and log messages. Use American spelling (`color`, `behavior`, `analyze`).
 - **Keep PRs focused and surgical** — one logical change per PR, with tests.
 
+### Stacked pull requests (dependent branches)
+
+Prefer **non-stacked** PRs: branch each change from `main` so it can merge independently. Only stack
+when there is a real **code** dependency (e.g. a milestone that won't compile without the previous one).
+
+When you must stack, follow this recipe — it avoids a footgun where deleting a branch that is still the
+**base** of an open PR **closes** that child PR (GitHub can't reopen or retarget it once the base is gone):
+
+1. Open each child PR with its parent branch as base (e.g. `feat/b` → `feat/a`).
+2. **Do not** pass `--delete-branch` while merging during the sequence.
+3. Merge **bottom-up**. Before merging a parent, **retarget its children to `main` first**
+   (`gh pr edit <child> --base main`) — don't rely on GitHub auto-retargeting.
+4. `main` requires *branch up to date*, so each PR needs `gh pr update-branch <pr>` + a fresh green CI
+   run before it can merge.
+5. **Delete the merged branches only at the very end**, once no open PR references them as a base.
+
+A local guardrail hook (PreToolUse on Bash) asks for confirmation before any branch deletion as a
+backstop; it's a personal `~/.claude/settings.json` hook, not part of this repo.
+
 ## Code review
 
 Every PR is reviewed AI-assisted and approved by the maintainer before merge — the procedure and the
