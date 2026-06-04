@@ -412,3 +412,32 @@ Generalizable lessons from completed milestones; append here as milestones land.
   not-yet-created DB). Trigger Flyway manually from a `StartupEvent` observer after ensuring the DB
   directory exists — `quarkus.flyway.migrate-at-start` runs during RUNTIME_INIT, before any observer,
   so it would open the file before the dir exists (SQLITE_CANTOPEN). [M5]
+- **The SPI method a plugin implements lands in its first CONSUMER's milestone, not the plugin's.**
+  `ModelProvider.resolve(ModelRef)→ChatModel` is consumed by M7's `LlmSelector` and implemented by M9's
+  Ollama provider; since M7 merges first, the method + a versionless `langchain4j-core` dep land on
+  `forvum-sdk` in the M7 PR (else M7 cannot compile). The SDK enforcer governs only the `ai.forvum:*`
+  namespace, so adding a non-Forvum dep needs no enforcer change, and `forvum-sdk` stays Quarkus-free
+  (LangChain4j is not Quarkus). [M7]
+- **`@AgentScoped` bean recipe:** use field injection (package-private) for ArC proxyability — no
+  artificial no-arg constructor — and read `CurrentAgent.CURRENT_AGENT` at method-call time. Test
+  per-agent isolation/caching via an injected bean's `System.identityHashCode(this)` inside
+  `ScopedValue.where(CURRENT_AGENT, id).call(...)` (mirror `ScopeProbe`). The generic isolation lives in
+  `AgentContext`, so don't re-assert it per bean. [M7]
+- **A turn is made atomic by persist-after-success, not `@Transactional` over the whole turn.** A
+  blanket `@Transactional respond()` would roll back the `provider_calls` audit row on a model failure.
+  Build the model request with the user message in-memory, call the model, then persist
+  user+assistant+observation in one transaction (`AgentMemory.recordTurn`) only on success — the failed
+  attempt's ledger row survives in the decorator's own transaction. [M7]
+- **A shared static `@TestProfile` HOME shares the SQLite DB AND `@ApplicationScoped` state across
+  same-profile `@QuarkusTest` classes** (one app instance), and `@Transactional` test methods commit.
+  Scope persistence assertions by the keys/sessions the test wrote, and clean up files a test writes
+  into the shared home — a `spawn` registry-corruption bug surfaced live as a sibling test seeing
+  `main`'s tool belt clobbered. [M7]
+- **Guard public registry mutations + keep IO off lock paths.** `spawn` must reject `childId ==
+  parentId` and collisions (`putIfAbsent`-and-throw) or it silently overwrites a file-declared agent. Do
+  not run blocking file IO inside `ConcurrentHashMap.computeIfAbsent` (it holds the bin monitor →
+  carrier-thread pinning, §3.8) — load outside, then `putIfAbsent`. JPQL `key` is reserved (the `KEY()`
+  function), so filter `semantic_memory` by key in-memory, not in a Panache where-clause. [M7]
+- **Run a deep, adversarially-verified review before a milestone merge** (dimensions → find →
+  refute-by-default verify). On M7 it flipped two test findings where the test was actually the stronger
+  version, and caught a real `spawn` corruption + a non-atomic turn before they shipped. [M7]
