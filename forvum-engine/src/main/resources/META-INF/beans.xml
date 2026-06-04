@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Marks forvum-engine as a CDI bean archive so a consuming Quarkus app (forvum-app) discovers its
+  @Singleton beans (ConfigWatcher, ForvumHome, ConfigLoader, the per-subfolder readers). Quarkus
+  ignores the content; the file's presence triggers indexing of this module during the app's
+  build-time augmentation. See the Quarkus CDI reference, "Bean Discovery".
+-->
+<beans xmlns="https://jakarta.ee/xml/ns/jakartaee"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee https://jakarta.ee/xml/ns/jakartaee/beans_4_0.xsd"
+       version="4.0" bean-discovery-mode="annotated"/>
