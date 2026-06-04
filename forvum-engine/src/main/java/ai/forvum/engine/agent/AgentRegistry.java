@@ -3,12 +3,15 @@ package ai.forvum.engine.agent;
 import ai.forvum.core.Persona;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.config.AgentReader;
+import ai.forvum.engine.config.ConfigurationChangedEvent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -70,6 +73,27 @@ public class AgentRegistry {
                 parent.primaryModel(), parentId, parent.costBudget(), parent.toolBudget());
         specs.put(childId, child);
         return childId;
+    }
+
+    /**
+     * Hot reload: on any change under {@code agents/}, evict the affected agent's cached spec so the
+     * next {@link #getOrCreate} re-reads it from disk (ULTRAPLAN section 5.2 — "watches that
+     * directory"). A bound {@link Agent} reads its persona through {@link #persona} on each call, so no
+     * stale state survives the eviction.
+     */
+    void onConfigChange(@Observes ConfigurationChangedEvent event) {
+        Path path = event.path();
+        if (path.getNameCount() < 1 || !"agents".equals(path.getName(0).toString())) {
+            return;
+        }
+        String fileName = path.getFileName().toString();
+        int dot = fileName.lastIndexOf('.');
+        String idValue = dot > 0 ? fileName.substring(0, dot) : fileName;
+        try {
+            specs.remove(new AgentId(idValue));
+        } catch (IllegalStateException ignored) {
+            // Not a valid agent-id token (e.g. a stray dotfile) — nothing to evict.
+        }
     }
 
     private Persona load(AgentId id) {

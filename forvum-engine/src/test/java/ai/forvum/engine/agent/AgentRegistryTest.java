@@ -8,15 +8,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.config.ChangeType;
+import ai.forvum.engine.config.ConfigurationChangedEvent;
 import ai.forvum.engine.context.CurrentAgent;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -31,6 +36,9 @@ class AgentRegistryTest {
 
     @Inject
     AgentRegistry registry;
+
+    @Inject
+    Event<ConfigurationChangedEvent> configChanged;
 
     @Test
     void getOrCreateLoadsSpecFromFilesAndCachesOneInstancePerAgent() throws Exception {
@@ -75,5 +83,26 @@ class AgentRegistryTest {
 
         assertThrows(IllegalStateException.class,
                 () -> registry.spawn(main, new AgentId("rogue"), List.of("shell.exec")));
+    }
+
+    @Test
+    void hotReloadEvictsAChangedAgentSoTheNextGetOrCreateRereadsIt() throws Exception {
+        Path agents = AgentRegistryTestHomeProfile.HOME.resolve("agents");
+        Files.writeString(agents.resolve("reloadable.md"), "persona");
+        Files.writeString(agents.resolve("reloadable.json"),
+                "{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"allowedTools\": [] }");
+
+        AgentId id = new AgentId("reloadable");
+        registry.getOrCreate(id);
+        assertEquals(ModelRef.parse("ollama:qwen3:1.7b"), registry.persona(id).primaryModel());
+
+        Files.writeString(agents.resolve("reloadable.json"),
+                "{ \"primaryModel\": \"fake:test-model\", \"allowedTools\": [] }");
+        configChanged.fire(new ConfigurationChangedEvent(
+                Path.of("agents", "reloadable.json"), ChangeType.MODIFIED));
+
+        registry.getOrCreate(id);
+        assertEquals(ModelRef.parse("fake:test-model"), registry.persona(id).primaryModel(),
+                "a changed agent file must be re-read on the next getOrCreate");
     }
 }
