@@ -27,11 +27,17 @@
         </dependencies>
     </dependencyManagement>
 
-    <!-- Layer 0 has no production dependencies; everything here is test scope. JUnit and Jackson
-         are the only test dependencies. None is an io.quarkus*/io.quarkiverse* artifact, so the
-         enforce-core-purity rule (below) still passes. Versions come from the Quarkus platform BOM
-         imported via forvum-bom. -->
+    <!-- Layer 0 stays pure Java. The single compile dependency is the Jakarta CDI API, needed only so
+         @AgentScoped can be meta-annotated @NormalScope; it is `provided` (compile-only, supplied by
+         ArC downstream) and is NOT an io.quarkus*/io.quarkiverse* artifact, so enforce-core-purity
+         (below) still passes. Everything else is test scope. Versions come from the Quarkus platform
+         BOM imported via forvum-bom. -->
     <dependencies>
+        <dependency>
+            <groupId>jakarta.enterprise</groupId>
+            <artifactId>jakarta.enterprise.cdi-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
