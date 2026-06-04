@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 /**
  * Watches the {@code $FORVUM_HOME} config surface with a single {@link WatchService} and fires a CDI
@@ -111,7 +112,9 @@ public class ConfigWatcher {
                 WatchKey key = watchService.take();                 // block until the first event
                 do {
                     drainKey(key);
-                    key.reset();
+                    if (!key.reset()) {
+                        keyToDir.remove(key); // directory gone/invalid — drop the now-dead key
+                    }
                     key = watchService.poll(DEBOUNCE.toMillis(), TimeUnit.MILLISECONDS); // coalesce the burst
                 } while (key != null && running);
                 fireAll(buffer.drain());                            // 250 ms quiet → emit coalesced events
@@ -131,11 +134,14 @@ public class ConfigWatcher {
         for (WatchEvent<?> event : key.pollEvents()) {
             Optional<ChangeType> type = ChangeType.from(event.kind());
             if (type.isEmpty()) {
-                continue; // OVERFLOW or unknown kind
+                onOverflow(dir); // OVERFLOW: the OS dropped events — rescan to recover them
+                continue;
             }
             Path full = dir.resolve((Path) event.context());
             Path relative = home.root().relativize(full);
-            if (isWatchedConfig(relative)) {
+            if (type.get() == ChangeType.CREATED && isWatchedSubfolder(relative) && Files.isDirectory(full)) {
+                registerAndScan(full); // a watched subfolder appeared after boot — start watching it
+            } else if (isWatchedConfig(relative)) {
                 buffer.record(relative, type.get());
             }
         }
@@ -149,9 +155,48 @@ public class ConfigWatcher {
         return WATCHED_SUBFOLDERS.contains(relative.getName(0).toString());
     }
 
+    /** True for a direct child of {@code $FORVUM_HOME} that is one of the watched subfolders. */
+    private static boolean isWatchedSubfolder(Path relative) {
+        return relative.getNameCount() == 1 && WATCHED_SUBFOLDERS.contains(relative.toString());
+    }
+
+    /** Watch a watched subfolder that appeared after boot, then announce the files already inside it. */
+    private void registerAndScan(Path dir) {
+        try {
+            register(dir);
+        } catch (IOException e) {
+            LOG.warnf(e, "Failed to watch newly created config directory %s", dir);
+            return;
+        }
+        recordExistingFiles(dir, ChangeType.CREATED);
+    }
+
+    /** OVERFLOW recovery: the OS lost events, so rescan {@code dir} and re-announce its files. */
+    private void onOverflow(Path dir) {
+        LOG.warnf("WatchService OVERFLOW on %s; rescanning to recover dropped events.", dir);
+        recordExistingFiles(dir, ChangeType.MODIFIED);
+    }
+
+    private void recordExistingFiles(Path dir, ChangeType type) {
+        try (Stream<Path> entries = Files.list(dir)) {
+            entries.filter(Files::isRegularFile).forEach(file -> {
+                Path relative = home.root().relativize(file);
+                if (isWatchedConfig(relative)) {
+                    buffer.record(relative, type);
+                }
+            });
+        } catch (IOException e) {
+            LOG.warnf(e, "Failed to scan config directory %s", dir);
+        }
+    }
+
     private void fireAll(List<ConfigurationChangedEvent> events) {
         for (ConfigurationChangedEvent event : events) {
-            emitter.fire(event);
+            try {
+                emitter.fire(event); // synchronous CDI event on this watch thread
+            } catch (RuntimeException e) {
+                LOG.errorf(e, "A ConfigurationChangedEvent observer failed for %s; watch continues.", event);
+            }
         }
     }
 

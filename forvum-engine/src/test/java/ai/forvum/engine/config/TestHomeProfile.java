@@ -22,7 +22,9 @@ public class TestHomeProfile implements QuarkusTestProfile {
     private static Path createHome() {
         try {
             Path home = Files.createTempDirectory("forvum-test-home");
-            for (String subfolder : List.of("identities", "agents", "skills", "crons", "channels", "mcp-servers")) {
+            // mcp-servers/ is intentionally absent at boot — ConfigWatcherTest creates it at runtime to
+            // exercise dynamic registration of a watched subfolder that did not exist at startup.
+            for (String subfolder : List.of("identities", "agents", "skills", "crons", "channels")) {
                 Files.createDirectories(home.resolve(subfolder));
             }
             Files.writeString(home.resolve("crons/seed.json"), "{\"schedule\":\"0 0 * * *\"}");

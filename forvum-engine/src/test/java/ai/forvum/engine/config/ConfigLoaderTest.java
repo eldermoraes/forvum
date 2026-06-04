@@ -63,4 +63,12 @@ class ConfigLoaderTest {
     void listIdsEmptyWhenDirAbsent(@TempDir Path dir) {
         assertEquals(List.of(), loader.listIds(dir.resolve("nope"), ".json"));
     }
+
+    @Test
+    void listIdsExcludesFileNamedExactlyTheSuffix(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve(".json"), "{}"); // hidden dotfile == suffix → empty stem, must be ignored
+        Files.writeString(dir.resolve("real.json"), "{}");
+
+        assertEquals(List.of("real"), loader.listIds(dir, ".json"));
+    }
 }

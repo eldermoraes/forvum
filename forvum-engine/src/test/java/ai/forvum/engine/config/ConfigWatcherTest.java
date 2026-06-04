@@ -1,6 +1,7 @@
 package ai.forvum.engine.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -61,5 +62,18 @@ class ConfigWatcherTest {
 
         assertEquals(Path.of("identities/seed.json"), event.path());
         assertEquals(ChangeType.DELETED, event.type());
+    }
+
+    @Test
+    void subfolderCreatedAfterBootIsWatchedAndItsFilesFireEvents() throws IOException, InterruptedException {
+        Path subfolder = TestHomeProfile.HOME.resolve("mcp-servers"); // absent at boot (see TestHomeProfile)
+        Files.createDirectory(subfolder);
+        Files.writeString(subfolder.resolve("github.json"), "{\"transport\":\"stdio\"}");
+
+        ConfigurationChangedEvent event = recorder.awaitNext(TIMEOUT);
+
+        assertEquals(Path.of("mcp-servers/github.json"), event.path());
+        assertTrue(event.type() == ChangeType.CREATED || event.type() == ChangeType.MODIFIED,
+                "expected CREATED or MODIFIED, got " + event.type());
     }
 }

@@ -67,7 +67,7 @@ public class ConfigLoader {
             return entries
                     .filter(Files::isRegularFile)
                     .map(p -> p.getFileName().toString())
-                    .filter(name -> name.endsWith(suffix))
+                    .filter(name -> name.length() > suffix.length() && name.endsWith(suffix))
                     .map(name -> name.substring(0, name.length() - suffix.length()))
                     .sorted()
                     .toList();
