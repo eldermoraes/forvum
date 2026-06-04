@@ -27,14 +27,20 @@
         </dependencies>
     </dependencyManagement>
 
-    <!-- Layer 1 SPI: the only production dependency is forvum-core (the contracts the sealed
-         interfaces build on; version managed by forvum-bom). Test scope adds junit-jupiter. No
-         quarkus-core in any scope — @RegisterForReflection is re-declared in this module, not
-         imported from Quarkus. The enforce-sdk-layering rule (below) validates the ai.forvum edge. -->
+    <!-- Layer 1 SPI: production dependencies are forvum-core (the contracts the sealed interfaces
+         build on) and langchain4j-core (the ModelProvider.resolve return type, ChatModel) — both
+         versionless, managed by forvum-bom. LangChain4j is NOT Quarkus, so the module stays
+         Quarkus-free. Test scope adds junit-jupiter. No quarkus-core in any scope —
+         @RegisterForReflection is re-declared in this module, not imported from Quarkus. The
+         enforce-sdk-layering rule (below) validates the ai.forvum edge. -->
     <dependencies>
         <dependency>
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-core</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

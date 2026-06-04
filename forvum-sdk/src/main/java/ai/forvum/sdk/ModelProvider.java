@@ -1,14 +1,27 @@
 package ai.forvum.sdk;
 
+import ai.forvum.core.ModelRef;
+import dev.langchain4j.model.chat.ChatModel;
+
 /**
  * SPI a model plugin implements to supply an LLM binding to the routing layer (ULTRAPLAN
- * section 2.2, Layer 1). Sealed: third parties extend {@link AbstractModelProvider}. The resolution
- * method ({@code ai.forvum.core.ModelRef} to a LangChain4j {@code ChatModel}) is added by the
- * provider milestones (M9-M12), which bring the LangChain4j types; M3 fixes only the structural
- * contract and the id.
+ * section 2.2, Layer 1). Sealed: third parties extend {@link AbstractModelProvider}. M3 fixed the
+ * structural contract and the id; the resolution method ({@link ModelRef} to a LangChain4j
+ * {@link ChatModel}) is added by the Tier-B prelude that the provider milestones (M9-M12) implement.
  */
 public sealed interface ModelProvider permits AbstractModelProvider {
 
     /** Stable id of the contributing extension, matching its {@code META-INF/forvum/plugin.json}. */
     String extensionId();
+
+    /**
+     * Resolve a {@link ModelRef} this provider handles to a LangChain4j {@link ChatModel}.
+     *
+     * <p>The engine's {@code LlmSelector} selects the provider whose {@link #extensionId()} matches the
+     * ref's provider half, then calls this to obtain the model it invokes (which the engine wraps in its
+     * fallback decorator). Implementations build/return the concrete model for {@code ref.model()}; they
+     * do not touch the ledger or apply fallback — those are the engine's concern (ULTRAPLAN
+     * section 4.3.5.1).
+     */
+    ChatModel resolve(ModelRef ref);
 }
