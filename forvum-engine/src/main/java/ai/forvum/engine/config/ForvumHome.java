@@ -63,6 +63,11 @@ public class ForvumHome {
         return root.resolve("config.json");
     }
 
+    /** {@code $FORVUM_HOME/state} — operational state (the SQLite database lives here). */
+    public Path state() {
+        return root.resolve("state");
+    }
+
     /** {@code $FORVUM_HOME/identities} — identity records. */
     public Path identities() {
         return root.resolve("identities");
