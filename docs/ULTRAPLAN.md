@@ -527,7 +527,7 @@ public final class FallbackReasons {
 - `invocationId: long` — mirrors `tool_invocations.id` autoincrement; assigned by the engine at row INSERT before emitting `ToolInvoked`.
 - `InvocationStatus` (on `ToolResult`) — resolved in §4.3.3 (Group 2).
 - `ModelRef` (on `TokenDelta`, `FallbackTriggered`) — resolved in §4.3.5.1 (Group 4a).
-- `FallbackTriggered.reason` is a `String` populated from `FallbackReasons.*` constants only. Migration to a `FailureClass` enum is scheduled for M8 once the taxonomy stabilizes.
+- `FallbackTriggered.reason` is a `String` populated from `FallbackReasons.*` constants only. (The once-proposed migration to a `FailureClass` enum was **declined at M8**: the stabilized `FailureClass` is the engine-local 3-way retry axis `Retryable`/`NonRetryable`/`Unknown`, orthogonal to and coarser than the user-facing `reason` token — collapsing them would lose telemetry granularity. `reason` stays a `FallbackReasons` String.)
 
 #### 4.3.3 SQL-mirror enums (`role`, `event_type`, `status`)
 
@@ -1295,10 +1295,11 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Verify:** seed `~/.forvum/agents/main.md` + `main.json`, call `registry.getOrCreate("main")` twice and assert the same `Agent` instance; call `registry.spawn("main", childSpec)` and assert a distinct child `AgentId` with a narrower tool belt.
   - **Commit:** `feat(engine): add AgentRegistry with file-driven agent creation`.
 
-- [ ] **M8 — `FallbackChatModel` + `FailureClassifier`.**
-  - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/model/FallbackChatModel.java`, `FallbackStreamingChatModel.java`, `FailureClass.java` (sealed), `FailureClassifier.java`.
-  - **Deps:** `dev.langchain4j:langchain4j-core` (from `forvum-bom`).
-  - **Verify:** unit test with a mock `ChatModel` that throws `RateLimitException` on the first call and returns on the second; assert `provider_calls` gets two rows and the second has `is_fallback = 1`.
+- [x] **M8 — `FallbackChatModel` + `FailureClassifier`.**
+  - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/model/FallbackChatModel.java`, `FallbackStreamingChatModel.java`, `FailureClass.java` (sealed: `Retryable`/`NonRetryable`/`Unknown`), `FailureClassifier.java`, `FallbackLink.java` (engine-local chain link), `ProviderCall.java` + `ProviderCallRecorder.java` (write seam) + `PanacheProviderCallRecorder.java` (persistence impl).
+  - **Deps:** `dev.langchain4j:langchain4j-core` (transitive via `quarkus-langchain4j-bom`).
+  - **As-built notes:** (1) `FailureClassifier` keys on LangChain4j's `RetriableException`/`NonRetriableException` base types. (2) The `FallbackTriggered.reason → FailureClass` migration the original plan scheduled here is **declined** — `FailureClass` is the engine-local 3-way *retry* axis, `reason` stays the finer `FallbackReasons` String *telemetry* token (collapsing would lose `rate_limit`/`timeout`/`server_error` granularity); zero `forvum-core` change (see §4.3.2). (3) `forvum-core.FallbackChain` is still TBD (§4.3.5.3 / Group 4c), so M8 uses an engine-local `FallbackLink` list — one constructor adapts when the core type lands.
+  - **Verify:** unit test with a mock `ChatModel` that throws `RateLimitException` on the first call and returns on the second; assert `provider_calls` gets two rows and the second has `is_fallback = 1` (`ProviderCallPersistenceIT`).
   - **Commit:** `feat(engine): add FallbackChatModel decorator with failure classification`.
 
 - [ ] **M9 — Ollama provider (first provider, local, no API key).**

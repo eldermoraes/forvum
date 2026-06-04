@@ -58,16 +58,16 @@ public final class AgentContext implements InjectableContext {
     @SuppressWarnings("unchecked")
     public <T> T get(Contextual<T> contextual, CreationalContext<T> creationalContext) {
         Map<Contextual<?>, Handle> map = currentMap();
-        Handle existing = map.get(contextual);
-        if (existing != null) {
-            return (T) existing.instance();
-        }
         if (creationalContext == null) {
-            return null;
+            Handle existing = map.get(contextual);
+            return existing != null ? (T) existing.instance() : null;
         }
-        T instance = contextual.create(creationalContext);
-        map.put(contextual, new Handle(instance, creationalContext));
-        return instance;
+        // Atomic per (agent, contextual): when the same agent is bound on two virtual threads that
+        // first-resolve the same bean concurrently, exactly one instance is created — a plain
+        // get-then-put would create two and leak the loser's CreationalContext.
+        Handle handle = map.computeIfAbsent(contextual,
+                c -> new Handle(contextual.create(creationalContext), creationalContext));
+        return (T) handle.instance();
     }
 
     @Override
@@ -87,6 +87,13 @@ public final class AgentContext implements InjectableContext {
         destroyHandle(contextual, map.remove(contextual));
     }
 
+    /**
+     * Destroys the currently bound agent's beans. Required by the {@code InjectableContext} SPI, but
+     * ArC generates a wrapper that overrides the no-arg {@code destroy()}/{@code getState()} with
+     * throwing stubs (a custom {@code AlterableContext} is not asked to tear down "all" instances), so
+     * this body is not exercised by the container-shutdown lifecycle — per-agent teardown goes through
+     * {@link #destroy(AgentId)} (M7). Kept functional and harmless in case it is ever invoked directly.
+     */
     @Override
     public void destroy() {
         if (!CurrentAgent.CURRENT_AGENT.isBound()) {
@@ -116,6 +123,11 @@ public final class AgentContext implements InjectableContext {
         }
     }
 
+    /**
+     * Snapshot of the current agent's contextual instances. Required by the SPI; like {@link #destroy()}
+     * it is shadowed by ArC's generated wrapper (which throws "has no state"), so it does not drive
+     * container shutdown — do not read it as evidence that {@code @AgentScoped} beans are reaped on stop.
+     */
     @Override
     public ContextState getState() {
         Map<Contextual<?>, Handle> map = currentMap();
