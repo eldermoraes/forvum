@@ -49,6 +49,11 @@ public final class AgentSpecReader {
         Long toolBudget = null;
         JsonNode toolBudgetNode = spec.get("toolBudget");
         if (toolBudgetNode != null && !toolBudgetNode.isNull()) {
+            if (!toolBudgetNode.isIntegralNumber()) {
+                throw new IllegalStateException(
+                    "Agent '" + id.value() + "' has a non-integer 'toolBudget' (" + toolBudgetNode
+                  + "). Check agents/" + id.value() + ".json.");
+            }
             toolBudget = toolBudgetNode.asLong();
         }
 

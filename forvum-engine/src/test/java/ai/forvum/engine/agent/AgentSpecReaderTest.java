@@ -69,4 +69,21 @@ class AgentSpecReaderTest {
         assertThrows(IllegalStateException.class,
                 () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec));
     }
+
+    @Test
+    void rejectsBlankPrimaryModel() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"\" }");
+
+        assertThrows(IllegalStateException.class,
+                () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec));
+    }
+
+    @Test
+    void rejectsNonNumericToolBudget() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"toolBudget\": \"abc\" }");
+
+        assertThrows(IllegalStateException.class,
+                () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec),
+                "a non-numeric toolBudget must be rejected, not silently coerced to 0");
+    }
 }
