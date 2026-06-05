@@ -567,15 +567,19 @@ manifest. If the Vertex gRPC stack blocks native, switch to the REST `quarkus-la
 **Labels:** `phase-1`, `engine`, `tool`, `security`, `native` · **Milestone:** `v0.1 MVP`
 
 **Context.** Tool capability gating (§5.3, §4.3.4): the Select pillar applied to capability. Tied to the
-security-test layer (§10) and to the X7 gap (the shell tool, the `SkillInvokerTool` skills surface, and
-the MCP bridge baseline have no dedicated milestone — fold them here or into M18, or split micro-issues).
+security-test layer (§10). The X7 gap (the shell tool, the `SkillInvokerTool` skills surface, the MCP
+bridge baseline, the OTel baseline) is **out of M13 scope** — decided 2026-06-05, deferred to its own
+issue (#73), so M13 stays minimal.
 
-**Scope / Deliverables.** `ToolRegistry`; `ToolExecutor` (enforces `PermissionScope`); `PermissionScope`
-enum (§4.3.4); `ToolFilter` (glob matching). Decide X7 placement: shell tool + skills surface +
-mcp-bridge (flagged off, Risk #9) + OTel baseline as M13/M18 acceptance vs micro-milestones.
+**Scope / Deliverables.** `ToolRegistry`; `ToolExecutor` (enforces capability via the agent's filtered
+belt); `PermissionDeniedException`; `ToolFilter` (glob matching); the `forvum-sdk` `ToolProvider.tools()`
+SPI prelude; the `ToolInvocation` recorder triad (write seam over the existing V1 `tool_invocations`).
+`PermissionScope` is **consumed** from `forvum-core` (already exists, M2) — not recreated; M13 adds no
+migration. Tools are not wired into `Agent.respond()` here (that is M18).
 
-**Files.** `forvum-engine/.../tools/ToolRegistry.java`, `ToolExecutor.java`, `PermissionScope.java`,
-`ToolFilter.java`.
+**Files.** `forvum-engine/.../tools/{ToolRegistry,ToolExecutor,ToolFilter,PermissionDeniedException}.java`,
+`.../model/{ToolInvocation,ToolInvocationRecorder}.java`, `.../persistence/PanacheToolInvocationRecorder.java`,
+`.../agent/AgentToolBelt.java` (filtered `tools()`); `forvum-sdk/.../ToolProvider.java` (the `tools()` prelude).
 
 **Acceptance Criteria.**
 - Register `a.read`/`a.write`; seed an agent with `allowedTools:["a.read"]`; assert a call to `a.write`
