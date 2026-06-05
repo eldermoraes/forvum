@@ -38,20 +38,22 @@ import java.util.Map;
  * <p><strong>Requires Ollama running locally:</strong> {@code ollama serve} with {@code qwen3:1.7b}
  * pulled ({@code ollama pull qwen3:1.7b}).
  *
- * <p>{@code @Tag("live")} — excluded from the default build by the {@code maven-surefire-plugin}
- * {@code excludedGroups} configuration in {@code forvum-app/pom.xml}. To run manually, clear the
- * exclusion AND select the group (a bare {@code -Dgroups=live} loses to the static exclusion):
+ * <p>{@code @Tag("live")} — excluded from the default build via the {@code ${excludedGroups}} Surefire
+ * user property (defaulted to {@code live} in {@code forvum-app/pom.xml}). To run manually, clear the
+ * exclusion AND select the group:
  * <pre>{@code
  *   ./mvnw -pl forvum-app test -Dgroups=live -DexcludedGroups=
  * }</pre>
  *
  * <p><strong>Native (Risk #5) — deferred to M20 (written carve-out, CLAUDE.md §5).</strong> The
- * per-provider native scripted-turn smoke ULTRAPLAN §8 Risk #5 mandates needs Ollama as a CI service
- * plus the {@code ci.yml} matrix — both M20 infrastructure. M9 validates the load-bearing native parts
- * now: the provider native-COMPILES (the pre-release {@code quarkus-langchain4j} {@code 1.11.0.CR1}
- * builds the binary) and the binary boots gracefully with no {@code ~/.forvum/} (exit 0). The native
- * turn that exercises {@code resolve()/chat()} — catching a native-only JSON reflection gap in the
- * Ollama request/response path — lands at M20 when the CI Ollama service exists.
+ * per-provider native scripted-turn smoke ULTRAPLAN §8 Risk #5 mandates needs an Ollama CI service plus
+ * a native {@code @QuarkusIntegrationTest} that drives a turn. The existing {@code ci.yml} native leg
+ * ({@code ./mvnw -Pnative verify} on linux-amd64 + macos-arm64) today runs only the boot smoke
+ * (ForvumApplicationIT), which never reaches {@code resolve()/chat()}. M9 validates the load-bearing
+ * native parts now: the provider native-COMPILES (the pre-release {@code quarkus-langchain4j}
+ * {@code 1.11.0.CR1} builds the binary) and the binary boots gracefully with no {@code ~/.forvum/}
+ * (exit 0). The Ollama-service-backed native turn — catching a native-only JSON reflection gap in the
+ * request/response path — is M20 scope.
  */
 @QuarkusTest
 @TestProfile(OllamaScriptedTurnE2E.LiveHomeProfile.class)
