@@ -63,4 +63,24 @@ class FilesystemToolsTest {
 
         assertThrows(WorkspaceEscapeException.class, () -> read.read("../../../../etc/passwd"));
     }
+
+    @Test
+    void writeOverwritesAnExistingFile(@TempDir Path dir) throws IOException {
+        WorkspaceRoot workspace = new WorkspaceRoot(dir);
+        FsWriteTool write = new FsWriteTool(workspace);
+
+        write.write("note.txt", "a long first version");
+        write.write("note.txt", "x");
+
+        assertEquals("x", Files.readString(dir.resolve("note.txt")),
+                "a second write truncates, not appends (no leftover bytes from the longer first write)");
+    }
+
+    @Test
+    void listOutsideTheWorkspaceIsDenied(@TempDir Path dir) {
+        WorkspaceRoot workspace = new WorkspaceRoot(dir);
+        FsListTool list = new FsListTool(workspace);
+
+        assertThrows(WorkspaceEscapeException.class, () -> list.list(".."));
+    }
 }

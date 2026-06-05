@@ -613,8 +613,10 @@ the three append-only pom wirings (root `<modules>`, `forvum-bom`, `forvum-app`)
   workspace root is denied.
 - **[NATIVE]** native file I/O native-clean; native parity applies.
 - Security negative test (X5/TEST-SEC): path traversal in fs-tool args → denied. M14 ships a minimal
-  self-contained `WorkspaceRoot` (`normalize` + element-wise `startsWith`); the full DR-6a output-filter
-  / threat-model contract is deferred (decided 2026-06-05, the M9–M12 ship-without-every-contract precedent).
+  self-contained `WorkspaceRoot` (`normalize` + element-wise `startsWith`, so a `<root>-evil` sibling is
+  rejected). The check is LEXICAL only — symlink-resolving confinement (`toRealPath` / `O_NOFOLLOW`) and
+  TOCTOU hardening are part of the deferred DR-6a output-filter / threat-model contract (decided
+  2026-06-05; out of scope under the single-user, local-first trust boundary — the M9–M12 precedent).
 - **[PLUGIN]** `quarkus/skills` for the SDK/tool patterns; module scaffolded via the MCP.
 
 **Dependencies.** M3, M13.

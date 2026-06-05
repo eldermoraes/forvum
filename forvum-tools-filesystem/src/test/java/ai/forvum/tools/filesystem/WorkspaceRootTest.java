@@ -51,4 +51,14 @@ class WorkspaceRootTest {
 
         assertThrows(WorkspaceEscapeException.class, () -> workspace.resolve("/etc/passwd"));
     }
+
+    @Test
+    void rejectsASiblingDirectoryThatSharesAStringPrefix(@TempDir Path dir) {
+        WorkspaceRoot workspace = new WorkspaceRoot(dir);
+        // "<root>-evil" string-starts-with "<root>" but is a different path element — element-wise
+        // startsWith must reject it (a String.startsWith regression would let it through).
+        String sibling = "../" + dir.getFileName() + "-evil/loot.txt";
+
+        assertThrows(WorkspaceEscapeException.class, () -> workspace.resolve(sibling));
+    }
 }
