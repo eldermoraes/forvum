@@ -24,7 +24,7 @@ public class AgentToolBelt {
     @Inject
     ToolRegistry toolRegistry;
 
-    private List<ToolSpec> filtered;
+    private volatile List<ToolSpec> filtered;
 
     /** The agent's {@code allowedTools} globs (immutable, from its persona). */
     public List<String> globs() {

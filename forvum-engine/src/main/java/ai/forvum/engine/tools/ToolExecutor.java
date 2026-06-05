@@ -44,7 +44,7 @@ public class ToolExecutor {
         boolean permitted = belt.stream().anyMatch(spec -> spec.name().equals(toolName));
         if (!permitted) {
             recorder.record(new ToolInvocation(sessionId, agentId.value(), toolName, arguments,
-                    null, InvocationStatus.DENIED, 0, createdAt));
+                    null, InvocationStatus.DENIED, null, createdAt));
             throw new PermissionDeniedException(
                     "Agent '" + agentId.value() + "' is not permitted to call tool '" + toolName
                   + "': it is not in the agent's tool belt (its allowedTools globs do not select it). "
