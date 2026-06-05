@@ -1,0 +1,7 @@
+{
+  "extension_id": "ollama",
+  "module_name": "forvum-provider-ollama",
+  "providers": [
+    { "type": "model", "class": "ai.forvum.provider.ollama.OllamaModelProvider" }
+  ]
+}

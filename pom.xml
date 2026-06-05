@@ -26,6 +26,7 @@
         <module>forvum-core</module>
         <module>forvum-sdk</module>
         <module>forvum-engine</module>
+        <module>forvum-provider-ollama</module>
         <module>forvum-app</module>
     </modules>
 
