@@ -85,6 +85,11 @@
                 <artifactId>forvum-provider-ollama</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-provider-anthropic</artifactId>
+                <version>${project.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 </project>
