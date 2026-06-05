@@ -150,22 +150,28 @@ nobody asked for. This mirrors the behavioral guidelines in CLAUDE.md §13. Reje
 ### 5.1 Layer-3 plugin layering
 
 When a Layer-3 module is created (`forvum-channel-*`, `forvum-provider-*`, `forvum-tools-*`), it carries
-this `maven-enforcer-plugin` execution so it compiles only against `forvum-sdk` — never against engine
-or core internals (CLAUDE.md §12):
+this `maven-enforcer-plugin` execution so it compiles only against `forvum-sdk` **plus the Layer-0
+contracts the SPI re-exposes** (`forvum-core`) — never against the engine, another extension, or the app
+(CLAUDE.md §12). `forvum-core` MUST be allowlisted: with `searchTransitive=true` it arrives transitively
+via `forvum-sdk` (the SPI signatures use Layer-0 types, e.g. `ModelProvider.resolve(ModelRef)`), and a
+plugin genuinely imports them — `forvum-core` is the pure-contract layer, not internals.
 
 ```xml
 <bannedDependencies>
     <!-- Allowlist form (consistent with core/sdk/engine): ban every ai.forvum module,
-         re-allow only forvum-sdk — so a plugin can never reach core internals, the engine,
-         another extension, or the app, regardless of future module names. -->
+         re-allow forvum-sdk + forvum-core. forvum-core is the Layer-0 contract layer the SPI
+         re-exposes (e.g. ModelRef in ModelProvider.resolve(ModelRef)) — a plugin unavoidably and
+         legitimately compiles against it; what stays banned is the engine, another extension, and
+         the app, regardless of future module names. -->
     <includes>
         <include>ai.forvum:forvum-sdk</include>
+        <include>ai.forvum:forvum-core</include>
     </includes>
     <excludes>
         <exclude>ai.forvum:*</exclude>
     </excludes>
     <searchTransitive>true</searchTransitive>
-    <message>A Forvum extension (Layer 3) compiles only against forvum-sdk (among ai.forvum modules); it must not depend on forvum-core, forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+    <message>A Forvum extension (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ModelRef in the ModelProvider SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
 </bannedDependencies>
 ```
 
