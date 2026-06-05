@@ -49,6 +49,14 @@
             <groupId>io.quarkiverse.langchain4j</groupId>
             <artifactId>quarkus-langchain4j-ai-gemini</artifactId>
         </dependency>
+        <!-- JaxRsHttpClientBuilder: pinned explicitly in GoogleModelProvider#resolve so GeminiService
+             never takes the ambiguous HttpClientBuilderLoader ServiceLoader path (two factories coexist
+             on the forvum-app classpath). Declared directly because the code references it (it is also a
+             transitive of the ai-gemini extension). Version managed via quarkus-langchain4j-bom. -->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-jaxrs-client</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>

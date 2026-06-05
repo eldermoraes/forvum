@@ -445,3 +445,25 @@ Generalizable lessons from completed milestones; append here as milestones land.
 - **Run a deep, adversarially-verified review before a milestone merge** (dimensions → find →
   refute-by-default verify). On M7 it flipped two test findings where the test was actually the stronger
   version, and caught a real `spawn` corruption + a non-atomic turn before they shipped. [M7]
+- **A LangChain4j model built programmatically must pin an explicit `httpClientBuilder` — the multi-factory
+  conflict is silent until the full app classpath.** `forvum-app` carries TWO
+  `dev.langchain4j.http.client.HttpClientBuilderFactory` services at once (`JaxRsHttpClientBuilderFactory`
+  via ollama/gemini + `JdkHttpClientBuilderFactory` pulled by `langchain4j-anthropic`). A model whose
+  builder is NOT swapped by a Quarkiverse builder-factory (the Gemini case — unlike OpenAI/Anthropic,
+  whose `builder()` IS swapped to the Quarkus REST client) falls through `GeminiService` →
+  `HttpClientBuilderLoader.loadHttpClientBuilder()`, which `ServiceLoader`s the classpath and throws
+  `IllegalStateException("Conflict: multiple HTTP clients ...")` at `build()` time unless
+  `langchain4j.http.clientBuilderFactory` is set. Fix: pin `.httpClientBuilder(new JaxRsHttpClientBuilder())`
+  (the native-tested Quarkus REST client, same stack the sibling providers land on; `GeminiService` fills
+  its timeouts from the model `timeout`, so a bare instance is safe). The trap: a provider-module contract
+  test passes (its classpath has a single factory) and the only app-classpath exerciser is a `@Tag("live")`
+  e2e (default-off) — so the regression ships green. The guard is a NON-live `@QuarkusTest` in `forvum-app`
+  that `resolve()`s the ref (build() alone throws; no key/network needed). [M12]
+- **The `quarkus-langchain4j-ai-gemini` extension fails the no-config native boot eagerly** — its
+  deployment recorder (`AiGeminiRecorder#throwIfApiKeysNotConfigured`) throws a `ConfigValidationException`
+  while constructing the auto-registered default ChatModel synthetic bean at startup when no api-key is
+  set (the api-key mapping is itself `Optional<String>`; the eagerness is the recorder's). OpenAI/Anthropic
+  are lazy by contrast. Remedy: a placeholder `quarkus.langchain4j.ai.gemini.api-key=unset` default across
+  all profiles (the CI native smoke runs the prod profile with no `~/.forvum/` and no key). Forvum never
+  uses the extension's own bean (it builds the model programmatically), so the placeholder only defers a
+  real-key failure to call time. [M12]
