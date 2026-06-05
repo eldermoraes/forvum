@@ -28,6 +28,7 @@
         <module>forvum-engine</module>
         <module>forvum-provider-ollama</module>
         <module>forvum-provider-anthropic</module>
+        <module>forvum-provider-openai</module>
         <module>forvum-app</module>
     </modules>
 
