@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.exception.AuthenticationException;
+import dev.langchain4j.exception.InvalidRequestException;
 import dev.langchain4j.exception.RateLimitException;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -82,26 +83,61 @@ class FallbackChatModelTest {
     }
 
     @Test
-    void nonRetryableFailureStopsImmediately() {
+    void authFailureAdvancesToNextProvider() {
+        // AuthenticationException is provider-level (bad key on this provider, not a bad request):
+        // the chain must fall through to the next link, return its response, and record 2 rows.
         var recorder = new InMemoryProviderCallRecorder();
+        var events = new ArrayList<AgentEvent>();
         var primary = new FallbackLink(new ModelRef("anthropic", "claude"), throwing(new AuthenticationException("bad key")), null);
-        var secondary = new FallbackLink(new ModelRef("ollama", "qwen"), returning(response(1, 1)), null);
-        var model = new FallbackChatModel(List.of(primary, secondary), "s", "a", classifier, recorder, null);
+        var secondary = new FallbackLink(new ModelRef("ollama", "qwen"), returning(response(1, 2)), null);
+        var model = new FallbackChatModel(List.of(primary, secondary), "s", "a", classifier, recorder, events::add);
 
-        assertThrows(AuthenticationException.class, () -> model.chat(request()));
-        assertEquals(1, recorder.calls.size());
+        ChatResponse out = model.chat(request());
+
+        assertEquals(2, out.tokenUsage().outputTokenCount());
+        assertEquals(2, recorder.calls.size(), "one anthropic failure row + one ollama success row");
         assertFalse(recorder.calls.get(0).fallback());
+        assertEquals(AuthenticationException.class.getName(), recorder.calls.get(0).error());
+        assertTrue(recorder.calls.get(1).fallback());
+        assertNull(recorder.calls.get(1).error());
+        assertEquals(1, events.size(), "exactly one FallbackTriggered");
+        FallbackTriggered triggered = assertInstanceOf(FallbackTriggered.class, events.get(0));
+        assertEquals("ollama", triggered.next().provider());
     }
 
     @Test
-    void unknownFailureIsNeverRetried() {
+    void unknownFailureAdvancesToNextProvider() {
+        // Unknown RuntimeExceptions are provider-level (connection error, unexpected failure):
+        // the chain must fall through to the next link.
         var recorder = new InMemoryProviderCallRecorder();
+        var events = new ArrayList<AgentEvent>();
         var primary = new FallbackLink(new ModelRef("anthropic", "claude"), throwing(new RuntimeException("weird")), null);
         var secondary = new FallbackLink(new ModelRef("ollama", "qwen"), returning(response(1, 1)), null);
-        var model = new FallbackChatModel(List.of(primary, secondary), "s", "a", classifier, recorder, null);
+        var model = new FallbackChatModel(List.of(primary, secondary), "s", "a", classifier, recorder, events::add);
 
-        assertThrows(RuntimeException.class, () -> model.chat(request()));
-        assertEquals(1, recorder.calls.size());
+        ChatResponse out = model.chat(request());
+
+        assertEquals(1, out.tokenUsage().outputTokenCount());
+        assertEquals(2, recorder.calls.size(), "one primary failure row + one secondary success row");
+        assertNull(recorder.calls.get(1).error());
+        assertEquals(1, events.size(), "exactly one FallbackTriggered");
+    }
+
+    @Test
+    void invalidRequestStopsImmediatelyWithoutFallback() {
+        // InvalidRequestException is request-level: a malformed request fails on every provider,
+        // so the chain must re-throw without advancing and must not emit FallbackTriggered.
+        var recorder = new InMemoryProviderCallRecorder();
+        var events = new ArrayList<AgentEvent>();
+        var primary = new FallbackLink(new ModelRef("anthropic", "claude"),
+                throwing(new InvalidRequestException("bad request")), null);
+        var secondary = new FallbackLink(new ModelRef("ollama", "qwen"), returning(response(1, 1)), null);
+        var model = new FallbackChatModel(List.of(primary, secondary), "s", "a", classifier, recorder, events::add);
+
+        assertThrows(InvalidRequestException.class, () -> model.chat(request()));
+        assertEquals(1, recorder.calls.size(), "only the primary failure row — no secondary attempt");
+        assertEquals(InvalidRequestException.class.getName(), recorder.calls.get(0).error());
+        assertTrue(events.isEmpty(), "FallbackTriggered must NOT be emitted for a request-level failure");
     }
 
     @Test
