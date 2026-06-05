@@ -1,0 +1,7 @@
+{
+  "extension_id": "anthropic",
+  "module_name": "forvum-provider-anthropic",
+  "providers": [
+    { "type": "model", "class": "ai.forvum.provider.anthropic.AnthropicModelProvider" }
+  ]
+}
