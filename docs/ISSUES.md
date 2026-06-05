@@ -605,14 +605,18 @@ root.
 (`FS_WRITE`), `FsListTool`; `FilesystemToolProvider`; manifest.
 
 **Files.** `forvum-tools-filesystem/` module, `FilesystemToolProvider.java`, `FsReadTool.java`,
-`FsWriteTool.java`, `FsListTool.java`, manifest.
+`FsWriteTool.java`, `FsListTool.java`, `WorkspaceRoot.java`, `WorkspaceEscapeException.java`, manifest;
+the three append-only pom wirings (root `<modules>`, `forvum-bom`, `forvum-app`).
 
 **Acceptance Criteria.**
 - Integration test against `@TempDir`: read/write/list round-trip; a write outside the configured
   workspace root is denied.
 - **[NATIVE]** native file I/O native-clean; native parity applies.
-- Security negative test (X5/TEST-SEC): path traversal in fs-tool args → denied (the `WorkspaceRoot`
-  contract is defined by DR-6a).
+- Security negative test (X5/TEST-SEC): path traversal in fs-tool args → denied. M14 ships a minimal
+  self-contained `WorkspaceRoot` (`normalize` + element-wise `startsWith`, so a `<root>-evil` sibling is
+  rejected). The check is LEXICAL only — symlink-resolving confinement (`toRealPath` / `O_NOFOLLOW`) and
+  TOCTOU hardening are part of the deferred DR-6a output-filter / threat-model contract (decided
+  2026-06-05; out of scope under the single-user, local-first trust boundary — the M9–M12 precedent).
 - **[PLUGIN]** `quarkus/skills` for the SDK/tool patterns; module scaffolded via the MCP.
 
 **Dependencies.** M3, M13.

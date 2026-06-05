@@ -64,6 +64,11 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-provider-google</artifactId>
         </dependency>
+        <!-- Layer-3 filesystem tool module (M14): contributes fs.read/fs.write/fs.list to the ToolRegistry. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-filesystem</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>

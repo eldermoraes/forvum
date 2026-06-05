@@ -1333,8 +1333,8 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Commit:** `feat(engine): add ToolRegistry with glob-based filtering and permission scopes`.
 
 - [ ] **M14 — Filesystem tools.**
-  - **Files:** `forvum-tools-filesystem/` module; `FilesystemToolProvider.java`; `FsReadTool.java` (`PermissionScope.FS_READ`), `FsWriteTool.java` (`FS_WRITE`), `FsListTool.java`; manifest.
-  - **Deps:** none beyond `forvum-sdk`.
+  - **Files:** `forvum-tools-filesystem/` module; `FilesystemToolProvider.java` (implements the M13 `ToolProvider.tools()` SPI); `FsReadTool.java` (`PermissionScope.FS_READ`), `FsWriteTool.java` (`FS_WRITE`), `FsListTool.java` (`FS_READ`); `WorkspaceRoot.java` + `WorkspaceEscapeException.java` (self-contained path confinement — the full DR-6a contract is deferred); manifest; the three append-only pom wirings (root `<modules>`, `forvum-bom`, `forvum-app`).
+  - **Deps:** builds on M3 and M13 (the `ToolProvider.tools()` SPI). Among non-`java.nio` deps the module needs only `forvum-sdk` + `quarkus-arc` — no langchain4j (it copies the provider recipe minus the AI extension).
   - **Verify:** integration test against a `@TempDir`; read/write/list round-trip asserted; a write outside the configured workspace root is denied.
   - **Commit:** `feat(tools-fs): add filesystem read/write/list tools with FS permission scope`.
 

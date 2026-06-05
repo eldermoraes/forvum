@@ -493,3 +493,16 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `ToolExecutor` with `PermissionDeniedException` + an audited `denied` row — there is no ad-hoc elevation
   path. `ToolExecutor`/`AgentToolBelt.tools()` have no production caller in M13 (not wired into
   `Agent.respond()`); the model-request wiring is M18. [M13]
+- **A tool module is the provider Layer-3 recipe minus the langchain4j extension.** `forvum-tools-filesystem`
+  (the first tool module) copies `forvum-provider-ollama`'s pom verbatim and drops the
+  `quarkus-langchain4j-*` dependency — a filesystem tool is `java.nio` + `quarkus-arc` only; the enforcer
+  allowlist (`forvum-sdk` + `forvum-core`) is unchanged because `ToolSpec`/`PermissionScope` are Layer-0.
+  The provider (`@ForvumExtension @ApplicationScoped extends AbstractToolProvider`) implements the M13
+  `tools()` SPI — contribution-only, so it declares `ToolSpec`s but does NOT run the tools. The tool
+  classes (`Fs{Read,Write,List}Tool`) carry the `java.nio` logic and are tested directly (`@TempDir`
+  round-trip); their engine-wired execution is M18. Path confinement is a self-contained `WorkspaceRoot`
+  (`normalize` + element-wise `startsWith`, so a sibling `<root>-evil` is rejected) throwing
+  `WorkspaceEscapeException` — distinct from M13's capability-scope `PermissionDeniedException` (a tool
+  plugin can't depend on the engine), and the full DR-6a threat-model contract is deferred. Wire the
+  module into the three append-only poms (root `<modules>`, `forvum-bom`, `forvum-app`) in the same
+  milestone so it native-compiles + registers at app startup. [M14]
