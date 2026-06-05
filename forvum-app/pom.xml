@@ -59,6 +59,11 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-provider-openai</artifactId>
         </dependency>
+        <!-- Layer-3 Google Gemini provider (M12): REST Gemini Developer API, API key required at chat time. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-provider-google</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
