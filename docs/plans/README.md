@@ -1,4 +1,4 @@
-# Concurrent implementation plans (Tier-A · Tier-B)
+# Concurrent implementation plans (Tier-A · Tier-B · Tier-C · Tier-D)
 
 A **tier** is a group of milestones implementable in one concurrent window — independent tracks joined
 by at most one soft (test-level) gating edge. Source of truth remains `docs/ULTRAPLAN.md`; issue map is
@@ -8,7 +8,9 @@ conflicts with the plan body, the banner wins, and this README's cross-cutting d
 | Tier | Plans | Issues | Status |
 |---|---|---|---|
 | **A** | [M5](M5-sqlite-flyway.md) · [M6](M6-agentscoped-context.md) · [M8](M8-fallback-chatmodel.md) | #10 · #11 · #13 | **merged** (§0–§6 below, retained for reference) |
-| **B** | [M7](M7-agent-registry.md) · [M9](M9-ollama-provider.md) | #12 · #14 | **planning** (§B below) |
+| **B** | [M7](M7-agent-registry.md) · [M9](M9-ollama-provider.md) | #12 · #14 | **merged** (§B below; M7 PR #92, M9 PR #95) |
+| **C** | Provider Fleet: M9 · M10 · M11 · M12 (plan on `docs/tier-c-provider-fleet-plan`) | #14–#17 | **merged** (PRs #95–#98) |
+| **D** | [Tools: M13 · M14](tier-d-tools.md) | #18 · #19 | **planning** (§D below) |
 
 ---
 
@@ -104,6 +106,27 @@ clean. M9 adds the Risk #5 per-provider canned-turn native smoke (CI-runnable, l
 ```
 
 Fully parallel once both agree the `resolve(ModelRef)` signature. M7 merges first; M9 un-gates its e2e.
+
+---
+
+## D. Tier-D — M13 · M14 (Tools)
+
+Status: **planning artifacts, not code.** Full plan: [`tier-d-tools.md`](tier-d-tools.md). The next
+window after the merged Provider Fleet (Tier-C, M9–M12). Unlike a fleet of parallel siblings, this is a
+**sequential chain**: M14's `FilesystemToolProvider` cannot *compile* until M13's `ToolProvider.tools()`
+SPI prelude merges (a HARD source edge — `@EnabledIf`/class-presence gating cannot bridge a compile
+dependency, unlike Tier-C's soft test edge).
+
+| Plan | Milestone | Issue | Module surface |
+|---|---|---|---|
+| [tier-d-tools.md](tier-d-tools.md) (§5) | M13 — `ToolRegistry` + `ToolFilter` + `ToolExecutor` + `ToolProvider.tools()` SPI prelude + permission enforcement/audit (anchor) | #18 | `forvum-engine/tools` + `forvum-sdk` (no new module) |
+| [tier-d-tools.md](tier-d-tools.md) (§6) | M14 — `forvum-tools-filesystem` (first Layer-3 tool module; Fs read/write/list) | #19 | new `forvum-tools-filesystem` + app/bom/root wiring |
+
+**Window-shape headlines (adversarially verified, 2026-06-05):** M13 adds **no migration** and **no
+`PermissionScope`** (both already exist from M5/M2); the `ToolProvider` SPI is a stub that M13 fills with
+`List<ToolSpec> tools()` (contribution-only, forvum-core types); tools are **not** wired into
+`Agent.respond()` (that is M18); X7 (shell/mcp-bridge/OTel) is **out of scope** (issue #73). Four
+architectural sign-offs decided 2026-06-05 (see the plan §2). Merge order **M13 → M14**.
 
 ---
 
