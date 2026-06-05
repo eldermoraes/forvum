@@ -59,10 +59,23 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-provider-openai</artifactId>
         </dependency>
+        <!-- Layer-3 Google Gemini provider (M12): REST Gemini Developer API, API key required at chat time. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-provider-google</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- HttpClientFactorySelector references JaxRsHttpClientBuilderFactory.class to pin the LangChain4j
+             HTTP client app-wide (it is otherwise only a transitive of the ai-gemini extension). Declared
+             directly so a class-name drift on a BOM bump is a compile error, not a runtime surprise.
+             Version managed via quarkus-langchain4j-bom. -->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-jaxrs-client</artifactId>
         </dependency>
 
         <!-- TamboUI toolkit + widgets, versions via tamboui-bom. Wired in from M1 for a headless

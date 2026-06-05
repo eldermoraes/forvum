@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.forvum</groupId>
+        <artifactId>forvum-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forvum-provider-google</artifactId>
+
+    <name>Forvum Provider — Google Gemini</name>
+    <description>Layer-3 Forvum extension: Google Gemini model provider via the REST Gemini Developer API
+        (quarkus-langchain4j-ai-gemini, API-key based — NOT the gRPC Vertex AI extension, which is
+        avoided for native-image fragility per CLAUDE.md §5). Resolves any google:&lt;model&gt; ModelRef
+        to a LangChain4j ChatModel via GoogleAiGeminiChatModel.builder().</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Layer-1 plugin SPI: the ONLY ai.forvum dependency for a Layer-3 extension (enforced below).
+             Version managed by forvum-bom. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
+        <!-- CDI (ArC): @ApplicationScoped bean discovery. Version via Quarkus platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- Quarkiverse LangChain4j Google AI Gemini extension (REST Developer API, NOT Vertex AI gRPC):
+             brings GoogleAiGeminiChatModel on the classpath. API-key based, native-friendly.
+             Version managed versionlessly via quarkus-langchain4j-bom imported by forvum-bom. -->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-ai-gemini</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Quarkus codegen + dev/test bootstrap. No `build` goal: forvum-provider-google is a
+                 Layer-3 library, never a runnable artifact (that is forvum-app). -->
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- forvum-provider-google is a headless Quarkus library with no `build` goal; its
+                         *IT tests run via Surefire (CLAUDE.md section 4 exception). -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-plugin-layering</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- Allowlist form (consistent with core/sdk/engine): ban every ai.forvum module,
+                                         re-allow forvum-sdk + forvum-core. forvum-core is the Layer-0 contract layer the
+                                         SDK SPI re-exposes (e.g. ModelRef in ModelProvider.resolve(ModelRef)), so a
+                                         plugin unavoidably and legitimately compiles against it; what stays banned is
+                                         forvum-engine, another extension, and the app — regardless of future names. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                        <include>ai.forvum:forvum-core</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>A Forvum extension (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ModelRef in the ModelProvider SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
