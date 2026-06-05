@@ -39,6 +39,11 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-engine</artifactId>
         </dependency>
+        <!-- Layer-3 Ollama provider (M9): local model support, no API key. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-provider-ollama</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
