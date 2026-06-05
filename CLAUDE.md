@@ -63,9 +63,10 @@ channel/provider/tool module.
 This is enforced (since M1) by `maven-enforcer-plugin` `bannedDependencies` in each module's pom,
 allowlist form: `forvum-core` bans Quarkus/Quarkiverse; `forvum-sdk` may depend only on `forvum-core`;
 `forvum-engine` only on `forvum-core` + `forvum-sdk`. **Every new module carries its own enforcer
-execution** — a Layer-3 plugin compiles only against `forvum-sdk` (copy the template in
-`docs/CODE-REVIEW.md` §5.1). The rule runs at `validate`, so `./mvnw -DskipTests validate` is the fast
-local check.
+execution** — a Layer-3 plugin compiles against `forvum-sdk` **plus the Layer-0 contracts the SPI
+re-exposes** (`forvum-core`, e.g. `ModelRef` in `ModelProvider.resolve(ModelRef)`), never the engine,
+another extension, or the app (copy the template in `docs/CODE-REVIEW.md` §5.1). The rule runs at
+`validate`, so `./mvnw -DskipTests validate` is the fast local check.
 
 ```
 forvum-parent (pom)
@@ -325,7 +326,10 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - Do **not** write any repository artifact in a language other than English.
 - Do **not** make `forvum-engine` compile-depend on a concrete channel/provider/tool module, or
   hardcode an extension ID in core — core stays extension-agnostic.
-- Do **not** import core internals from a plugin — plugins compile only against `forvum-sdk`.
+- Do **not** make a plugin depend on `forvum-engine`, another extension, or the app — a plugin compiles
+  against `forvum-sdk` **plus the Layer-0 contracts the SPI re-exposes** (`forvum-core`, e.g. `ModelRef` in
+  `ModelProvider.resolve(ModelRef)`). `forvum-core` is the pure-contract layer (records/sealed types), not
+  internals, so a plugin legitimately uses it; the Layer-3 enforcer allowlists `forvum-sdk` + `forvum-core`.
 - Do **not** introduce runtime reflection, dynamic class loading (outside the JVM-only drop-in path),
   `sun.misc.Unsafe`, CGLib, or runtime Javassist — they break the native binary and are CI-banned.
 - Do **not** ship a DTO record in a Quarkus-bearing module (Layer 2+) without `@RegisterForReflection`

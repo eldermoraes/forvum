@@ -108,9 +108,10 @@
                             <rules>
                                 <bannedDependencies>
                                     <!-- Allowlist form (consistent with core/sdk/engine): ban every ai.forvum module,
-                                         re-allow forvum-sdk + forvum-core (forvum-core is an unavoidable transitive of
-                                         forvum-sdk) — so a plugin can never reach the engine, another extension, or the
-                                         app, regardless of future module names. -->
+                                         re-allow forvum-sdk + forvum-core. forvum-core is the Layer-0 contract layer the
+                                         SDK SPI re-exposes (e.g. ModelRef in ModelProvider.resolve(ModelRef)), so a
+                                         plugin unavoidably and legitimately compiles against it; what stays banned is
+                                         forvum-engine, another extension, and the app — regardless of future names. -->
                                     <includes>
                                         <include>ai.forvum:forvum-sdk</include>
                                         <include>ai.forvum:forvum-core</include>
@@ -119,7 +120,7 @@
                                         <exclude>ai.forvum:*</exclude>
                                     </excludes>
                                     <searchTransitive>true</searchTransitive>
-                                    <message>A Forvum extension (Layer 3) compiles only against forvum-sdk (among ai.forvum modules); it must not depend on forvum-core, forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                    <message>A Forvum extension (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ModelRef in the ModelProvider SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
                                 </bannedDependencies>
                             </rules>
                         </configuration>
