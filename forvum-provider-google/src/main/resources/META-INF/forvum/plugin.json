@@ -1,0 +1,7 @@
+{
+  "extension_id": "google",
+  "module_name": "forvum-provider-google",
+  "providers": [
+    { "type": "model", "class": "ai.forvum.provider.google.GoogleModelProvider" }
+  ]
+}
