@@ -18,6 +18,11 @@
     <properties>
         <!-- Integration tests (the native smoke) run only under the native profile; skipped in JVM builds. -->
         <skipITs>true</skipITs>
+        <!-- @Tag("live") tests (e.g. a real-Ollama scripted turn) are off by default. They are excluded
+             via this Surefire user property (so a bare CLI -DexcludedGroups= can clear it — a value
+             hardcoded in the plugin <configuration> could not be overridden). Run them with:
+             -Dgroups=live -DexcludedGroups= -->
+        <excludedGroups>live</excludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -98,9 +103,16 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- Exclude @Tag("live") tests by default; they require external services
-                         (e.g. a running Ollama server). Run with -Dgroups=live to include them. -->
-                    <excludedGroups>live</excludedGroups>
+                    <!-- Surefire's default include patterns match *Test/*Tests/*TestCase only, so a
+                         *E2E class is otherwise never discovered. List it explicitly alongside *Test
+                         (the ten forvum-app e2e scripts use the *E2E suffix). -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*E2E.java</include>
+                    </includes>
+                    <!-- excludedGroups is left to the ${excludedGroups} user property (defaulted to
+                         'live' above) so the CLI can clear it: -Dgroups=live -DexcludedGroups= runs the
+                         live tests; the default build skips @Tag("live"). -->
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>

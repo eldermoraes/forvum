@@ -14,7 +14,6 @@ import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -40,10 +39,19 @@ import java.util.Map;
  * pulled ({@code ollama pull qwen3:1.7b}).
  *
  * <p>{@code @Tag("live")} — excluded from the default build by the {@code maven-surefire-plugin}
- * {@code excludedGroups} configuration in {@code forvum-app/pom.xml}. To run manually:
+ * {@code excludedGroups} configuration in {@code forvum-app/pom.xml}. To run manually, clear the
+ * exclusion AND select the group (a bare {@code -Dgroups=live} loses to the static exclusion):
  * <pre>{@code
- *   ./mvnw -pl forvum-app test -Dgroups=live
+ *   ./mvnw -pl forvum-app test -Dgroups=live -DexcludedGroups=
  * }</pre>
+ *
+ * <p><strong>Native (Risk #5) — deferred to M20 (written carve-out, CLAUDE.md §5).</strong> The
+ * per-provider native scripted-turn smoke ULTRAPLAN §8 Risk #5 mandates needs Ollama as a CI service
+ * plus the {@code ci.yml} matrix — both M20 infrastructure. M9 validates the load-bearing native parts
+ * now: the provider native-COMPILES (the pre-release {@code quarkus-langchain4j} {@code 1.11.0.CR1}
+ * builds the binary) and the binary boots gracefully with no {@code ~/.forvum/} (exit 0). The native
+ * turn that exercises {@code resolve()/chat()} — catching a native-only JSON reflection gap in the
+ * Ollama request/response path — lands at M20 when the CI Ollama service exists.
  */
 @QuarkusTest
 @TestProfile(OllamaScriptedTurnE2E.LiveHomeProfile.class)
@@ -54,8 +62,11 @@ class OllamaScriptedTurnE2E {
     AgentRegistry registry;
 
     @Test
-    @Transactional
     void scriptedTurnThroughAgentRegistryAgainstRealOllama() throws Exception {
+        // Deliberately NOT @Transactional: Agent.respond() owns the turn's transaction boundary (the
+        // M7/M8 persist-after-success design), and the provider_calls audit row must survive a failed
+        // turn — wrapping the turn here would roll that row back. Panache count() reads fine outside a
+        // tx in @QuarkusTest (mirrors AgentTurnTest's failure-path method).
         AgentId main = new AgentId("main");
         Agent agent = registry.getOrCreate(main);
         String sessionId = "e2e-ollama-scripted";
