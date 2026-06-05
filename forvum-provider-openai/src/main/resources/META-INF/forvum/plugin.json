@@ -1,0 +1,7 @@
+{
+  "extension_id": "openai",
+  "module_name": "forvum-provider-openai",
+  "providers": [
+    { "type": "model", "class": "ai.forvum.provider.openai.OpenAiModelProvider" }
+  ]
+}
