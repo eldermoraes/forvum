@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.exception.AuthenticationException;
+import dev.langchain4j.exception.InvalidRequestException;
 import dev.langchain4j.exception.RateLimitException;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -96,11 +97,50 @@ class FallbackStreamingChatModelTest {
     }
 
     @Test
-    void nonRetryableErrorReachesTheUser() {
+    void authFailureAdvancesToNextProvider() {
+        // AuthenticationException is provider-level: the chain must fall through to the next link.
         var recorder = new InMemoryProviderCallRecorder();
+        var partials = new ArrayList<String>();
+        var completed = new ArrayList<ChatResponse>();
         var errors = new ArrayList<Throwable>();
 
         var primary = new FallbackLink(new ModelRef("anthropic", "claude"), null, erroring(new AuthenticationException("bad")));
+        var fallbackResp = ChatResponse.builder().aiMessage(AiMessage.from("y")).build();
+        var secondary = new FallbackLink(new ModelRef("ollama", "qwen"), null, streamingOnce("tok", fallbackResp));
+        var model = new FallbackStreamingChatModel(List.of(primary, secondary), "s", "a", classifier, recorder, null);
+
+        model.chat(request(), new StreamingChatResponseHandler() {
+            @Override
+            public void onPartialResponse(String partialResponse) {
+                partials.add(partialResponse);
+            }
+
+            @Override
+            public void onCompleteResponse(ChatResponse response) {
+                completed.add(response);
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                errors.add(error);
+            }
+        });
+
+        assertTrue(errors.isEmpty(), "auth failure must not reach the user handler — chain advances");
+        assertEquals(List.of("tok"), partials);
+        assertEquals(1, completed.size());
+        assertEquals(2, recorder.calls.size(), "one anthropic failure row + one ollama success row");
+        assertTrue(recorder.calls.get(1).fallback());
+    }
+
+    @Test
+    void invalidRequestErrorReachesTheUser() {
+        // InvalidRequestException is request-level: re-throw without advancing; must reach the user.
+        var recorder = new InMemoryProviderCallRecorder();
+        var errors = new ArrayList<Throwable>();
+
+        var primary = new FallbackLink(new ModelRef("anthropic", "claude"), null,
+                erroring(new InvalidRequestException("bad request")));
         var fallbackResp = ChatResponse.builder().aiMessage(AiMessage.from("y")).build();
         var secondary = new FallbackLink(new ModelRef("ollama", "qwen"), null, streamingOnce("x", fallbackResp));
         var model = new FallbackStreamingChatModel(List.of(primary, secondary), "s", "a", classifier, recorder, null);
@@ -116,9 +156,9 @@ class FallbackStreamingChatModelTest {
             }
         });
 
-        assertEquals(1, errors.size());
-        assertInstanceOf(AuthenticationException.class, errors.get(0));
-        assertEquals(1, recorder.calls.size());
+        assertEquals(1, errors.size(), "request-level failure must surface to the user");
+        assertInstanceOf(InvalidRequestException.class, errors.get(0));
+        assertEquals(1, recorder.calls.size(), "only the primary failure row — no secondary attempt");
     }
 
     @Test

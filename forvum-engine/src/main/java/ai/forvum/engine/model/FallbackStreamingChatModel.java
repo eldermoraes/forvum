@@ -14,10 +14,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * Streaming counterpart of {@link FallbackChatModel}. On a retryable {@code onError} it advances to the
- * next link without surfacing the error — but only if no partial tokens have already reached the user
- * handler (once a stream starts emitting, the attempt is committed). Records a {@code provider_calls}
- * row per attempt. No {@code synchronized}.
+ * Streaming counterpart of {@link FallbackChatModel}. On a provider-level {@code onError} it advances
+ * to the next link without surfacing the error — but only if no partial tokens have already reached the
+ * user handler (once a stream starts emitting, the attempt is committed). Request-level failures
+ * ({@link dev.langchain4j.exception.InvalidRequestException}) are surfaced immediately. Records a
+ * {@code provider_calls} row per attempt. No {@code synchronized}.
  *
  * <p>Only {@code chat(ChatRequest, handler)} is decorated; the 1.13+ {@code ChatRequestOptions} overload
  * bypasses the fallback (override {@code doChat} if it is ever adopted).
@@ -75,7 +76,7 @@ public final class FallbackStreamingChatModel implements StreamingChatModel {
                 recorder.record(ProviderCalls.failure(sessionId, agentId, link, fallback, error,
                         millisSince(start)));
                 boolean hasNext = index < links.size() - 1;
-                if (classifier.classify(error).isRetryable() && hasNext && !partialsEmitted.get()) {
+                if (classifier.shouldFallback(error) && hasNext && !partialsEmitted.get()) {
                     onEvent.accept(new FallbackTriggered(Instant.now(), link.ref(),
                             links.get(index + 1).ref(), classifier.reason(error)));
                     attempt(index + 1, request, user);

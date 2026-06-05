@@ -13,10 +13,10 @@ import java.util.function.Consumer;
 
 /**
  * A LangChain4j {@link ChatModel} decorator that walks a fallback chain: it tries each {@link
- * FallbackLink} in turn, records a {@code provider_calls} row per attempt, and advances only on a
- * {@link FailureClass#isRetryable() retryable} failure — surfacing non-retryable/unknown failures
- * immediately (ULTRAPLAN section 5.4). Stateless per call, no {@code synchronized}; runs on the
- * caller's (virtual) thread.
+ * FallbackLink} in turn, records a {@code provider_calls} row per attempt, and advances on any
+ * provider-level failure — re-throwing only request-level failures ({@link
+ * dev.langchain4j.exception.InvalidRequestException}) which fail on every provider (ULTRAPLAN
+ * section 5.4). Stateless per call, no {@code synchronized}; runs on the caller's (virtual) thread.
  *
  * <p>Only the main entry point {@code chat(ChatRequest)} is decorated — the path every AI-service and
  * convenience caller routes through. The 1.13+ {@code chat(ChatRequest, ChatRequestOptions)} overload
@@ -61,7 +61,7 @@ public final class FallbackChatModel implements ChatModel {
                 recorder.record(ProviderCalls.failure(sessionId, agentId, link, fallback, e,
                         millisSince(start)));
                 boolean hasNext = i < links.size() - 1;
-                if (classifier.classify(e).isRetryable() && hasNext) {
+                if (classifier.shouldFallback(e) && hasNext) {
                     onEvent.accept(new FallbackTriggered(Instant.now(), link.ref(),
                             links.get(i + 1).ref(), classifier.reason(e)));
                     continue;
