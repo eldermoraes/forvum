@@ -43,9 +43,11 @@ public class AnthropicModelProvider extends AbstractModelProvider {
 
     /**
      * HTTP request timeout for programmatic model construction; package-private for ArC field
-     * injection. Uses a Forvum-namespaced key to avoid conflicting with the Quarkiverse extension's
-     * own {@code quarkus.langchain4j.anthropic.timeout} binding (which the extension manages for
-     * its declarative {@code @RegisterAiService} path). Defaults to 30 s.
+     * injection. Uses a Forvum-namespaced key ({@code forvum.provider.anthropic.timeout}) to avoid a
+     * real conflict with the Quarkiverse extension's own {@code quarkus.langchain4j.anthropic.timeout}
+     * binding: that key uses expression interpolation referencing {@code quarkus.langchain4j.timeout},
+     * which is absent in Forvum's config, causing a {@code SRCFG00011} boot error if read directly via
+     * {@code @ConfigProperty}. The Forvum key is independent and safe. Defaults to 30 s.
      */
     @ConfigProperty(name = "forvum.provider.anthropic.timeout", defaultValue = "30S")
     Duration timeout;

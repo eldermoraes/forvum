@@ -35,14 +35,14 @@ import java.util.Map;
  *   <li>at least one {@code provider_calls} row exists with {@code provider == "anthropic"}.</li>
  * </ol>
  *
- * <p><strong>Requires a valid {@code ANTHROPIC_API_KEY}:</strong> set the environment variable before
- * running (the key is read from {@code quarkus.langchain4j.anthropic.api-key} which Quarkus maps from
- * the environment variable).
+ * <p><strong>Requires a valid API key:</strong> set {@code QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY}
+ * before running — that is the environment variable MP Config maps to
+ * {@code quarkus.langchain4j.anthropic.api-key} (standard Quarkus env-var naming convention).
  *
  * <p>{@code @Tag("live")} — excluded from the default build via the {@code ${excludedGroups}} Surefire
  * user property (defaulted to {@code live} in {@code forvum-app/pom.xml}). To run manually:
  * <pre>{@code
- *   ANTHROPIC_API_KEY=sk-... ./mvnw -pl forvum-app test -Dgroups=live -DexcludedGroups=
+ *   QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY=sk-... ./mvnw -pl forvum-app test -Dgroups=live -DexcludedGroups=
  * }</pre>
  *
  * <p>NOT {@code @Transactional}: {@link Agent#respond} owns the turn's transaction boundary (the M7/M8

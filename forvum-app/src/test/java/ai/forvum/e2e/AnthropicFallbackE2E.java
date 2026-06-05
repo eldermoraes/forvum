@@ -44,23 +44,20 @@ import java.util.Map;
  *
  * <p>Expected behavior:
  * <ol>
- *   <li>The Anthropic call fails (invalid key → retryable or non-retryable exception from the Anthropic
- *       API).</li>
+ *   <li>The Anthropic call fails (invalid key → AuthenticationException, a provider-level failure).</li>
+ *   <li>{@link ai.forvum.engine.model.FailureClassifier#shouldFallback} returns {@code true} (anything
+ *       except {@code InvalidRequestException} advances the chain), so the chain falls through.</li>
  *   <li>Ollama is the fallback link and produces a non-empty reply.</li>
  *   <li>Two {@code provider_calls} rows are recorded: one anthropic failure + one ollama success.</li>
  * </ol>
  *
  * <p><strong>Requires local Ollama:</strong> {@code ollama serve} with {@code qwen3:1.7b} pulled.
- * Anthropic deliberately receives an intentionally empty API key ({@code "bad-key"}) to trigger the
- * failure path without consuming live quota. An empty/invalid key causes an authentication failure
- * that the Anthropic HTTP client wraps in a LangChain4j exception — the exact type (retryable vs.
- * non-retryable) determines whether fallback advances or re-throws. If Anthropic's client wraps auth
- * failures as non-retryable, the fallback chain will NOT advance and the test will surface the auth
- * exception. In that scenario the test is still valuable as a compile-time / wiring check.
+ * Anthropic deliberately receives an invalid (non-empty) API key ({@code "bad-key"}) to trigger the
+ * failure path without consuming live quota.
  *
  * <p>{@code @Tag("live")} — excluded from the default build. To run manually:
  * <pre>{@code
- *   ./mvnw -pl forvum-app test -Dgroups=live -DexcludedGroups= \
+ *   QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY=bad-key ./mvnw -pl forvum-app test -Dgroups=live -DexcludedGroups= \
  *       -Dquarkus.langchain4j.ollama.devservices.enabled=false
  * }</pre>
  *
@@ -127,7 +124,7 @@ class AnthropicFallbackE2E {
 
     /**
      * Points {@code $FORVUM_HOME} at a throwaway temp directory with a minimal agent spec.
-     * The Anthropic API key defaults to empty (no-key), triggering the failure path.
+     * Uses an invalid (non-empty) API key {@code "bad-key"} to trigger the Anthropic failure path.
      */
     public static class FallbackHomeProfile implements QuarkusTestProfile {
 
@@ -149,7 +146,7 @@ class AnthropicFallbackE2E {
 
         @Override
         public Map<String, String> getConfigOverrides() {
-            // Empty API key intentionally triggers the Anthropic failure path.
+            // Invalid (non-empty) API key intentionally triggers the Anthropic auth failure path.
             return Map.of(
                     "forvum.home", HOME.toString(),
                     "quarkus.langchain4j.anthropic.api-key", "bad-key");
