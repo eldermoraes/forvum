@@ -1,4 +1,4 @@
-# Concurrent implementation plans (Tier-A · Tier-B · Tier-C · Tier-D)
+# Concurrent implementation plans (Tier-A · Tier-B · Tier-C · Tier-D · Tier-E)
 
 A **tier** is a group of milestones implementable in one concurrent window — independent tracks joined
 by at most one soft (test-level) gating edge. Source of truth remains `docs/ULTRAPLAN.md`; issue map is
@@ -10,7 +10,8 @@ conflicts with the plan body, the banner wins, and this README's cross-cutting d
 | **A** | [M5](M5-sqlite-flyway.md) · [M6](M6-agentscoped-context.md) · [M8](M8-fallback-chatmodel.md) | #10 · #11 · #13 | **merged** (§0–§6 below, retained for reference) |
 | **B** | [M7](M7-agent-registry.md) · [M9](M9-ollama-provider.md) | #12 · #14 | **merged** (§B below; M7 PR #92, M9 PR #95) |
 | **C** | Provider Fleet: M9 · M10 · M11 · M12 (plan on `docs/tier-c-provider-fleet-plan`) | #14–#17 | **merged** (PRs #95–#98) |
-| **D** | [Tools: M13 · M14](tier-d-tools.md) | #18 · #19 | **planning** (§D below) |
+| **D** | [Tools: M13 · M14](tier-d-tools.md) | #18 · #19 | **merged** (§D below; PRs #99 · #100) |
+| **E** | [Channels: M15 · M16 · M17](tier-e-channels.md) | #20 · #21 · #22 | **planning** (§E below) |
 
 ---
 
@@ -127,6 +128,31 @@ dependency, unlike Tier-C's soft test edge).
 `List<ToolSpec> tools()` (contribution-only, forvum-core types); tools are **not** wired into
 `Agent.respond()` (that is M18); X7 (shell/mcp-bridge/OTel) is **out of scope** (issue #73). Four
 architectural sign-offs decided 2026-06-05 (see the plan §2). Merge order **M13 → M14**.
+
+---
+
+## E. Tier-E — M15 · M16 · M17 (Channels)
+
+Status: **planning artifacts, not code.** Full plan: [`tier-e-channels.md`](tier-e-channels.md). The
+first three production turn-driving channels — TUI (M15), Web (M16), Telegram (M17). Like Tools, this is a
+**sequential chain**, and even MORE so: the anchor settles the un-settled `ChannelProvider` transport SPI
+**and** lands engine work (a `TurnService` facade, an `IdentityResolver`, the launch dispatch), so the
+siblings depend on both.
+
+| Plan | Milestone | Issue | Module surface |
+|---|---|---|---|
+| [tier-e-channels.md](tier-e-channels.md) (§6.1) | M16 — Web channel (WebSockets Next) + `ChannelProvider` SPI prelude + `TurnService`/`IdentityResolver` + launch dispatch + CI greps (ANCHOR) | #21 | new `forvum-channel-web` + `forvum-sdk` + `forvum-engine` + `forvum-app` |
+| [tier-e-channels.md](tier-e-channels.md) (§6.2) | M15 — TUI channel (TamboUI/JLine 3) | #20 | new `forvum-channel-tui` (high native risk) |
+| [tier-e-channels.md](tier-e-channels.md) (§6.3) | M17 — Telegram channel (long-poll) | #22 | new `forvum-channel-telegram` + `security/` |
+
+**Window-shape headlines (ground-truth verified 2026-06-05; four sign-offs decided):** **anchor = M16/Web**
+(the only channel not depending on M8); `ChannelProvider` is a stub the anchor fills with an inbound
+`ChannelMessage` + outbound JDK `Consumer<AgentEvent>` (never Mutiny — `forvum-sdk` is Quarkus-free);
+`Agent.respond` is single-shot with no `AgentEvent` producer → the anchor ships **single-shot adaptation**
+(`TokenDelta`+`Done`), true streaming deferred to M18; the anchor also builds the slipped **CI concurrency
+greps** (`synchronized`/pinned/Mutiny). M15 carries the high native risk (first `reachability-metadata.json`
++ JLine `Kernel32` `initialize-at-run-time`); M17 carries `allowedUserIds` security. Merge order **M16 →
+{M15, M17}**.
 
 ---
 
