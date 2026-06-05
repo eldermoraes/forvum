@@ -1,5 +1,6 @@
 package ai.forvum.app;
 
+import io.quarkiverse.langchain4j.jaxrsclient.JaxRsHttpClientBuilderFactory;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -27,8 +28,10 @@ import jakarta.enterprise.event.Observes;
  * — which happens on the first turn, well after boot — so a {@link StartupEvent} observer is early enough,
  * and {@code System.setProperty} at runtime works identically in the JVM and the native image. The value is
  * set only when absent, so an operator may override it with {@code -Dlangchain4j.http.clientBuilderFactory=...}.
- * {@code ProviderResolveInAppClasspathTest} resolves every provider in the full classpath and fails fast if
- * this factory name ever drifts from the real type or a new un-swapped provider is added.
+ * The factory is named via {@link JaxRsHttpClientBuilderFactory}{@code .class} (a class reference, so a
+ * rename on a BOM bump fails compilation here rather than at first build), and
+ * {@code ProviderResolveInAppClasspathTest} resolves every provider in the full classpath to catch a new
+ * un-swapped provider or a missing factory.
  */
 @ApplicationScoped
 public class HttpClientFactorySelector {
@@ -37,11 +40,12 @@ public class HttpClientFactorySelector {
     static final String PROPERTY = "langchain4j.http.clientBuilderFactory";
 
     /**
-     * Fully-qualified name of the Quarkus REST client factory. A string literal (not a class reference)
-     * so {@code forvum-app} need not compile against the Quarkiverse impl jar; the loader compares it to
-     * {@code factory.getClass().getName()}, and {@code ProviderResolveInAppClasspathTest} catches any drift.
+     * The Quarkus REST client factory the loader must select. Taken from the class (not a string literal)
+     * so a rename/relocation on a BOM bump is a compile error here, not a runtime
+     * {@code "...does not match any..."} at first model build; the loader compares it to
+     * {@code factory.getClass().getName()}.
      */
-    static final String JAXRS_FACTORY = "io.quarkiverse.langchain4j.jaxrsclient.JaxRsHttpClientBuilderFactory";
+    static final String JAXRS_FACTORY = JaxRsHttpClientBuilderFactory.class.getName();
 
     void onStart(@Observes StartupEvent event) {
         if (System.getProperty(PROPERTY) == null) {

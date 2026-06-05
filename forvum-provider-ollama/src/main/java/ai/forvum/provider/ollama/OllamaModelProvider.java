@@ -24,6 +24,17 @@ import java.util.concurrent.ConcurrentMap;
  * are cached per model id: each build allocates an underlying HTTP client, so re-resolving the same
  * {@code ollama:<model>} on every turn (e.g. a per-minute cron) would churn clients; the cache reuses
  * one model per id.
+ *
+ * <p><strong>HTTP client selection:</strong> like Gemini (and unlike OpenAI/Anthropic, which are swapped
+ * to the Quarkus REST client by their Quarkiverse builder-factories), {@code OllamaChatModel.builder()}
+ * is the raw LangChain4j builder, so {@code OllamaClient} resolves its HTTP client via
+ * {@code dev.langchain4j.http.client.HttpClientBuilderLoader}. When the assembled {@code forvum-app}
+ * classpath carries more than one {@code HttpClientBuilderFactory}, that loader throws
+ * {@code IllegalStateException("Conflict: multiple HTTP clients ...")} at {@code build()} time unless a
+ * factory is named. {@code ai.forvum.app.HttpClientFactorySelector} names it app-wide (the
+ * {@code langchain4j.http.clientBuilderFactory} system property) — so this provider needs no per-builder
+ * pin, but it DOES rely on that selector being present in the assembly. {@code ProviderResolveInAppClasspathTest}
+ * guards it; this module's own contract test passes regardless (its classpath has a single factory).
  */
 @ForvumExtension
 @ApplicationScoped

@@ -456,15 +456,18 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `langchain4j.http.clientBuilderFactory` system property names a factory. (Latent on `main` since M10 added
   the JDK factory: every `ollama:<model>` turn on the assembled binary would have thrown.) Fix at the
   assembly layer: a `@Observes StartupEvent` bean in `forvum-app` (`HttpClientFactorySelector`) sets that
-  system property to `JaxRsHttpClientBuilderFactory` once — native-tested Quarkus REST client, the same stack
-  the swapped siblings use. Per-provider `.httpClientBuilder(...)` pins also work but DON'T scale (the first
-  attempt pinned only Gemini and missed Ollama). The loader reads `System.getProperty` (not MP Config) lazily
-  at first `build()` (= first turn, after boot), so a startup observer is early enough and works in JVM +
-  native; set-only-if-absent leaves an operator `-D` override. The trap: a provider-module contract test
-  passes (single-factory classpath) and the only app-classpath exerciser is a `@Tag("live")` e2e (default-off),
-  so it ships green — guard with a NON-live `@QuarkusTest` in `forvum-app` that `resolve()`s EVERY provider
-  (`build()` alone throws; no key/network), which also catches a future un-swapped provider or a factory-name
-  drift. [M12]
+  system property to `JaxRsHttpClientBuilderFactory` once — Quarkus REST client, the same stack the swapped
+  siblings use. (Trade-off: per-provider `.httpClientBuilder(...)` pins are self-contained but distributed —
+  each new un-swapped provider must remember one, and the first attempt pinned only Gemini and missed Ollama;
+  the app-wide selector is central but makes the contract cross-layer, so document the dependency on each
+  provider.) The loader reads `System.getProperty` (not MP Config) lazily at first `build()` (= first turn,
+  after boot), so a startup observer is early enough; set-only-if-absent leaves an operator `-D` override.
+  Native build + no-config boot are verified; the `resolve()` path (System.getProperty + ServiceLoader) is
+  identical to the JVM (a live native turn is nightly/M20). The trap: a provider-module contract test passes
+  (single-factory classpath) and the only app-classpath exerciser is a `@Tag("live")` e2e (default-off), so it
+  ships green — guard with a NON-live `@QuarkusTest` in `forvum-app` that `resolve()`s EVERY provider
+  (`build()` alone throws; no key/network), which also catches a future un-swapped provider or a missing
+  factory; name the factory via `.class` so a rename is a compile error. [M12]
 - **The `quarkus-langchain4j-ai-gemini` extension fails the no-config native boot eagerly** — its
   deployment recorder (`AiGeminiRecorder#throwIfApiKeysNotConfigured`) throws a `ConfigValidationException`
   while constructing the auto-registered default ChatModel synthetic bean at startup when no api-key is
