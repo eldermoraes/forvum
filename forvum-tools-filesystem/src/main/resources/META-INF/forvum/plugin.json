@@ -1,0 +1,7 @@
+{
+  "extension_id": "filesystem",
+  "module_name": "forvum-tools-filesystem",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.filesystem.FilesystemToolProvider" }
+  ]
+}

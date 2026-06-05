@@ -30,6 +30,7 @@
         <module>forvum-provider-anthropic</module>
         <module>forvum-provider-openai</module>
         <module>forvum-provider-google</module>
+        <module>forvum-tools-filesystem</module>
         <module>forvum-app</module>
     </modules>
 
