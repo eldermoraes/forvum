@@ -567,15 +567,19 @@ manifest. If the Vertex gRPC stack blocks native, switch to the REST `quarkus-la
 **Labels:** `phase-1`, `engine`, `tool`, `security`, `native` · **Milestone:** `v0.1 MVP`
 
 **Context.** Tool capability gating (§5.3, §4.3.4): the Select pillar applied to capability. Tied to the
-security-test layer (§10) and to the X7 gap (the shell tool, the `SkillInvokerTool` skills surface, and
-the MCP bridge baseline have no dedicated milestone — fold them here or into M18, or split micro-issues).
+security-test layer (§10). The X7 gap (the shell tool, the `SkillInvokerTool` skills surface, the MCP
+bridge baseline, the OTel baseline) is **out of M13 scope** — decided 2026-06-05, deferred to its own
+issue (#73), so M13 stays minimal.
 
-**Scope / Deliverables.** `ToolRegistry`; `ToolExecutor` (enforces `PermissionScope`); `PermissionScope`
-enum (§4.3.4); `ToolFilter` (glob matching). Decide X7 placement: shell tool + skills surface +
-mcp-bridge (flagged off, Risk #9) + OTel baseline as M13/M18 acceptance vs micro-milestones.
+**Scope / Deliverables.** `ToolRegistry`; `ToolExecutor` (enforces capability via the agent's filtered
+belt); `PermissionDeniedException`; `ToolFilter` (glob matching); the `forvum-sdk` `ToolProvider.tools()`
+SPI prelude; the `ToolInvocation` recorder triad (write seam over the existing V1 `tool_invocations`).
+`PermissionScope` is **consumed** from `forvum-core` (already exists, M2) — not recreated; M13 adds no
+migration. Tools are not wired into `Agent.respond()` here (that is M18).
 
-**Files.** `forvum-engine/.../tools/ToolRegistry.java`, `ToolExecutor.java`, `PermissionScope.java`,
-`ToolFilter.java`.
+**Files.** `forvum-engine/.../tools/{ToolRegistry,ToolExecutor,ToolFilter,PermissionDeniedException}.java`,
+`.../model/{ToolInvocation,ToolInvocationRecorder}.java`, `.../persistence/PanacheToolInvocationRecorder.java`,
+`.../agent/AgentToolBelt.java` (filtered `tools()`); `forvum-sdk/.../ToolProvider.java` (the `tools()` prelude).
 
 **Acceptance Criteria.**
 - Register `a.read`/`a.write`; seed an agent with `allowedTools:["a.read"]`; assert a call to `a.write`
@@ -601,14 +605,18 @@ root.
 (`FS_WRITE`), `FsListTool`; `FilesystemToolProvider`; manifest.
 
 **Files.** `forvum-tools-filesystem/` module, `FilesystemToolProvider.java`, `FsReadTool.java`,
-`FsWriteTool.java`, `FsListTool.java`, manifest.
+`FsWriteTool.java`, `FsListTool.java`, `WorkspaceRoot.java`, `WorkspaceEscapeException.java`, manifest;
+the three append-only pom wirings (root `<modules>`, `forvum-bom`, `forvum-app`).
 
 **Acceptance Criteria.**
 - Integration test against `@TempDir`: read/write/list round-trip; a write outside the configured
   workspace root is denied.
 - **[NATIVE]** native file I/O native-clean; native parity applies.
-- Security negative test (X5/TEST-SEC): path traversal in fs-tool args → denied (the `WorkspaceRoot`
-  contract is defined by DR-6a).
+- Security negative test (X5/TEST-SEC): path traversal in fs-tool args → denied. M14 ships a minimal
+  self-contained `WorkspaceRoot` (`normalize` + element-wise `startsWith`, so a `<root>-evil` sibling is
+  rejected). The check is LEXICAL only — symlink-resolving confinement (`toRealPath` / `O_NOFOLLOW`) and
+  TOCTOU hardening are part of the deferred DR-6a output-filter / threat-model contract (decided
+  2026-06-05; out of scope under the single-user, local-first trust boundary — the M9–M12 precedent).
 - **[PLUGIN]** `quarkus/skills` for the SDK/tool patterns; module scaffolded via the MCP.
 
 **Dependencies.** M3, M13.

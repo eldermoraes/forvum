@@ -1327,14 +1327,14 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Commit:** `feat(provider-google): add Vertex AI Gemini provider`.
 
 - [ ] **M13 — `ToolRegistry`, filtering, `PermissionScope`.**
-  - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/tools/ToolRegistry.java`, `ToolExecutor.java`, `PermissionScope.java` (enum), `ToolFilter.java` (glob matching).
-  - **Deps:** builds on M3 and M7.
+  - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/tools/ToolRegistry.java`, `ToolExecutor.java`, `PermissionDeniedException.java`, `ToolFilter.java` (glob matching); the `forvum-sdk` `ToolProvider.tools()` SPI prelude (contribution-only, forvum-core types); `forvum-engine/.../model/ToolInvocation.java` + `ToolInvocationRecorder.java` + `.../persistence/PanacheToolInvocationRecorder.java` (write seam over the existing V1 `tool_invocations`); `AgentToolBelt` filtered `tools()`. `PermissionScope` is **consumed** from `forvum-core` (already exists, M2) — M13 does NOT create it, and adds NO migration (the `tool_invocations` table is V1/M5).
+  - **Deps:** builds on M3, M7, and M5 (the existing `tool_invocations` table). Tools are not wired into `Agent.respond()` here — that is M18.
   - **Verify:** register two synthetic tools (`a.read`, `a.write`), seed an agent with `allowedTools: ["a.read"]`, assert a call to `a.write` from that agent is refused with a `PermissionDeniedException` and logged in `tool_invocations` with `status = 'denied'`.
   - **Commit:** `feat(engine): add ToolRegistry with glob-based filtering and permission scopes`.
 
 - [ ] **M14 — Filesystem tools.**
-  - **Files:** `forvum-tools-filesystem/` module; `FilesystemToolProvider.java`; `FsReadTool.java` (`PermissionScope.FS_READ`), `FsWriteTool.java` (`FS_WRITE`), `FsListTool.java`; manifest.
-  - **Deps:** none beyond `forvum-sdk`.
+  - **Files:** `forvum-tools-filesystem/` module; `FilesystemToolProvider.java` (implements the M13 `ToolProvider.tools()` SPI); `FsReadTool.java` (`PermissionScope.FS_READ`), `FsWriteTool.java` (`FS_WRITE`), `FsListTool.java` (`FS_READ`); `WorkspaceRoot.java` + `WorkspaceEscapeException.java` (self-contained path confinement — the full DR-6a contract is deferred); manifest; the three append-only pom wirings (root `<modules>`, `forvum-bom`, `forvum-app`).
+  - **Deps:** builds on M3 and M13 (the `ToolProvider.tools()` SPI). Among non-`java.nio` deps the module needs only `forvum-sdk` + `quarkus-arc` — no langchain4j (it copies the provider recipe minus the AI extension).
   - **Verify:** integration test against a `@TempDir`; read/write/list round-trip asserted; a write outside the configured workspace root is denied.
   - **Commit:** `feat(tools-fs): add filesystem read/write/list tools with FS permission scope`.
 

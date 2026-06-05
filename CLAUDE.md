@@ -476,3 +476,33 @@ Generalizable lessons from completed milestones; append here as milestones land.
   all profiles (the CI native smoke runs the prod profile with no `~/.forvum/` and no key). Forvum never
   uses the extension's own bean (it builds the model programmatically), so the placeholder only defers a
   real-key failure to call time. [M12]
+- **A milestone's roadmap "Files" list can be stale in BOTH directions — verify on disk before scaffolding.**
+  M13's ULTRAPLAN §7.1 / ISSUES.md "Files" listed `PermissionScope.java (enum)` under `engine/tools/`, but
+  the enum already lived in `forvum-core` (M2) and the §4.3.4 prose said so — scaffolding it in the engine
+  would have duplicated a Layer-0 type. Likewise `tool_invocations` was already a V1/M5 table (+ entity), so
+  M13 added ZERO migrations — only the write seam (`ToolInvocation` DTO + `ToolInvocationRecorder` +
+  `PanacheToolInvocationRecorder`, a verbatim mirror of the `ProviderCall` triad). Grep the codebase for
+  every type a milestone's Files list names before creating it; the contract often already exists. [M13]
+- **The tool SPI follows the M7 prelude-in-consumer-PR pattern, contribution-only.** `ToolProvider` was an
+  `extensionId()`-only stub; M13's engine `ToolRegistry` consumes it, so the prelude method
+  `List<ToolSpec> tools()` lands in `forvum-sdk` as M13's first commit (M14 implements it) — exactly as M7
+  added `ModelProvider.resolve()` ahead of M9. It carries only `forvum-core` types (no langchain4j
+  `ToolSpecification`, no execute method — dispatch is the engine's `ToolExecutor` / M18's `tool_loop`), so
+  `forvum-sdk` needs NO new dependency and stays Quarkus-free. The permission model is belt-membership: a
+  persona's `allowedTools` globs select the belt (`ToolFilter`), and a tool outside the belt is refused by
+  `ToolExecutor` with `PermissionDeniedException` + an audited `denied` row — there is no ad-hoc elevation
+  path. `ToolExecutor`/`AgentToolBelt.tools()` have no production caller in M13 (not wired into
+  `Agent.respond()`); the model-request wiring is M18. [M13]
+- **A tool module is the provider Layer-3 recipe minus the langchain4j extension.** `forvum-tools-filesystem`
+  (the first tool module) copies `forvum-provider-ollama`'s pom verbatim and drops the
+  `quarkus-langchain4j-*` dependency — a filesystem tool is `java.nio` + `quarkus-arc` only; the enforcer
+  allowlist (`forvum-sdk` + `forvum-core`) is unchanged because `ToolSpec`/`PermissionScope` are Layer-0.
+  The provider (`@ForvumExtension @ApplicationScoped extends AbstractToolProvider`) implements the M13
+  `tools()` SPI — contribution-only, so it declares `ToolSpec`s but does NOT run the tools. The tool
+  classes (`Fs{Read,Write,List}Tool`) carry the `java.nio` logic and are tested directly (`@TempDir`
+  round-trip); their engine-wired execution is M18. Path confinement is a self-contained `WorkspaceRoot`
+  (`normalize` + element-wise `startsWith`, so a sibling `<root>-evil` is rejected) throwing
+  `WorkspaceEscapeException` — distinct from M13's capability-scope `PermissionDeniedException` (a tool
+  plugin can't depend on the engine), and the full DR-6a threat-model contract is deferred. Wire the
+  module into the three append-only poms (root `<modules>`, `forvum-bom`, `forvum-app`) in the same
+  milestone so it native-compiles + registers at app startup. [M14]
