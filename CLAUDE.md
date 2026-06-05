@@ -445,20 +445,26 @@ Generalizable lessons from completed milestones; append here as milestones land.
 - **Run a deep, adversarially-verified review before a milestone merge** (dimensions → find →
   refute-by-default verify). On M7 it flipped two test findings where the test was actually the stronger
   version, and caught a real `spawn` corruption + a non-atomic turn before they shipped. [M7]
-- **A LangChain4j model built programmatically must pin an explicit `httpClientBuilder` — the multi-factory
-  conflict is silent until the full app classpath.** `forvum-app` carries TWO
-  `dev.langchain4j.http.client.HttpClientBuilderFactory` services at once (`JaxRsHttpClientBuilderFactory`
-  via ollama/gemini + `JdkHttpClientBuilderFactory` pulled by `langchain4j-anthropic`). A model whose
-  builder is NOT swapped by a Quarkiverse builder-factory (the Gemini case — unlike OpenAI/Anthropic,
-  whose `builder()` IS swapped to the Quarkus REST client) falls through `GeminiService` →
-  `HttpClientBuilderLoader.loadHttpClientBuilder()`, which `ServiceLoader`s the classpath and throws
-  `IllegalStateException("Conflict: multiple HTTP clients ...")` at `build()` time unless
-  `langchain4j.http.clientBuilderFactory` is set. Fix: pin `.httpClientBuilder(new JaxRsHttpClientBuilder())`
-  (the native-tested Quarkus REST client, same stack the sibling providers land on; `GeminiService` fills
-  its timeouts from the model `timeout`, so a bare instance is safe). The trap: a provider-module contract
-  test passes (its classpath has a single factory) and the only app-classpath exerciser is a `@Tag("live")`
-  e2e (default-off) — so the regression ships green. The guard is a NON-live `@QuarkusTest` in `forvum-app`
-  that `resolve()`s the ref (build() alone throws; no key/network needed). [M12]
+- **Select the LangChain4j HTTP client factory once, app-wide — the multi-factory conflict is silent until
+  the full app classpath and hits EVERY programmatically-built model, not just one.** `forvum-app` carries
+  TWO `dev.langchain4j.http.client.HttpClientBuilderFactory` services at once (`JaxRsHttpClientBuilderFactory`
+  via ollama/gemini + `JdkHttpClientBuilderFactory`, a transitive of several langchain4j model libs e.g.
+  anthropic). A model whose builder is NOT swapped by a Quarkiverse builder-factory — **both Gemini AND
+  Ollama** (unlike OpenAI/Anthropic, whose `builder()` IS swapped to the Quarkus REST client) — falls through
+  to `HttpClientBuilderLoader.loadHttpClientBuilder()`, which `ServiceLoader`s the classpath and throws
+  `IllegalStateException("Conflict: multiple HTTP clients ...")` at `build()` time unless the
+  `langchain4j.http.clientBuilderFactory` system property names a factory. (Latent on `main` since M10 added
+  the JDK factory: every `ollama:<model>` turn on the assembled binary would have thrown.) Fix at the
+  assembly layer: a `@Observes StartupEvent` bean in `forvum-app` (`HttpClientFactorySelector`) sets that
+  system property to `JaxRsHttpClientBuilderFactory` once — native-tested Quarkus REST client, the same stack
+  the swapped siblings use. Per-provider `.httpClientBuilder(...)` pins also work but DON'T scale (the first
+  attempt pinned only Gemini and missed Ollama). The loader reads `System.getProperty` (not MP Config) lazily
+  at first `build()` (= first turn, after boot), so a startup observer is early enough and works in JVM +
+  native; set-only-if-absent leaves an operator `-D` override. The trap: a provider-module contract test
+  passes (single-factory classpath) and the only app-classpath exerciser is a `@Tag("live")` e2e (default-off),
+  so it ships green — guard with a NON-live `@QuarkusTest` in `forvum-app` that `resolve()`s EVERY provider
+  (`build()` alone throws; no key/network), which also catches a future un-swapped provider or a factory-name
+  drift. [M12]
 - **The `quarkus-langchain4j-ai-gemini` extension fails the no-config native boot eagerly** — its
   deployment recorder (`AiGeminiRecorder#throwIfApiKeysNotConfigured`) throws a `ConfigValidationException`
   while constructing the auto-registered default ChatModel synthetic bean at startup when no api-key is
