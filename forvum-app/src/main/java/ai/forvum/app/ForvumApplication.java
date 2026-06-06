@@ -49,7 +49,7 @@ public class ForvumApplication implements QuarkusApplication {
             return tui.run();
         }
         if (channels.shouldRunAsServer()) {
-            System.out.println("Web channel ready at /ws/chat - press Ctrl+C to stop.");
+            System.out.println("Server channel(s) ready - press Ctrl+C to stop.");
             Quarkus.waitForExit();
         }
         return 0;

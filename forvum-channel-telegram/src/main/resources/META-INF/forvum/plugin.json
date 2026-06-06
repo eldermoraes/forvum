@@ -1,0 +1,7 @@
+{
+  "extension_id": "telegram",
+  "module_name": "forvum-channel-telegram",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.telegram.TelegramChannelProvider" }
+  ]
+}

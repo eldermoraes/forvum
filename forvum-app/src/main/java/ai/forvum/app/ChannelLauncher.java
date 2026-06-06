@@ -14,7 +14,10 @@ import java.util.Set;
  * launch dispatch — picocli and proper run-modes are M20). A <em>server channel</em> is one whose
  * inbound surface keeps the process alive to serve; v0.1's only server channel is the Web channel
  * (its vertx-http/WebSocket server runs in background threads, so {@code run()} need only block). M17
- * adds Telegram's long-poll loop to this set.
+ * adds Telegram's long-poll loop to this set — but only when it actually serves: Telegram counts as a
+ * live server channel only when its config carries a non-blank {@code botToken}, mirroring
+ * {@code TelegramChannel.onStart} (which warns and no-ops without one). An enabled but token-less
+ * {@code telegram.json} would otherwise hang the binary in server mode serving nothing.
  *
  * <p>Enablement is read from {@code $FORVUM_HOME/channels/<id>.json} via the engine's
  * {@link ChannelReader}: a channel is enabled unless its config explicitly sets {@code "enabled": false}
@@ -24,8 +27,11 @@ import java.util.Set;
 @ApplicationScoped
 public class ChannelLauncher {
 
+    /** Channel id of the Telegram channel, which additionally requires a {@code botToken} to serve. */
+    static final String TELEGRAM_ID = "telegram";
+
     /** Channel ids whose enablement keeps the process alive to serve. */
-    static final Set<String> SERVER_CHANNELS = Set.of("web");
+    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID);
 
     /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.
@@ -37,11 +43,23 @@ public class ChannelLauncher {
     @Inject
     ChannelReader channels;
 
-    /** True if any configured server channel is enabled — the binary must stay alive to serve it. */
+    /** True if any configured server channel is live — the binary must stay alive to serve it. */
     public boolean shouldRunAsServer() {
         return channels.ids().stream()
                 .filter(SERVER_CHANNELS::contains)
-                .anyMatch(id -> isEnabled(channels.read(id).orElse(null)));
+                .anyMatch(id -> serves(id, channels.read(id).orElse(null)));
+    }
+
+    /**
+     * Whether channel {@code id} actually serves: enabled, and — for Telegram — carrying a non-blank
+     * {@code botToken}, since {@code TelegramChannel.onStart} starts its poll loop only with a token (an
+     * enabled but token-less {@code telegram.json} otherwise hangs the binary serving nothing).
+     */
+    static boolean serves(String id, JsonNode spec) {
+        if (!isEnabled(spec)) {
+            return false;
+        }
+        return !TELEGRAM_ID.equals(id) || hasBotToken(spec);
     }
 
     /** True if an interactive foreground channel (the TUI) is enabled — run it in the foreground. */
@@ -58,5 +76,11 @@ public class ChannelLauncher {
         }
         JsonNode enabled = spec.get("enabled");
         return enabled == null || enabled.asBoolean(true);
+    }
+
+    /** True if {@code spec} carries a present, non-blank {@code botToken}. */
+    static boolean hasBotToken(JsonNode spec) {
+        JsonNode token = spec.get("botToken");
+        return token != null && !token.asText().isBlank();
     }
 }
