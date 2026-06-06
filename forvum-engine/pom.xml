@@ -78,6 +78,14 @@
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-core</artifactId>
         </dependency>
+        <!-- M18: LangGraph4j StateGraph orchestration (supervisor-workers, ULTRAPLAN section 5.5). Not a
+             Quarkus extension; version pinned in forvum-bom. Core only — tool execution, permission, and
+             state stay in the engine (no langgraph4j-langchain4j: ToolSpecifications are built from
+             ToolSpec and the graph runs stateless, so no LC4jToolService/serializer surface). -->
+        <dependency>
+            <groupId>org.bsc.langgraph4j</groupId>
+            <artifactId>langgraph4j-core</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>

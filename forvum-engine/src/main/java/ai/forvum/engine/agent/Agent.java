@@ -2,8 +2,12 @@ package ai.forvum.engine.agent;
 
 import ai.forvum.core.AgentScoped;
 import ai.forvum.core.Persona;
+import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
+import ai.forvum.engine.graph.GraphTurnRequest;
+import ai.forvum.engine.graph.SupervisorGraph;
+import ai.forvum.engine.persistence.CaprRecorder;
 import ai.forvum.engine.routing.LlmSelector;
 
 import jakarta.inject.Inject;
@@ -12,8 +16,6 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.response.ChatResponse;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +44,12 @@ public class Agent {
     @Inject
     LlmSelector llmSelector;
 
+    @Inject
+    SupervisorGraph supervisorGraph;
+
+    @Inject
+    CaprRecorder caprRecorder;
+
     /** This agent's persona (system prompt + structural spec), for the currently bound agent. */
     public Persona persona() {
         return registry.persona(CurrentAgent.CURRENT_AGENT.get());
@@ -58,28 +66,31 @@ public class Agent {
     }
 
     /**
-     * Run one turn: call the agent's model over the system prompt + conversational history + the new
-     * user message, then persist the user message, assistant reply, and a turn observation atomically.
-     * The conversational tier is written only <em>after</em> a successful reply, so a failed model call
-     * leaves no orphan user row (the failed attempt is still ledgered in {@code provider_calls} by the
-     * fallback decorator). A deliberate single-shot path — routing, the tool loop, and sub-agent fan-out
-     * arrive with the LangGraph4j {@code SupervisorGraph} (M18).
+     * Run one turn through the LangGraph4j {@link SupervisorGraph} (M18): build the request (system prompt
+     * + committed history + the new user message), resolve the agent's model and tool belt, and drive the
+     * supervisor graph — which routes, runs the permission-gated tool loop, and fans sub-agents out on
+     * virtual threads. On success the user message, assistant reply, and a turn observation are persisted
+     * atomically, then a {@code capr_events} verdict is recorded for the turn. The conversational tier is
+     * written only <em>after</em> a successful turn, so a failed turn leaves no orphan rows (the failed
+     * attempt is still ledgered in {@code provider_calls} by the fallback decorator).
      */
     public String respond(String sessionId, String userText) {
         AgentId id = CurrentAgent.CURRENT_AGENT.get();
         sessions.ensureSession(sessionId, id);
 
         Persona persona = registry.persona(id);
-        List<ChatMessage> request = new ArrayList<>();
-        request.add(SystemMessage.from(persona.systemPrompt()));
-        request.addAll(memory.messages(sessionId));   // committed prior history
-        request.add(UserMessage.from(userText));        // this turn's user message, not yet persisted
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(SystemMessage.from(persona.systemPrompt()));
+        messages.addAll(memory.messages(sessionId));   // committed prior history
+        messages.add(UserMessage.from(userText));        // this turn's user message, not yet persisted
 
         ChatModel model = llmSelector.select(persona, sessionId);
-        ChatResponse response = model.chat(ChatRequest.builder().messages(request).build());
-        String reply = response.aiMessage().text();
+        List<ToolSpec> belt = toolBelt.tools();
 
-        memory.recordTurn(sessionId, userText, reply);
+        String reply = supervisorGraph.run(new GraphTurnRequest(sessionId, id, model, belt, messages));
+
+        long turnId = memory.recordTurn(sessionId, userText, reply);
+        caprRecorder.recordPassed(sessionId, id.value(), turnId);
         return reply;
     }
 

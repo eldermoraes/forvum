@@ -40,15 +40,18 @@ public class AgentMemory {
 
     /**
      * Persist a completed turn atomically: the user message, the assistant reply, and a turn
-     * observation in one transaction. Called by {@link Agent#respond} only after a successful model
-     * call, so a failed turn leaves no orphan conversational rows (the failed attempt is still ledgered
+     * observation in one transaction. Called by {@link Agent#respond} only after a successful turn,
+     * so a failed turn leaves no orphan conversational rows (the failed attempt is still ledgered
      * separately in {@code provider_calls} by the fallback decorator).
+     *
+     * @return the persisted assistant message id — the turn id a {@code capr_events} row references (M18)
      */
     @Transactional
-    public void recordTurn(String sessionId, String userText, String assistantText) {
+    public long recordTurn(String sessionId, String userText, String assistantText) {
         persistMessage(sessionId, Role.USER, userText);
-        persistMessage(sessionId, Role.ASSISTANT, assistantText);
+        MessageEntity assistant = persistMessage(sessionId, Role.ASSISTANT, assistantText);
         persistObservation(sessionId, "turn completed");
+        return assistant.id;
     }
 
     /** Conversational history for {@code sessionId}, oldest first, as LangChain4j messages. */
@@ -102,7 +105,7 @@ public class AgentMemory {
         fact.persist();
     }
 
-    private void persistMessage(String sessionId, Role role, String content) {
+    private MessageEntity persistMessage(String sessionId, Role role, String content) {
         MessageEntity message = new MessageEntity();
         message.sessionId = sessionId;
         message.agentId = agentId();
@@ -111,6 +114,7 @@ public class AgentMemory {
         message.tokens = null;
         message.createdAt = System.currentTimeMillis();
         message.persist();
+        return message;
     }
 
     private void persistObservation(String sessionId, String content) {

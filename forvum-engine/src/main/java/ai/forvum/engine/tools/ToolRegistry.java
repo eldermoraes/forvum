@@ -31,6 +31,7 @@ public class ToolRegistry {
     Instance<ToolProvider> providers;
 
     private final ConcurrentMap<String, ToolSpec> tools = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, ToolProvider> providerByTool = new ConcurrentHashMap<>();
 
     /** Index every discovered provider's tools at startup, so the belt is ready before the first turn. */
     void onStart(@Observes StartupEvent event) {
@@ -52,6 +53,7 @@ public class ToolRegistry {
                       + provider.extensionId() + "'. Tool names must be globally unique across providers "
                       + "(it is already registered). Rename one of the colliding tools.");
             }
+            providerByTool.put(spec.name(), provider);
         }
     }
 
@@ -63,5 +65,14 @@ public class ToolRegistry {
     /** The registered spec for {@code name}, or {@code null} if no provider contributes it. */
     public ToolSpec lookup(String name) {
         return tools.get(name);
+    }
+
+    /**
+     * The provider that contributes {@code name}, or {@code null} if none does — the M18 {@code tool_loop}
+     * routes a model-emitted call to its owning provider's {@code invoke(...)} through this (ULTRAPLAN
+     * section 5.5). Names are globally unique (see {@link #register}), so the mapping is unambiguous.
+     */
+    public ToolProvider providerFor(String name) {
+        return providerByTool.get(name);
     }
 }

@@ -14,6 +14,7 @@ import ai.forvum.sdk.ToolProvider;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Unit tests for {@link ToolRegistry}: the global registry of every {@link ToolSpec} contributed by
@@ -38,6 +39,11 @@ class ToolRegistryTest {
             public List<ToolSpec> tools() {
                 return List.of(specs);
             }
+
+            @Override
+            public String invoke(String toolName, Map<String, Object> arguments) {
+                return extensionId + ":" + toolName;
+            }
         };
     }
 
@@ -53,6 +59,19 @@ class ToolRegistryTest {
         assertSame(read, registry.lookup("a.read"));
         assertSame(write, registry.lookup("a.write"));
         assertNull(registry.lookup("a.delete"), "an unregistered tool resolves to null");
+    }
+
+    @Test
+    void providerForRoutesAToolNameToItsOwningProvider() {
+        ToolProvider a = provider("a", tool("a.read", PermissionScope.FS_READ));
+        ToolProvider b = provider("b", tool("b.write", PermissionScope.FS_WRITE));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(a);
+        registry.register(b);
+
+        assertSame(a, registry.providerFor("a.read"));
+        assertSame(b, registry.providerFor("b.write"));
+        assertNull(registry.providerFor("c.unknown"), "an unregistered tool has no owning provider");
     }
 
     @Test
