@@ -167,6 +167,15 @@ All architectural blockers (B-E1, B-E2, B-E4, B-E6, B-E7) are signed off (§2).
 
 - **SI-E1 — `ChannelProvider` transport SPI signatures → DECIDED:** inbound `ChannelMessage` + outbound
   JDK `Consumer<AgentEvent>` (never Mutiny `Multi`; AC-E5). Settled by the M16 anchor; M15/M17 implement.
+  **SUPERSEDED at M16 implementation (Resolution B, PR #103):** `ChannelProvider` stays a pure discovery
+  marker (`extensionId()` only — NO transport method). The decided contract (inbound `ChannelMessage` +
+  outbound `Consumer<AgentEvent>`) lives on a SEPARATE new SDK interface `ChannelTurnDriver` that the
+  engine's `TurnService` implements and the channel `@Inject`s — the channel is self-driving (it calls the
+  driver; the engine never calls back into `ChannelProvider`). Same signatures + types as decided here;
+  only the host type changed (a new SDK interface, not methods on `ChannelProvider`), which keeps
+  `forvum-sdk` Quarkus-free and the channel enforcer at `{forvum-sdk, forvum-core}`. (Thus AC-E1's
+  "anchor adds transport methods to `ChannelProvider`" and B-E1 read against `ChannelTurnDriver`, not
+  `ChannelProvider`.)
 - **SI-E2 — `AgentEvent`-stream production off single-shot `respond` → DECIDED Option B (§4):** engine
   emits `TokenDelta(reply)` + `Done`; SPI typed for streaming; true streaming deferred to M18.
 - **SI-E3 — turn-driver facade + identity resolution → DECIDED full facade:** the anchor adds a thin
