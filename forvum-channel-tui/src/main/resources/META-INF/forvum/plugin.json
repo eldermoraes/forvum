@@ -1,0 +1,7 @@
+{
+  "extension_id": "tui",
+  "module_name": "forvum-channel-tui",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.tui.TuiChannelProvider" }
+  ]
+}

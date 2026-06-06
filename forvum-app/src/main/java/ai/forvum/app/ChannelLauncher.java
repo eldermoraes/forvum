@@ -27,6 +27,13 @@ public class ChannelLauncher {
     /** Channel ids whose enablement keeps the process alive to serve. */
     static final Set<String> SERVER_CHANNELS = Set.of("web");
 
+    /**
+     * Channel ids whose enablement runs an interactive foreground loop instead of a background server.
+     * v0.1's only one is the TUI (M15): its stdin REPL blocks the foreground, so the binary runs it
+     * directly rather than {@code Quarkus.waitForExit()}.
+     */
+    static final Set<String> FOREGROUND_CHANNELS = Set.of("tui");
+
     @Inject
     ChannelReader channels;
 
@@ -34,6 +41,13 @@ public class ChannelLauncher {
     public boolean shouldRunAsServer() {
         return channels.ids().stream()
                 .filter(SERVER_CHANNELS::contains)
+                .anyMatch(id -> isEnabled(channels.read(id).orElse(null)));
+    }
+
+    /** True if an interactive foreground channel (the TUI) is enabled — run it in the foreground. */
+    public boolean shouldRunInteractive() {
+        return channels.ids().stream()
+                .filter(FOREGROUND_CHANNELS::contains)
                 .anyMatch(id -> isEnabled(channels.read(id).orElse(null)));
     }
 
