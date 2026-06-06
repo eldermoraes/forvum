@@ -12,6 +12,7 @@ import jakarta.transaction.Transactional;
 
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
+import ai.forvum.engine.persistence.CaprEventEntity;
 import ai.forvum.engine.persistence.EpisodicMemoryEntity;
 import ai.forvum.engine.persistence.MessageEntity;
 import ai.forvum.engine.persistence.ProviderCallEntity;
@@ -19,11 +20,11 @@ import ai.forvum.engine.persistence.ProviderCallEntity;
 import org.junit.jupiter.api.Test;
 
 /**
- * The minimal single-agent turn (ULTRAPLAN section 5.5, pre-graph): {@link Agent#respond} runs the
- * {@code faker} agent through {@link FakeModelProvider}, returning a non-empty reply and leaving the
- * turn fully ledgered — two {@code messages} rows (user + assistant), one {@code provider_calls} row,
- * and one {@code episodic_memory} observation. This is the engine-side analogue of M9's gated
- * "scripted turn through AgentRegistry" e2e.
+ * The single-agent turn through the M18 {@link ai.forvum.engine.graph.SupervisorGraph}: {@link Agent#respond}
+ * runs the {@code faker} agent through {@link FakeModelProvider} (a direct, no-tool answer), returning a
+ * non-empty reply and leaving the turn fully ledgered — two {@code messages} rows (user + assistant), one
+ * {@code provider_calls} row, one {@code episodic_memory} observation, and one {@code capr_events} verdict.
+ * A failed turn leaves no conversational/CAPR rows but still ledgers the attempt.
  */
 @QuarkusTest
 @TestProfile(AgentRegistryTestHomeProfile.class)
@@ -49,6 +50,8 @@ class AgentTurnTest {
                 "one provider_calls ledger row");
         assertEquals(1, EpisodicMemoryEntity.count("agentId = ?1 and sessionId = ?2", "faker", sessionId),
                 "one episodic observation");
+        assertEquals(1, CaprEventEntity.count("sessionId = ?1 and agentId = ?2", sessionId, "faker"),
+                "one capr_events verdict written for the turn (M18)");
     }
 
     @Test
@@ -68,5 +71,7 @@ class AgentTurnTest {
                 "no turn observation on failure");
         assertEquals(1, ProviderCallEntity.count("sessionId = ?1 and agentId = ?2", sessionId, "boomer"),
                 "the failed attempt is still ledgered in provider_calls (audit survives)");
+        assertEquals(0, CaprEventEntity.count("sessionId = ?1 and agentId = ?2", sessionId, "boomer"),
+                "no capr verdict on a failed turn");
     }
 }

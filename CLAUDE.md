@@ -573,3 +573,44 @@ Generalizable lessons from completed milestones; append here as milestones land.
   externally-invoked inbound handlers). An enabled-but-token-less `telegram.json` must NOT count as a live
   server channel (`ChannelLauncher.shouldRunAsServer` is token-aware) or the binary hangs in
   `Quarkus.waitForExit()` serving nothing. [M17]
+- **LangGraph4j serializes the graph state via `ObjectOutputStream` on EVERY step, even with no
+  checkpointer — so keep non-`Serializable` types OUT of the state.** langchain4j messages
+  (`UserMessage`/`AiMessage`/…) are not `Serializable`; putting them in a channel throws
+  `NotSerializableException` at `invoke()` (reproduced in a spike). Resolution (R6): `GraphState` holds
+  ONLY `String`/`List<String>` control signals (`route`/`next`/`final`/`workerDigests`); the `ChatMessage`
+  conversation lives in a per-turn mutable holder captured by the node lambdas (compile the graph per
+  turn). This also keeps the native image free of any `ObjectStream`/langchain4j serialization surface —
+  the M18 native build is green with ZERO hand-authored `META-INF/native-image/` metadata. Corollary:
+  `GraphState` MUST be a *class* extending `AgentState` (map-backed contract), NOT a record — the
+  ULTRAPLAN's "graph-state types are records" was wrong (records are for the values *in* the channels, of
+  which there are now none); both ULTRAPLAN spots were corrected. [M18]
+- **`node_async(NodeAction)` builds a `LambdaMetafactory` lambda, not a JDK dynamic `Proxy` — the
+  `Proxy.newProxyInstance` branch fires only for `InterruptableAction`** (verified by disassembling
+  `langgraph4j-core` 1.8.17). Forvum's plain `state -> node(state)` lambdas are build-time-reachable, so
+  no proxy/reflect native config is needed; an adversarial-review "missing native metadata" finding was
+  refuted by the bytecode + the green native build. [M18]
+- **LangGraph4j's default `recursionLimit` is 25 and counts EVERY node execution, not turns/rounds.** A
+  spawn round is 4 nodes (generate→spawn_worker→worker_run→reduce), so an in-graph round cap of 8 is
+  unreachable — the framework throws "Maximum number of iterations" around round 6 and fails the turn
+  instead of degrading. Fix: `compile(CompileConfig.builder().recursionLimit(MAX_ROUNDS*4 + margin).build())`
+  so the in-graph cap binds and returns a best-effort answer. [M18]
+- **Tool execution enters the turn at M18 via the graph, and the `@Tool`-vs-self-dispatch choice is a
+  native-mandate call.** Option A — `ToolProvider.invoke(String,Map)` self-dispatch (a name→logic switch,
+  ZERO reflection) — was chosen over langchain4j `@Tool`/`DefaultToolExecutor`, whose `Method.invoke`
+  reflection is NOT framework-managed when models are built programmatically (no `@RegisterAiService`),
+  clashing with §5/§12. The SPI execution method lands in its consumer milestone (M18), mirroring M7's
+  `resolve()`; the SDK stays Quarkus-free + langchain4j-free (only `java.util.Map`). Model-facing
+  `ToolSpecification`s are built FROM `ToolSpec` (no reflection either). Every model-emitted tool call
+  still runs inside `ToolExecutor` (belt + audit) — incl. belt tools emitted in the SAME reply as a
+  built-in `spawn_worker` call, which the 6-dim review caught being silently dropped (every
+  `ToolExecutionRequest` MUST get a result message or the next provider call rejects the conversation).
+  [M18]
+- **Decouple the supervisor graph from `LlmSelector`/`AgentRegistry` via a `WorkerRunner` seam.** Pass the
+  resolved `ChatModel` + belt + messages INTO `SupervisorGraph.run(GraphTurnRequest)` (so it is unit-testable
+  with a scripted model), and put sub-agent spawn/drive behind a `WorkerRunner` interface
+  (`DefaultWorkerRunner` does `AgentRegistry.spawn` + a child generation, re-binding `CURRENT_AGENT` INSIDE
+  the worker virtual thread since `ScopedValue` does not inherit across threads). Workers fan out on
+  `Executors.newVirtualThreadPerTaskExecutor()` (no `StructuredTaskScope`). A scripted model that ignores
+  its input makes "tool result fed back" / "worker digest merged back" tests pass for the wrong reason —
+  capture the per-call `ChatRequest.messages()` and assert the result/digest actually reaches the model
+  (the 6-dim review caught both as green-for-wrong-reason). [M18]

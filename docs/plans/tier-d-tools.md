@@ -57,6 +57,13 @@ conflicts with the plan body or the source docs, **the banner wins**.
   `forvum-sdk` Quarkus-free AND needs NO change to `forvum-sdk/pom.xml` (unlike M7, which had to add
   `langchain4j-core` for `ChatModel`). Execution/dispatch lives in the engine `ToolExecutor` (and the
   M18 `tool_loop`), NOT on the SPI.
+  - **⤷ REVISED at M18 (Option A, maintainer-approved 2026-06-06):** execution DOES land on the SPI after
+    all — `ToolProvider` gained `String invoke(String toolName, Map<String,Object> arguments)` so the
+    provider self-dispatches by name (zero reflection; native-clean), still gated + audited by the engine
+    `ToolExecutor`/`ToolCallBridge`. The SDK stays Quarkus-free and langchain4j-free (only `java.util.Map`
+    added). This supersedes the "NOT on the SPI" clause above; the alternative (langchain4j `@Tool`
+    reflection) was rejected for its non-framework-managed `Method.invoke` native cost. See
+    `docs/plans/m18-supervisor-graph.md` §R2.
 
 - **AC-D3 — `tool_invocations` is ALREADY a Flyway-migrated table (M5). M13 adds ZERO migrations.**
   `forvum-engine/src/main/resources/db/migration/V1__baseline.sql` creates `tool_invocations`
