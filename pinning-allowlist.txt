@@ -1,0 +1,17 @@
+# Virtual-thread concurrency allowlist (CLAUDE.md section 11, ULTRAPLAN section 3.8).
+#
+# ACTIVE use: the static `synchronized` ban in .github/concurrency-guardrails.sh consults this file —
+# a `synchronized` hit whose `file:line:code` contains a listed (fixed-string) substring is permitted.
+# Blank lines and lines starting with '#' are ignored. The default expectation is EMPTY: the engine and
+# channel hot paths are virtual-thread-first and lock-free, and JEP 491 (JDK 24) stopped `synchronized`
+# from pinning anyway, so a `synchronized` here is a style/discipline violation, not a pin.
+#
+# FUTURE use (runtime pinning gate): `-Djdk.tracePinnedThreads` was removed in JDK 24+; runtime pinning
+# detection on JDK 25 is via the JFR `jdk.VirtualThreadPinned` event (the `quarkus-junit-virtual-threads`
+# @ShouldNotPin helper). When that gate lands, the only expected non-first-party pin is org.xerial
+# sqlite-jdbc's JNI: a virtual thread blocked in a SQLite native call (e.g. a channel-driven turn that
+# records to SQLite) pins its carrier — the embedded driver has no async API. The frame fingerprint to
+# allowlist there will be:
+#   org.sqlite
+#
+# (Kept commented: with no runtime gate wired yet, no active entries are needed.)

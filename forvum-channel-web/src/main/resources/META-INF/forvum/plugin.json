@@ -1,0 +1,7 @@
+{
+  "extension_id": "web",
+  "module_name": "forvum-channel-web",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.web.WebChannelProvider" }
+  ]
+}

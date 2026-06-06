@@ -31,6 +31,7 @@
         <module>forvum-provider-openai</module>
         <module>forvum-provider-google</module>
         <module>forvum-tools-filesystem</module>
+        <module>forvum-channel-web</module>
         <module>forvum-app</module>
     </modules>
 

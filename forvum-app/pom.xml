@@ -69,6 +69,12 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-filesystem</artifactId>
         </dependency>
+        <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
+             Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-web</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>

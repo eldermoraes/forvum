@@ -32,6 +32,17 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
+      # Concurrency discipline (CLAUDE.md section 11, ULTRAPLAN section 3.8): static scan for
+      # `synchronized` / Mutiny imports in the engine + channel hot paths (allowlists at repo root).
+      #
+      # NOTE: runtime virtual-thread pinning is NOT detected via `-Djdk.tracePinnedThreads`, which was
+      # REMOVED in JDK 24+ (Forvum runs on JDK 25 — the flag is silently inert and would make a stderr
+      # grep a vacuous always-pass gate). JEP 491 (JDK 24) also stopped `synchronized` from pinning,
+      # leaving only native-code pins (e.g. SQLite JNI); surfacing those needs the JFR
+      # `jdk.VirtualThreadPinned` event (the `quarkus-junit-virtual-threads` extension's @ShouldNotPin).
+      # Wiring that JFR-based gate is a tracked follow-up; the static scan below is the enforced check.
+      - name: Concurrency guardrails (no synchronized / no Mutiny in engine + channels)
+        run: bash .github/concurrency-guardrails.sh
       - name: Build + test reactor (JVM)
         run: ./mvnw -B verify
       - name: Smoke-test fast-jar (must start and exit 0)
