@@ -313,10 +313,15 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **Concurrency discipline (§3.8):** **virtual threads first** — blocking, imperative code on virtual
   threads is the default model, not reactive programming; reactive types (Mutiny/Reactor) are allowed
   only at a framework-mandated boundary bridged to a VT, with a justification, and reactive code where
-  a VT would have worked is a PR rejection reason. Virtual threads per request;
-  `-Djdk.tracePinnedThreads=full` in dev/test + CI grep for `Thread pinned`; `synchronized` forbidden
-  in `forvum-engine` / `forvum-channel-*` hot paths (CI grep) — use `ReentrantLock` /
-  `java.util.concurrent` / atomics.
+  a VT would have worked is a PR rejection reason. Virtual threads per request; `synchronized` forbidden
+  in `forvum-engine` / `forvum-channel-*` hot paths (CI static grep, `.github/concurrency-guardrails.sh`)
+  — use `ReentrantLock` / `java.util.concurrent` / atomics. **Pinning detection:**
+  `-Djdk.tracePinnedThreads` was REMOVED in JDK 24+ (Forvum runs JDK 25 — the flag is silently inert, so
+  a stderr `Thread pinned` grep is a vacuous always-pass gate and is NOT used). JEP 491 (JDK 24) also
+  stopped `synchronized` from pinning, leaving only native-code pins (e.g. SQLite JNI); runtime detection
+  is via the JFR `jdk.VirtualThreadPinned` event — the `quarkus-junit-virtual-threads` extension's
+  `@ShouldNotPin` — and wiring that gate is a tracked follow-up. The enforced concurrency checks today are
+  the static `synchronized`/Mutiny greps (`pinning-allowlist.txt` / `vt-allowlist.txt`).
 
 ---
 
@@ -506,3 +511,38 @@ Generalizable lessons from completed milestones; append here as milestones land.
   plugin can't depend on the engine), and the full DR-6a threat-model contract is deferred. Wire the
   module into the three append-only poms (root `<modules>`, `forvum-bom`, `forvum-app`) in the same
   milestone so it native-compiles + registers at app startup. [M14]
+- **A channel (Layer 3) drives turns but must not depend on `forvum-engine` — promote the turn-driver
+  contract to `forvum-sdk` (Resolution B).** A channel's direction is inverted (plugin→engine), unlike a
+  provider/tool (engine→plugin), yet the Layer-3 enforcer still bans `forvum-engine`. Resolve it with a
+  plain (non-sealed) `ChannelTurnDriver` interface in `forvum-sdk` carrying only `forvum-core` + JDK types
+  (`dispatch(ChannelMessage, Consumer<AgentEvent>)`, Quarkus-free); the engine's `TurnService` implements
+  it; the channel `@Inject`s the SDK interface and ArC resolves it to `TurnService` app-wide.
+  `ChannelProvider` stays a pure discovery marker (no transport method — supersedes the planned SI-E1), and
+  the channel enforcer stays `{forvum-sdk, forvum-core}`. [M16]
+- **A channel-driven turn must self-activate the CDI request context AND catch its own failures — the
+  engine `@QuarkusTest` masks both.** `TurnService.dispatch` runs on the channel's own thread (a WebSocket
+  virtual thread, a stdin loop) with no ambient request context, but the turn reads via the request-scoped
+  `EntityManager` → `ContextNotActiveException`; annotate `dispatch` `@ActivateRequestContext` (the
+  `@Transactional` writes still open their own tx). And it must `try/catch` the turn and emit a terminal
+  `ErrorEvent` to the sink — an uncaught exception escapes the channel callback and websockets-next's
+  default strategy CLOSES the socket with nothing shown, leaving the `ErrorEvent` render arm dead code.
+  Engine `@QuarkusTest`s pass regardless (test methods carry a request context and drive only the happy
+  path); only an app-level WS e2e (real channel thread) + an always-throwing-provider test catch these —
+  both surfaced by the pre-merge adversarial review, not the green build. [M16]
+- **A Layer-3 web library is NOT `quarkus:dev`-startable just because it bundles `vertx-http`.** The
+  `quarkus:dev` "support library" skip keys off the absent `build` goal, not HTTP presence, so
+  `forvum-channel-web` runs its `@QuarkusTest` `*IT` under Surefire (like the headless engine), NOT the Dev
+  MCP — even though each `@QuarkusTest` boots a real in-JVM HTTP/WS server. (Corrects the plan's
+  "web is the only Dev-MCP-startable module" premise.) [M16]
+- **websockets-next test: use `BasicWebSocketConnector` with the full `@TestHTTPResource` URI.** The typed
+  `WebSocketConnector<Client>.baseUri(uri)` CONCATENATES the `@WebSocketClient` path, so passing the full
+  endpoint URI doubles it → handshake 404. `BasicWebSocketConnector.create().baseUri(fullUri).onTextMessage(
+  (c,m)->…).connectAndAwait()` sidesteps it. The per-tab session id is `WebSocketConnection.id()` (from
+  `Connection`); `sendTextAndAwait` is blocking → call it from a `@RunOnVirtualThread @OnTextMessage`
+  (`io.smallrye.common.annotation.RunOnVirtualThread`), never a Mutiny `Multi` return. [M16]
+- **`-Djdk.tracePinnedThreads` was REMOVED in JDK 24+ — a stderr `Thread pinned` CI grep is a vacuous
+  always-pass gate on JDK 25.** The flag is silently inert; runtime pinning detection moved to the JFR
+  `jdk.VirtualThreadPinned` event (`quarkus-junit-virtual-threads` `@ShouldNotPin`), and JEP 491 (JDK 24)
+  also stopped `synchronized` from pinning (leaving only native-code, e.g. SQLite JNI, pins). The enforced
+  concurrency gate is now the static `synchronized`/Mutiny grep (`.github/concurrency-guardrails.sh` +
+  repo-root `pinning-allowlist.txt`/`vt-allowlist.txt`); the JFR runtime gate is a tracked follow-up. [M16]

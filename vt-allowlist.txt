@@ -1,0 +1,11 @@
+# Mutiny / Reactor import allowlist (CLAUDE.md section 11, ULTRAPLAN section 3.8).
+#
+# Used by the CI concurrency guardrails (.github/concurrency-guardrails.sh). One fixed-string
+# (substring) per line; blank lines and lines starting with '#' are ignored. Virtual threads are the
+# default concurrency model: a Mutiny (io.smallrye.mutiny) or Reactor import in forvum-engine /
+# forvum-channel-* is a PR rejection UNLESS it sits at a framework-mandated boundary bridged to a
+# virtual thread, with a written justification cited on the entry here.
+#
+# Empty by design: no such boundary exists in the engine or any channel yet. The Web channel sends
+# through the blocking WebSocketConnection.sendTextAndAwait on a @RunOnVirtualThread callback — never
+# a Mutiny Multi return (io.smallrye.common.annotation.RunOnVirtualThread is NOT a Mutiny import).

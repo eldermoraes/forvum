@@ -105,6 +105,11 @@
                 <artifactId>forvum-tools-filesystem</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-channel-web</artifactId>
+                <version>${project.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 </project>
