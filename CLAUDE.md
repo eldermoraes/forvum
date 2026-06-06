@@ -546,3 +546,30 @@ Generalizable lessons from completed milestones; append here as milestones land.
   also stopped `synchronized` from pinning (leaving only native-code, e.g. SQLite JNI, pins). The enforced
   concurrency gate is now the static `synchronized`/Mutiny grep (`.github/concurrency-guardrails.sh` +
   repo-root `pinning-allowlist.txt`/`vt-allowlist.txt`); the JFR runtime gate is a tracked follow-up. [M16]
+- **TamboUI 0.3.0's BOTH terminal backends fail the GraalVM 25 native build — ship NO terminal backend in
+  v0.1.** `tamboui-jline3-backend` pulls the `org.jline:jline` uber jar whose bundled JNA provider
+  (`JnaNativePty` → absent `com.sun.jna.Platform`) breaks `--link-at-build-time`; `tamboui-panama-backend`'s
+  FFM downcall (`LibC.tcgetattr`) is rejected by native-image (`should not reach here: linkToNative`). A
+  backend is only needed for terminal-size auto-detection, so `forvum-channel-tui` carries just
+  `tamboui-toolkit`+`tamboui-widgets` and renders ANSI through the pure-Java headless `Buffer` (the same
+  path the app banner already native-compiles), sized to the fragment's CONTENT width — display-width aware
+  so CJK/wide glyphs aren't truncated (`String.length()` is UTF-16 code-units, not terminal cells); the
+  terminal wraps long lines. v0.1 is a line-based, pipeable stdin REPL (NOT a full-screen Toolkit app), with
+  `--no-ansi` (`forvum.no-ansi`) bypassing TamboUI entirely; terminal-width auto-detection + the full-screen
+  Toolkit/`tui.tcss` are deferred to a native-buildable TamboUI backend (TamboUI bump / M20). The TUI is a
+  foreground (not server) channel: `ChannelLauncher.FOREGROUND_CHANNELS` + `ForvumApplication.run()` runs the
+  REPL in the foreground (returns at stdin EOF) instead of `Quarkus.waitForExit()`. [M15]
+- **A Layer-3 library module's config DEFAULTS go in `META-INF/microprofile-config.properties`, not
+  `application.properties`; and never log a secret-bearing URL.** Quarkus loads `application.properties` only
+  from the application artifact (`forvum-app`); a dependency JAR's `application.properties` works in the
+  module's OWN `@QuarkusTest` (there the module IS the app) but is NOT a config source in the assembled
+  binary, so it silently falls back to defaults. M17's Telegram rest-client `read-timeout` (which MUST exceed
+  the 50s long-poll, else `getUpdates` is cut at the 30s default) belongs in
+  `META-INF/microprofile-config.properties` (ordinal 100, loaded from every JAR; `forvum-app`/env override at
+  a higher ordinal). Security: the bot token is embedded in the request URL PATH (`/bot<TOKEN>`), so a
+  REST-client exception must NOT be logged raw — redact the `/bot<TOKEN>` segment and log a message only (no
+  throwable/stack). The long-poll worker is a self-started loop on
+  `Executors.newVirtualThreadPerTaskExecutor()` (blocking, no Mutiny — `@RunOnVirtualThread` is only for
+  externally-invoked inbound handlers). An enabled-but-token-less `telegram.json` must NOT count as a live
+  server channel (`ChannelLauncher.shouldRunAsServer` is token-aware) or the binary hangs in
+  `Quarkus.waitForExit()` serving nothing. [M17]
