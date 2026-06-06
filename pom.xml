@@ -32,6 +32,7 @@
         <module>forvum-provider-google</module>
         <module>forvum-tools-filesystem</module>
         <module>forvum-channel-web</module>
+        <module>forvum-channel-tui</module>
         <module>forvum-app</module>
     </modules>
 

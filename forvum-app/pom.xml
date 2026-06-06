@@ -75,6 +75,15 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-channel-web</artifactId>
         </dependency>
+        <!-- Layer-3 TUI channel (M15): a line-based stdin REPL driving turns via ChannelTurnDriver.
+             ANSI output is rendered via TamboUI's pure-Java headless Buffer (same as the banner); v0.1
+             ships NO terminal backend (both TamboUI 0.3.0 backends fail the GraalVM 25 native build —
+             jline3's JNA provider breaks link-at-build-time, panama's FFM downcall is rejected), so the
+             app needs no native carve-out for the TUI. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-tui</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
