@@ -84,6 +84,12 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-channel-tui</artifactId>
         </dependency>
+        <!-- Layer-3 Telegram channel (M17): a blocking REST client long-poll worker on a virtual thread
+             driving turns via ChannelTurnDriver. Brings quarkus-rest-client-jackson. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-telegram</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
