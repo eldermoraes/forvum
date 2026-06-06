@@ -75,6 +75,15 @@ public class Agent {
      * attempt is still ledgered in {@code provider_calls} by the fallback decorator).
      */
     public String respond(String sessionId, String userText) {
+        return respond(sessionId, userText, null);
+    }
+
+    /**
+     * As {@link #respond(String, String)}, but using {@code modelOverride} instead of the agent's persona
+     * model when non-null — the M19 cron path runs a turn with the cron's own model (distinct from the
+     * agent's default). All other behavior (session, memory, graph, CAPR) is identical.
+     */
+    public String respond(String sessionId, String userText, ChatModel modelOverride) {
         AgentId id = CurrentAgent.CURRENT_AGENT.get();
         sessions.ensureSession(sessionId, id);
 
@@ -84,7 +93,7 @@ public class Agent {
         messages.addAll(memory.messages(sessionId));   // committed prior history
         messages.add(UserMessage.from(userText));        // this turn's user message, not yet persisted
 
-        ChatModel model = llmSelector.select(persona, sessionId);
+        ChatModel model = modelOverride != null ? modelOverride : llmSelector.select(persona, sessionId);
         List<ToolSpec> belt = toolBelt.tools();
 
         String reply = supervisorGraph.run(new GraphTurnRequest(sessionId, id, model, belt, messages));
