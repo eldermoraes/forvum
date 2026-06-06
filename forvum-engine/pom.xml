@@ -51,6 +51,11 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-jackson</artifactId>
         </dependency>
+        <!-- M19: programmatic cron scheduling (Scheduler API). Version via the platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-scheduler</artifactId>
+        </dependency>
 
         <!-- M5 persistence: SQLite via Hibernate ORM Panache + Flyway. SQLite has no Quarkus JDBC
              extension, so it is wired as an "Other database" (db-kind=other + bare Xerial driver +

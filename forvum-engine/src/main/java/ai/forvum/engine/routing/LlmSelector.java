@@ -38,12 +38,19 @@ public class LlmSelector {
 
     /** Resolve {@code persona}'s primary model to a fallback-wrapped {@link ChatModel} for the turn. */
     public ChatModel select(Persona persona, String sessionId) {
-        ModelRef ref = persona.primaryModel();
+        return resolve(persona.primaryModel(), persona.id().value(), sessionId);
+    }
+
+    /**
+     * Resolve an explicit {@link ModelRef} to a fallback-wrapped {@link ChatModel}, attributing the
+     * ledger to {@code agentId}/{@code sessionId}. Used by the M19 cron path to run a turn with the
+     * cron's own model rather than the agent's persona model.
+     */
+    public ChatModel resolve(ModelRef ref, String agentId, String sessionId) {
         ModelProvider provider = providerFor(ref);
         ChatModel resolved = provider.resolve(ref);
         FallbackLink link = new FallbackLink(ref, resolved, null);
-        return new FallbackChatModel(List.of(link), sessionId, persona.id().value(),
-                classifier, recorder, null);
+        return new FallbackChatModel(List.of(link), sessionId, agentId, classifier, recorder, null);
     }
 
     private ModelProvider providerFor(ModelRef ref) {

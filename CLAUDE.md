@@ -614,3 +614,24 @@ Generalizable lessons from completed milestones; append here as milestones land.
   its input makes "tool result fed back" / "worker digest merged back" tests pass for the wrong reason —
   capture the per-call `ChatRequest.messages()` and assert the result/digest actually reaches the model
   (the 6-dim review caught both as green-for-wrong-reason). [M18]
+- **Pure programmatic Quarkus scheduling needs `quarkus.scheduler.start-mode=forced`** — without a
+  `@Scheduled` business method the scheduler does not start, so `Scheduler.newJob(id)...schedule()` never
+  fires. The flag goes in `META-INF/microprofile-config.properties` (app-wide, [M17]), not
+  `application.properties`. Programmatic API: `scheduler.newJob(id).setCron(expr)
+  .setConcurrentExecution(SKIP).setTask(task, true).schedule()` / `unscheduleJob(id)` /
+  `getScheduledJob(id)` (the latter two confirmed in `quarkus-scheduler` 3.33.1 via `javap`). **The 2nd arg
+  of `setTask(Consumer, boolean)` IS the run-on-virtual-thread flag** (a `runOnVirtualThread` field on
+  `AbstractJobDefinition`) — framework-managed VT, no manual offload needed. [M19]
+- **Hot-reload: a config-driven job that becomes INVALID on edit must be UNSCHEDULED, not left firing the
+  stale spec.** The natural `read().map(parse).ifPresent(schedule)` swallows a parse failure and leaves the
+  prior job running the old definition (and old model → burns budget). The MODIFIED-into-invalid (and
+  empty/mid-write read) path must `unscheduleJob(id)`, mirroring DELETED. Test the reload deterministically
+  by firing `ConfigurationChangedEvent` (or calling the `@Observes` method) + asserting
+  `scheduler.getScheduledJob(id)` — NOT via WatchService timing; the boot/`onStart` fixture does not cover
+  the reload entry point ([M4] lesson). [M19]
+- **A per-cron (or per-X) model override is only proven if the override differs from the default in the
+  test.** The cron carries its own `ModelRef` (resolved via `LlmSelector.resolve(ref, agentId, sessionId)`
+  + an `Agent.respond(..., ChatModel override)` overload). With the cron model == the agent persona model
+  in the fixture (and `FakeModelProvider` ignoring the ref), a regression that dropped the override and
+  used the persona model passes green. Give the cron a DISTINCT model id and assert `provider_calls.model`
+  reflects the CRON's model (the 6-dim review caught this as green-for-wrong-reason). [M19]
