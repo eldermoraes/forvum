@@ -1,67 +1,55 @@
 package ai.forvum.app;
 
-import ai.forvum.channel.tui.TuiChannel;
+import ai.forvum.engine.runtime.CommandMode;
 
-import dev.tamboui.buffer.Buffer;
-import dev.tamboui.layout.Rect;
-import dev.tamboui.text.Text;
-import dev.tamboui.widgets.paragraph.Paragraph;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.QuarkusApplication;
 import io.quarkus.runtime.annotations.QuarkusMain;
 
 import jakarta.inject.Inject;
 
+import picocli.CommandLine;
+
 /**
- * Entry point for the Forvum native binary. Renders a one-line TamboUI banner into an in-memory
- * {@link Buffer} (headless — needs no TTY, so the same path runs unchanged on JVM and native and is the
- * CI smoke target), then dispatches on the configured channels (milestone M16, interim).
+ * Entry point for the Forvum native binary (M20). Parses the process arguments with picocli and runs the
+ * matched command: {@code --help}/{@code --version} print and exit; {@code init} scaffolds {@code ~/.forvum};
+ * with no subcommand the {@link RootCommand} default runs the M15/M16 channel dispatch (banner, then an
+ * interactive TUI or a long-lived server channel, else a clean command-mode exit). The {@code IFactory}
+ * is the CDI-aware picocli factory provided by quarkus-picocli, so the command beans get their injections.
  *
- * <p><strong>Launch dispatch (M16 + M15):</strong> if an interactive <em>foreground</em> channel is
- * enabled — v0.1's only one is the TUI (M15), whose stdin REPL blocks the foreground — the binary runs it
- * directly ({@link TuiChannel#run()}) and exits with its result. Else if a <em>server</em> channel is
- * enabled — v0.1's only one is the Web channel, whose vertx-http/WebSocket server is already running on
- * background threads — the binary stays alive ({@link Quarkus#waitForExit()}) to serve it; otherwise it
- * exits {@code 0} in command mode. With no {@code ~/.forvum/} (the CI native smoke) no channel is enabled,
- * so it exits cleanly. The picocli CLI, {@code --help}, proper run-modes, and the 200 ms cold-start gate
- * land at M20.
- *
- * <p><strong>Interim limitation:</strong> bundling the Web channel puts vertx-http on the only runnable
- * artifact, and Quarkus binds the HTTP port at boot (RUNTIME_INIT) before {@code run()} chooses a mode —
- * so even a command-mode invocation requires a free {@code quarkus.http.port} (default 8080). A
- * command-vs-server split that leaves HTTP unbound for one-shot commands is part of the M20 run-mode rework.
+ * <p>Cold-start (the &lt;200 ms gate): {@link #main} detects a one-shot command
+ * ({@code --help}/{@code --version}/{@code init}) from the raw args BEFORE Quarkus boots and (a) leaves the
+ * bundled Web channel's {@code vertx-http} listener unbound ({@code quarkus.http.host-enabled=false}), and
+ * (b) lets the startup observers skip Flyway migration, the config {@code WatchService}, and cron scheduling
+ * ({@code CommandMode}). So a one-shot pays neither the HTTP bind nor the DB/IO — native {@code forvum --help}
+ * measures ~45 ms and needs no free port.
  */
 @QuarkusMain
 public class ForvumApplication implements QuarkusApplication {
 
-    static final String BANNER = "Forvum - local-first AI on the JVM";
+    /**
+     * Leaves HTTP unbound for a one-shot command so it needs no free port and skips the bundled Web
+     * channel's {@code vertx-http} bind. {@code quarkus.http.host-enabled} is read at RUNTIME_INIT (when the
+     * listener would bind), which precedes {@code QuarkusApplication.run()} — so the decision must be a
+     * system property set here, before {@link Quarkus#run}, not a {@code StartupEvent} observer. (This does
+     * not address the separate macOS {@code getLocalHost()} startup stall, which the CI workflow fixes by
+     * making the runner's hostname resolvable.)
+     */
+    public static void main(String[] args) {
+        if (CommandMode.isOneShotCommand(args)) {
+            System.setProperty("quarkus.http.host-enabled", "false");
+        }
+        Quarkus.run(ForvumApplication.class, args);
+    }
 
     @Inject
-    ChannelLauncher channels;
+    CommandLine.IFactory factory;
 
     @Inject
-    TuiChannel tui;
+    RootCommand root;
 
     @Override
     public int run(String... args) {
-        printBanner();
-        if (channels.shouldRunInteractive()) {
-            return tui.run();
-        }
-        if (channels.shouldRunAsServer()) {
-            System.out.println("Server channel(s) ready - press Ctrl+C to stop.");
-            Quarkus.waitForExit();
-        }
-        return 0;
-    }
-
-    private static void printBanner() {
-        Rect area = new Rect(0, 0, BANNER.length(), 1);
-        Buffer buffer = Buffer.empty(area);
-        Paragraph banner = Paragraph.builder()
-                .text(Text.from(BANNER))
-                .build();
-        banner.render(area, buffer);
-        System.out.println(buffer.toAnsiStringTrimmed());
+        return new CommandLine(root, factory).execute(args);
     }
 }

@@ -27,13 +27,15 @@ trade-off for a reflection-free native binary.
 - Docs: `docs/ULTRAPLAN.md` (source of truth, M1–M20 roadmap) · founding paradigm
   `docs/CONTEXT-ENGINEERING.md` (PT source) → `docs/CONTEXT-ENGINEERING-MAPPING.md` (EN mapping) ·
   `docs/ISSUES.md` (per-step issue master index) · `CONTRIBUTING.md` (full contributor guide).
-- Status: active design + early implementation. M1–M4 complete (multi-module reactor + Tier-1 domain
-  contracts: records, sealed `AgentEvent`, enums, `PermissionScope`, budget types; plus the Layer-1
-  plugin SDK: sealed provider interfaces, `@ForvumExtension`, re-exported `@RegisterForReflection`;
-  plus the M4 file-based config loader with `WatchService` hot reload — `ForvumHome` + `ConfigWatcher`
-  firing a CDI `ConfigurationChangedEvent`, per-subfolder readers); M5–M20 planned. A working vertical
-  slice (one agent vs local Ollama via CLI) lives on
-  `demo/conference-mvp`. Not production-ready.
+- Status: **Phase-1 MVP complete — M1–M20 landed (EPIC-1 #1 / v0.1).** The full reactor + Tier-1 domain
+  contracts + Layer-1 plugin SDK + M4 config loader (`WatchService` hot reload), SQLite/Flyway (M5),
+  `@AgentScoped` CDI context (M6), `AgentRegistry` (M7), `FallbackChatModel` (M8), the provider fleet
+  (Ollama/Anthropic/OpenAI/Google, M9–M12), tools (`ToolRegistry`/`PermissionScope`/filesystem, M13–M14),
+  channels (TUI/Web/Telegram, M15–M17), the LangGraph4j supervisor graph wiring tool execution into the
+  turn (M18), file-driven crons (M19), and the GraalVM native single-binary + CI matrix with the picocli
+  command-mode/lazy-DB &lt;200 ms cold-start gate (M20). A working vertical slice (one agent vs local
+  Ollama via CLI) lives on `demo/conference-mvp`. v0.1 is feature-complete; not yet hardened for
+  production. Phase-2 (v0.5 parity) is the next roadmap arc (`docs/ULTRAPLAN.md` §7.2).
 
 ---
 
@@ -635,3 +637,48 @@ Generalizable lessons from completed milestones; append here as milestones land.
   in the fixture (and `FakeModelProvider` ignoring the ref), a regression that dropped the override and
   used the persona model passes green. Give the cron a DISTINCT model id and assert `provider_calls.model`
   reflects the CRON's model (the 6-dim review caught this as green-for-wrong-reason). [M19]
+- **The cold-start lever is a per-invocation skip in EVERY DB/IO `@Observes StartupEvent` observer, not a
+  global flag — and it must be tested in BOTH directions.** A one-shot CLI command (`--help`/`--version`/
+  `init`, detected by `CommandMode` reading `@CommandLineArguments`, which Quarkus populates before any
+  observer) skips Flyway (`PersistenceBootstrap`), the `WatchService` (`ConfigWatcher`), AND cron
+  scheduling (`CronScheduler`). The first cut gated only the first two; the 6-dim review caught the
+  unguarded `CronScheduler` — combined with `scheduler.start-mode=forced`, a one-shot `init`/`--help` could
+  fire a cron turn against the (deliberately) un-migrated DB. When you add a startup observer that touches
+  the DB/IO, gate it on `commandMode.isOneShot()` too (cheap side-effect-free ones — `ToolRegistry`,
+  `HttpClientFactorySelector` — are fine left ungated). Test the lever with a recording collaborator (a
+  `Flyway` subclass whose `migrate()` records; `ConfigWatcher.isWatching()`) injected with a one-shot vs a
+  normal `CommandMode` and assert BOTH branches — a single-direction test stays green when the guard is
+  deleted (verified by mutating `isOneShot()`→`false` and watching the one-shot assertions go red). [M20]
+- **To leave HTTP unbound for a one-shot command, set `quarkus.http.host-enabled=false` as a system
+  property in a custom `@QuarkusMain` `main()` BEFORE `Quarkus.run` — not from a `StartupEvent` bean.** The
+  bundled Web channel puts `vertx-http` on the only runnable artifact; Quarkus binds the listener at
+  RUNTIME_INIT, BEFORE `QuarkusApplication.run()` (where picocli parses args), so a `StartupEvent` bean like
+  `CommandMode` is too late and `ProcessHandle...arguments()` is unreliable on macOS. The reliable lever:
+  give the `@QuarkusMain` class a `public static void main(String[] args)` (the real native entry point —
+  it runs before any Quarkus bootstrap), call `CommandMode.isOneShotCommand(args)` there, and on a one-shot
+  `System.setProperty("quarkus.http.host-enabled", "false")` then `Quarkus.run(App.class, args)`.
+  `host-enabled` is runtime config (system-property ordinal 400 > application.properties); verified on the
+  native binary: with the flag, startup logs `Listening on:` empty and drops ~0.285 s → ~0.040 s. This makes
+  a one-shot need no free port (the M20 fix for the review's HTTP-bind findings). (@QuarkusMainTest drives
+  `QuarkusApplication.run()`, not the static `main`, so the lever is validated by the native cold-start
+  gate, not a JVM test.) [M20]
+- **A fixed ~5 s startup stall on the macOS CI cell is `InetAddress.getLocalHost()`, not the HTTP bind —
+  fix the runner's hostname resolution, don't chase the listener.** The native cold-start gate measured
+  **~5093 ms** on `macos-14` while Linux CI and a dev Mac stayed ~45 ms. First fix attempt — unbinding HTTP
+  for one-shot — did NOT move it (still 5088 ms), which PROVED the stall is independent of the listener: it
+  is `getLocalHost()` called at startup by OpenTelemetry's host-resource detector + the Vert.x address
+  resolver, and the GitHub macOS runner has no resolvable hostname (a known runner issue), so the reverse
+  lookup times out ~5 s. Fix in the workflow: `echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts`
+  (+`::1`) on the macOS cell, before the build. Lessons: (1) the cold-start gate on BOTH cells is what
+  caught it — a "document the limitation" stance passed 3/4 and would have shipped a broken macOS binary;
+  (2) when a fix doesn't move the metric, that's the diagnostic — re-run and read it before assuming the
+  cause; (3) a consistent N-second (not jittery) delay is almost always a fixed timeout (DNS/getLocalHost),
+  not load. [M20]
+- **Source `--version` from the build, never a literal.** A hardcoded picocli `version = "..."` drifts from
+  the POM on the next bump and a same-literal test pins constant-vs-test, not constant-vs-actual-version. Use
+  a CDI `IVersionProvider` reading `quarkus.application.version` (Quarkus sets it from the Maven version and
+  bakes it into the native image — reflection-free via ArC, no manifest/resource-filter native hint needed).
+  `init` (the app-owned one-shot subcommand) also scaffolds `~/.forvum`, which later holds channel
+  credentials, so create it owner-only (0700 dirs / 0600 files via `PosixFilePermissions`, guarded by the
+  `posix` view) instead of the world-readable umask default; route the shipped binary's logs to stderr
+  (`%prod.quarkus.log.console.stderr=true`) so a one-shot's stdout is just the picocli usage. [M20]

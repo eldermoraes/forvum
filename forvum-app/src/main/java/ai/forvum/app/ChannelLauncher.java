@@ -10,9 +10,10 @@ import jakarta.inject.Inject;
 import java.util.Set;
 
 /**
- * Decides whether the binary runs as a long-lived server or in one-shot command mode (the interim
- * launch dispatch — picocli and proper run-modes are M20). A <em>server channel</em> is one whose
- * inbound surface keeps the process alive to serve; v0.1's only server channel is the Web channel
+ * Decides whether the binary runs as a long-lived server or exits in command mode. Invoked from
+ * {@link RootCommand#call()} (the picocli default command) as the permanent launch dispatch. A
+ * <em>server channel</em> is one whose inbound surface keeps the process alive to serve; v0.1's only
+ * server channel is the Web channel
  * (its vertx-http/WebSocket server runs in background threads, so {@code run()} need only block). M17
  * adds Telegram's long-poll loop to this set — but only when it actually serves: Telegram counts as a
  * live server channel only when its config carries a non-blank {@code botToken}, mirroring

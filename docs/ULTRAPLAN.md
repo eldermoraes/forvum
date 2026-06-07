@@ -1357,23 +1357,24 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Verify:** with a Telegram bot token in the keychain, a live DM produces an assistant reply within the turn latency budget; `allowedUserIds` in `channels/telegram.json` refuses other users with a friendly message.
   - **Commit:** `feat(channel-telegram): add long-poll Telegram channel`.
 
-- [ ] **M18 — LangGraph4j supervisor graph.**
+- [x] **M18 — LangGraph4j supervisor graph.**
   - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/graph/SupervisorGraph.java` (the `StateGraph` compiler), node implementations for `route`, `generate`, `tool_loop`, `spawn_worker`, `worker_run`, `reduce`, `GraphState.java`.
   - **Deps:** `org.bsc.langgraph4j:langgraph4j-core` (and the Langchain4j integration module).
   - **Verify:** a multi-tool scenario ("fetch X then summarize") routes through `tool_loop` -> `generate` and produces the expected final message; CAPR event written for the turn.
   - **Commit:** `feat(engine): add LangGraph4j supervisor-workers orchestration`.
 
-- [ ] **M19 — Quarkus-scheduler + crons.**
+- [x] **M19 — Quarkus-scheduler + crons.**
   - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/cron/CronScheduler.java` (registers `@Scheduled` programmatically from `~/.forvum/crons/*.json`), `CronSpec.java`, `CronTrigger.java`.
   - **Deps:** `quarkus-scheduler`.
   - **Verify:** a cron firing every minute with a `FallbackChain` pinned to Ollama triggers an agent turn and writes to `messages`, `provider_calls`, `capr_events`; adding a new cron file triggers reload without restart.
   - **Commit:** `feat(engine): add file-driven cron scheduler with per-cron LLM chain`.
 
-- [ ] **M20 — GraalVM native image + CI matrix.**
+- [x] **M20 — GraalVM native image + CI matrix.**
   - **Files:** `forvum-app/src/main/resources/application.properties` (native-specific flags), `.github/workflows/ci.yml` (matrix: `linux-amd64`, `macos-arm64`; JVM and native builds; native smoke test with 200 ms cold-start gate), `Dockerfile.jvm`, `Dockerfile.native`.
   - **Deps:** `quarkus-container-image-docker`; GraalVM CE 25 / Mandrel 25.0.x-Final on runners.
   - **Verify:** `mvn -f forvum-app -Pnative package -Dquarkus.native.container-build=true` succeeds on a clean CI runner; `./forvum-app-<version>-runner --help` prints help in < 200 ms measured from process start.
   - **Commit:** `feat(app): add GraalVM native image profile and CI matrix`.
+  - **As-built deviations:** (a) the cold-start lever is picocli command-mode (`--help`/`--version`/`init`) + a `CommandMode` one-shot detector that makes the DB/watcher/cron startup observers skip their work — native `forvum --help` measures ~45 ms (gate met). (b) `quarkus-container-image-docker` was deliberately **not** adopted: hand-authored `Dockerfile.jvm`/`Dockerfile.native` are simpler and CI never builds an image (it runs `forvum --help` on the bare runner). (c) one-shot commands leave HTTP **unbound**: `ForvumApplication.main` sets `quarkus.http.host-enabled=false` (read at RUNTIME_INIT, before `run()`) when the args name a one-shot, so they pay neither the bundled Web channel's `vertx-http` bind nor a free-port requirement. (Separately, the macOS CI cell paid a fixed ~5 s `InetAddress.getLocalHost()` stall at startup — OpenTelemetry's host-resource detector + the Vert.x address resolver call it, independent of the listener — so the workflow makes the runner's hostname resolvable; real Macs resolve fine.) (d) **Risk #5** (a real-provider native scripted-turn smoke) is a CLAUDE.md §5 sanctioned behavioral deferral: native-COMPILE covers the full turn path on every cell, the JVM `@Tag("live")` tests cover provider JSON, and an Ollama CI service is linux-only — tracked as a follow-up; the native-compile + 200 ms cold-start gates remain mandatory on both cells.
 
 ### 7.2 Phase 2 — v0.5 (parity with OpenClaw)
 

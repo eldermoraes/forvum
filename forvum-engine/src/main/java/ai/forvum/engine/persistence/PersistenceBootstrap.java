@@ -10,6 +10,7 @@ import org.flywaydb.core.Flyway;
 import org.jboss.logging.Logger;
 
 import ai.forvum.engine.config.ForvumHome;
+import ai.forvum.engine.runtime.CommandMode;
 
 /**
  * Brings the persistence layer up at startup: ensures {@code $FORVUM_HOME/state} exists, then runs the
@@ -29,14 +30,22 @@ public class PersistenceBootstrap {
 
     private final ForvumHome home;
     private final Flyway flyway;
+    private final CommandMode commandMode;
 
     @Inject
-    public PersistenceBootstrap(ForvumHome home, Flyway flyway) {
+    public PersistenceBootstrap(ForvumHome home, Flyway flyway, CommandMode commandMode) {
         this.home = home;
         this.flyway = flyway;
+        this.commandMode = commandMode;
     }
 
     void onStart(@Observes StartupEvent ev) {
+        if (commandMode.isOneShot()) {
+            // A one-shot command (--help/--version/init) never runs a turn — keep its cold-start off the
+            // DB (M20). Migration runs lazily for interactive/server modes (this observer) or the cron.
+            LOG.debugf("One-shot command — skipping schema migration.");
+            return;
+        }
         if (StateDirInitializer.ensureStateDir(home.state())) {
             flyway.migrate();
             LOG.debugf("Flyway migration applied; database at %s/forvum.sqlite", home.state());
