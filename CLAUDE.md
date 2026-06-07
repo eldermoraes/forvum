@@ -683,3 +683,24 @@ Generalizable lessons from completed milestones; append here as milestones land.
   credentials, so create it owner-only (0700 dirs / 0600 files via `PosixFilePermissions`, guarded by the
   `posix` view) instead of the world-readable umask default; route the shipped binary's logs to stderr
   (`%prod.quarkus.log.console.stderr=true`) so a one-shot's stdout is just the picocli usage. [M20]
+- **The native binary could not run a single turn — and "native-COMPILEs + boots" never proved it could.**
+  A live native turn (Ollama, the default agent) surfaced TWO native-only gaps that every prior milestone's
+  "native build green" had hidden, because the build + the no-config boot never EXECUTE a turn:
+  (1) **HTTP client.** A programmatically-built model whose builder is NOT swapped by a Quarkiverse
+  factory (Ollama, Gemini — unlike OpenAI/Anthropic) resolves its client via langchain4j's
+  `HttpClientBuilderLoader`, whose `ServiceLoader` is **EMPTY in a native image** → the turn dies with
+  `"No HTTP client has been found in the classpath"`. The M12 `HttpClientFactorySelector` system property
+  only DISAMBIGUATES a multi-factory JVM classpath; it cannot populate an empty native ServiceLoader (the
+  M12 "resolve() path identical to JVM" note was wrong — it had never run a native turn). Fix: pin an
+  explicit `.httpClientBuilder(new JdkHttpClientBuilder())` (pure-langchain4j JDK `java.net.http`, directly
+  instantiated, native-safe) on the un-swapped providers — never the loader. Note the Gemini builder hides
+  `httpClientBuilder` on its base class (`BaseGeminiChatModel...Builder`), inherited, not on the subclass.
+  (2) **Graph state serialization.** LangGraph4j clones the `GraphState` data map via `ObjectOutputStream`
+  on EVERY node step (R6) → native needs each serialized concrete type registered, so the first step throws
+  `UnsupportedFeatureError: SerializationConstructorAccessor not found for java.util.ArrayList`. Fix: a
+  `@RegisterForReflection(targets={ArrayList.class}, serialization=true)` holder (GraphState holds only
+  String + an `ArrayList`-backed `List<String>`). LESSON: the only thing that catches these is an actual
+  native turn against a real provider (Risk #5) — keep deferring it and the "single native binary" ships
+  unable to converse. Verified locally: `echo '...' | forvum` on the native binary returns a real Ollama
+  answer and writes `messages`/`provider_calls`. (Tool-loop/spawn paths add no new serialized types — the
+  SCHEMA's only collection channel is the ArrayList appender — but were not separately live-tested.) [M20/Risk#5]

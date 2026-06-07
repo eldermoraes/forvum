@@ -3,6 +3,7 @@ package ai.forvum.provider.google;
 import ai.forvum.core.ModelRef;
 import ai.forvum.sdk.AbstractModelProvider;
 import ai.forvum.sdk.ForvumExtension;
+import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -36,17 +37,18 @@ import java.util.concurrent.ConcurrentMap;
  * an underlying HTTP client, so re-resolving the same {@code google:<model>} on every turn would
  * churn clients; the cache reuses one model per id.
  *
- * <p><strong>HTTP client selection:</strong> unlike {@code OpenAiChatModel} and {@code AnthropicChatModel}
- * — whose programmatic {@code builder()} is swapped to the Quarkus REST client by a Quarkiverse
- * builder-factory — {@code GoogleAiGeminiChatModel.builder()} is the raw LangChain4j builder. With no
- * explicit {@code httpClientBuilder}, {@code GeminiService} resolves one via
- * {@code dev.langchain4j.http.client.HttpClientBuilderLoader}, which throws
- * {@code IllegalStateException("Conflict: multiple HTTP clients ...")} when the classpath carries more than
- * one {@code HttpClientBuilderFactory} (the assembled {@code forvum-app} does). The factory is selected
- * once, app-wide, by {@code ai.forvum.app.HttpClientFactorySelector} (the {@code langchain4j.http.clientBuilderFactory}
- * system property) — so this provider keeps the plain builder and does not pin a client itself.
- * {@code ProviderResolveInAppClasspathTest} in {@code forvum-app} is the regression guard (the conflict is
- * invisible to this module's single-factory contract test).
+ * <p><strong>HTTP client (native-critical):</strong> unlike {@code OpenAiChatModel} and
+ * {@code AnthropicChatModel} — whose programmatic {@code builder()} is swapped to the Quarkus REST client by
+ * a Quarkiverse builder-factory — {@code GoogleAiGeminiChatModel.builder()} is the raw LangChain4j builder.
+ * Left to itself, {@code GeminiService} resolves its HTTP client via
+ * {@code dev.langchain4j.http.client.HttpClientBuilderLoader}, whose {@code ServiceLoader} lookup returns
+ * EMPTY in a GraalVM native image (the langchain4j {@code HttpClientBuilderFactory} providers are not
+ * registered for native) — so a native turn fails at {@code build()} with
+ * {@code "No HTTP client has been found in the classpath"} (Risk #5; the JVM-only
+ * {@code HttpClientFactorySelector} system property cannot populate an empty native ServiceLoader). We
+ * therefore pin an explicit {@link JdkHttpClientBuilder} — a pure-LangChain4j JDK {@code java.net.http}
+ * client, directly instantiated (so the loader is never consulted) and native-safe — mirroring the Ollama
+ * provider. {@code ProviderResolveInAppClasspathTest} in {@code forvum-app} is the regression guard.
  *
  * <p>Timeout note: {@code quarkus.langchain4j.ai.gemini.timeout} is managed by the Quarkiverse
  * extension using expression interpolation referencing {@code quarkus.langchain4j.timeout}, which
@@ -95,6 +97,7 @@ public class GoogleModelProvider extends AbstractModelProvider {
                 .apiKey(apiKey)
                 .modelName(modelName)
                 .timeout(timeout)
+                .httpClientBuilder(new JdkHttpClientBuilder()) // explicit: native ServiceLoader is empty (see class javadoc)
                 .build());
     }
 }
