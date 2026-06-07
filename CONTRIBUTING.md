@@ -63,7 +63,7 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
 # No local GraalVM? Build the native image in a container:
 ./mvnw -f forvum-app -Pnative package -Dquarkus.native.container-build=true
 
-# Reactor verify — runs the test suite (JaCoCo coverage gates land at M2)
+# Reactor verify — runs the full test suite (JaCoCo coverage gates are planned, not yet wired — see #69)
 ./mvnw verify
 ```
 
@@ -76,7 +76,7 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
   - **Integration** (`*IT`) — `@QuarkusTest` against real SQLite via `@TempDir`.
   - **E2E** — scripts under `forvum-app/.../e2e/`.
 - Run everything with `./mvnw verify`.
-- **Coverage gates (JaCoCo):** 80% line at the parent, 75% branch — enforced from M2.
+- **Coverage gates (JaCoCo):** the target is 80% line at the parent, 75% branch — but JaCoCo is **not yet wired** into the build, so it is not enforced today (tracked in #69 / X3).
 - **Live-provider tests** are tagged `live` and are **default-off** (they hit real model providers);
   they run in nightly CI only.
 

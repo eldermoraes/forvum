@@ -129,7 +129,7 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
 ./mvnw -f forvum-app quarkus:dev             # Dev UI at /q/dev/ (live agent reload, CAPR dashboard,
                                              # provider-call inspector, Concurrency card)
 
-# Reactor verify (JaCoCo gates: 80% line at parent, 75% branch — §11)
+# Reactor verify — full test suite (JaCoCo coverage gates 80% line / 75% branch are PLANNED, not yet wired — see §11, #69)
 ./mvnw verify
 ```
 
@@ -295,9 +295,10 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
   implementation passes (Red → Green → Refactor, enforced in PR review).
 - **Test pyramid:** unit `*Test` → integration `*IT` (`@QuarkusTest`, real SQLite via `@TempDir`) → E2E
   under `forvum-app/.../e2e/` (ten scripts).
-- **Coverage gates:** JaCoCo 80% line (parent) + 75% branch. Pitest mutation testing starts in
-  `forvum-core` (50% killed greenfield → 70% Phase 2); mutation thresholds are signals until a baseline
-  exists, coverage gates are gates.
+- **Coverage gates (target, NOT yet enforced):** the goal is JaCoCo 80% line (parent) + 75% branch, but
+  JaCoCo is **not yet wired** into the build, so coverage is not gated today — wiring it (and the Pitest
+  mutation ramp in `forvum-core`, 50% killed greenfield → 70% Phase 2) is tracked in #69 / X3. Once wired,
+  coverage is a hard gate while mutation thresholds stay signals until a baseline exists.
 - **Property-style tests (JUnit 5) MANDATORY for parsers/records:** `ModelRef.parse` roundtrip,
   `AgentEvent` Jackson roundtrip, `CostBudget` invariants, `PermissionScope.fromName` failure modes.
   Expressed with `@ParameterizedTest` + `@EnumSource`/`@MethodSource` over curated edge cases plus
