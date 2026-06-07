@@ -23,6 +23,17 @@
              hardcoded in the plugin <configuration> could not be overridden). Run them with:
              -Dgroups=live -DexcludedGroups= -->
         <excludedGroups>live</excludedGroups>
+        <!-- Failsafe (the native *IT smoke) does NOT read the Surefire ${excludedGroups} property, so the
+             live native turn IT (OllamaNativeTurnIT, @Tag("live")) needs its own group filter or it would
+             run on every native build — including the Ollama-less macos cell. Default: run untagged ITs
+             (the boot smoke) and exclude live. The native-turn CI job opts in with
+             -DitGroups=live -DitExcludedGroups=none to run ONLY the live turn.
+             A blank itGroups is fine — Failsafe treats an empty <groups> as "no include filter". But an
+             empty <excludedGroups> is NOT: JUnit's excludeTags rejects a blank expression and the run
+             discovers ZERO tests, so the live opt-in must clear the exclusion with a non-empty no-op tag
+             (none), never an empty string. -->
+        <itGroups></itGroups>
+        <itExcludedGroups>live</itExcludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -185,6 +196,11 @@
                     </execution>
                 </executions>
                 <configuration>
+                    <!-- See ${itGroups}/${itExcludedGroups} in <properties>: Failsafe needs its own group
+                         filter (it does not inherit the Surefire ${excludedGroups} property). Default skips
+                         @Tag("live"); the native-turn job opts in with -DitGroups=live -DitExcludedGroups=none. -->
+                    <groups>${itGroups}</groups>
+                    <excludedGroups>${itExcludedGroups}</excludedGroups>
                     <systemPropertyVariables>
                         <native.image.path>${project.build.directory}/${project.build.finalName}-runner</native.image.path>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>

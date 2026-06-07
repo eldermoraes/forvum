@@ -45,15 +45,12 @@ import java.util.Map;
  *   ./mvnw -pl forvum-app test -Dgroups=live -DexcludedGroups=
  * }</pre>
  *
- * <p><strong>Native (Risk #5) — deferred to M20 (written carve-out, CLAUDE.md §5).</strong> The
- * per-provider native scripted-turn smoke ULTRAPLAN §8 Risk #5 mandates needs an Ollama CI service plus
- * a native {@code @QuarkusIntegrationTest} that drives a turn. The existing {@code ci.yml} native leg
- * ({@code ./mvnw -Pnative verify} on linux-amd64 + macos-arm64) today runs only the boot smoke
- * (ForvumApplicationIT), which never reaches {@code resolve()/chat()}. M9 validates the load-bearing
- * native parts now: the provider native-COMPILES (the pre-release {@code quarkus-langchain4j}
- * {@code 1.11.0.CR1} builds the binary) and the binary boots gracefully with no {@code ~/.forvum/}
- * (exit 0). The Ollama-service-backed native turn — catching a native-only JSON reflection gap in the
- * request/response path — is M20 scope.
+ * <p><strong>Native (Risk #5) — now covered by {@code OllamaNativeTurnIT}.</strong> The real-provider
+ * native scripted-turn smoke ULTRAPLAN §8 Risk #5 mandates runs out-of-process against the built binary
+ * via the {@code forvum ask} command ({@code @QuarkusMainIntegrationTest @Tag("live")}), gated in CI by
+ * the linux-only {@code native-turn} job (an {@code ollama/ollama} service running {@code qwen2.5:0.5b}).
+ * That IT asserts stdout only (exit 0 + a non-blank reply, since it runs out-of-process); this JVM
+ * {@code @Tag("live")} test keeps the in-process ledger assertions ({@code provider_calls}).
  */
 @QuarkusTest
 @TestProfile(OllamaScriptedTurnE2E.LiveHomeProfile.class)

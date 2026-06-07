@@ -114,11 +114,51 @@ jobs:
           print(f"forvum --help cold-start: min={best:.0f} ms  runs={[round(t) for t in times]}")
           assert best < 200, f"cold-start {best:.0f} ms exceeds the 200 ms gate"
           PY
-      # M20 native parity — DEFERRED behavioral assertion (CLAUDE.md section 5 sanctioned):
-      # the real-provider native scripted-turn smoke (Risk #5: Ollama service + a native
-      # @QuarkusIntegrationTest exercising a turn, to catch provider-specific native JSON-reflection
-      # gaps) is NOT run here. Justification: the native COMPILE on every cell already includes the full
-      # turn path (graph, tools, providers); the JVM @Tag("live") provider tests cover the provider
-      # request/response JSON; an Ollama CI service is linux-only (the macos-14 cell cannot host it) and
-      # pulling a model adds significant CI time. Tracked as a follow-up; native-compile + the cold-start
-      # gate above remain mandatory on both cells.
+  # Risk #5 — the real-provider native scripted-turn smoke (closes the gap PR #111 fell through: every
+  # other native leg is boot-only and never reaches resolve()/chat(), so a native-only provider
+  # JSON/HTTP/reflection regression escaped silently). Drives a real Ollama turn through `forvum ask`
+  # out-of-process against the built binary (OllamaNativeTurnIT). Gating (a failure blocks the merge).
+  # Linux-only: the Ollama service container cannot run on the macOS runner.
+  native-turn:
+    name: Native real-provider turn (Risk #5, linux-amd64)
+    runs-on: ubuntu-latest
+    services:
+      ollama:
+        image: ollama/ollama
+        ports:
+          - 11434:11434
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Mandrel (Linux)
+        uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: mandrel
+          version: mandrel-25.0.3.0-Final
+          java-version: '25'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      # OllamaNativeTurnIT pins the main agent to ollama:qwen2.5:0.5b. Wait for the service, then pull the
+      # model via the HTTP API (retried). The launched binary reaches it at the default base url
+      # http://localhost:11434 (the mapped service port) — no -D plumbing needed (a -D on mvnw would not
+      # reach the out-of-process binary anyway). The model is pulled fresh each run (~400 MB, not cached).
+      - name: Pull the Ollama model (qwen2.5:0.5b)
+        run: |
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:11434/api/version >/dev/null && break
+            echo "waiting for the ollama service... ($i)"; sleep 3
+          done
+          ok=
+          for i in 1 2 3; do
+            if curl -sf --max-time 600 http://localhost:11434/api/pull \
+                 -d '{"name":"qwen2.5:0.5b","stream":false}'; then ok=1; break; fi
+            echo "pull attempt $i failed; retrying"; sleep 5
+          done
+          [ "$ok" = 1 ] || { echo "::error::failed to pull qwen2.5:0.5b"; exit 1; }
+          curl -sf http://localhost:11434/api/tags | grep -q 'qwen2.5:0.5b' \
+            || { echo "::error::qwen2.5:0.5b not present after pull"; exit 1; }
+      # Build the native binary and drive the real-provider turn (OllamaNativeTurnIT, @Tag("live")).
+      # itExcludedGroups MUST be a non-empty no-op (none) — a blank one makes JUnit discover zero ITs
+      # (see forvum-app/pom.xml). The two-cell `native` job above (boot smoke + 200 ms cold-start) stays
+      # mandatory and unchanged; this job adds the turn coverage it cannot host (Ollama is linux-only).
+      - name: Build native binary + run the real-provider turn (Risk #5)
+        run: ./mvnw -B -Pnative verify -DitGroups=live -DitExcludedGroups=none
