@@ -860,8 +860,10 @@ M13/M18). **Commit.** `feat(app): add skill install command from URL`
 
 ## P2-8 — Session replay
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`
-**Context.** Replay a session for debugging/regression. **Scope.** CLI replays a session from `messages`
-with original tool outputs. **Files.** `forvum-app/.../cli/SessionReplayCommand.java`,
+**Context.** Replay a session for debugging/regression. **Scope.** CLI (`forvum replay <sessionId>`)
+replays a session from `messages` with original tool outputs — it reproduces the *recorded* transcript
+(messages interleaved with their `tool_invocations`, oldest first) and does not re-invoke the model
+(re-execution with substitution is P3-9). **Files.** `forvum-app/.../app/SessionReplayCommand.java`,
 `forvum-engine/.../replay/SessionReplayer.java`. **Acceptance.** Replaying a stored session
 reproduces the message sequence and tool outputs; parity verified. **[NATIVE]** native parity.
 **[PLUGIN]** scaffold via the MCP. **Dependencies.** M5. **Extended by** P3-9.

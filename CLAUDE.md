@@ -752,3 +752,24 @@ Generalizable lessons from completed milestones; append here as milestones land.
   exercise of config validation + provider discovery. Review catch worth generalizing: when a helper LISTS a
   directory from one source and PARSES it from a separate hardcoded literal, a name drift silently skips
   validation — make listing and parsing share one `dir` (single source). [P2-9]
+- **Replaying a session is a `messages`+`tool_invocations` interleave whose merge key is turn-logical, not raw
+  `created_at`.** A turn's user+assistant pair is committed atomically at turn-END (`AgentMemory.recordTurn`, M7
+  persist-after-success) while each `tool_invocations` row is ledgered MID-turn — so a tool's `created_at`
+  precedes its own turn's messages. A naive `ORDER BY created_at` merge would print the user message *after* the
+  tools it triggered. `SessionReplayer.interleave()` instead walks messages in `id` order and flushes the
+  not-yet-emitted tools whose `created_at <=` each *assistant* message (user → tools → assistant), draining any
+  trailing tools (a turn that failed before persisting its reply) at the end. The view records
+  (`ReplaySession`/`ReplaySegment`) carry NO `@RegisterForReflection` — like the `doctor` report records they are
+  built from JDBC rows and printed, never serialized (the native IT proves it). The adversarial review reaffirmed
+  the M4 lesson: a single-tool happy-path test left the multi-tool inner loop and the trailing-drain branch
+  unexercised — seed the multi-tool and incomplete-turn fixtures, not just the one-tool case. [P2-8]
+- **A DB-reading CLI (`forvum replay`) is NOT a `CommandMode` one-shot, and its deterministic native IT seeds the
+  DB without a live LLM via a two-launch dance.** Unlike `doctor` (file-only), `replay` reads the SQLite store, so
+  it must boot the full Flyway/Panache path — keep it OUT of `CommandMode.isOneShotCommand` (which would skip
+  migration). Its native IT therefore can't reuse doctor's file-only fixture: launch the binary once
+  (`replay <missing-session>` → it migrates the schema on boot, exits 1 not-found), INSERT a session + message rows
+  via plain JDBC into that now-migrated SQLite, then launch `replay <session>` again to read them back — all three
+  sharing one `forvum.home`. Test-side Flyway is NOT an option (`flyway-core` 12 ships no SQLite support module on
+  the app classpath); letting the binary own schema creation sidesteps it. These `@QuarkusMainIntegrationTest` ITs
+  run native-only (`skipITs=true` in JVM); the `forvum.home` propagation they rely on is the proven native-leg
+  mechanism (`DoctorNativeIT`/`OllamaNativeTurnIT`), so the same test errors under a JVM `-DskipITs=false` run. [P2-8]
