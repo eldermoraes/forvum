@@ -22,14 +22,15 @@ import java.util.concurrent.Callable;
  * channel dispatch moved here from {@code ForvumApplication}: render the banner, then run an interactive
  * foreground channel (TUI) or stay alive for a server channel (Web/Telegram), else exit {@code 0}. The
  * {@code init} subcommand scaffolds {@code ~/.forvum}; {@code ask} runs one non-interactive turn and exits;
- * {@code doctor} validates the {@code ~/.forvum} configuration and exits non-zero on problems.
+ * {@code doctor} validates the {@code ~/.forvum} configuration and exits non-zero on problems;
+ * {@code replay} reproduces a stored session's recorded message and tool sequence.
  */
 @CommandLine.Command(
         name = "forvum",
         mixinStandardHelpOptions = true,
         versionProvider = VersionProvider.class,
         description = "Forvum - local-first, open-source personal AI agents on the JVM.",
-        subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class })
+        subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class, SessionReplayCommand.class })
 public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";
