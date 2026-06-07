@@ -148,7 +148,8 @@ test runner cannot attach. Both run their tests directly via Maven Surefire (e.g
 Test layout: unit `*Test` (Surefire, no Quarkus boot/IO) → integration `*IT` (`@QuarkusTest`, real
 SQLite via `@TempDir`) → E2E under `forvum-app/src/test/java/ai/forvum/e2e/` (ten scripts, landing
 milestone by milestone). Live-provider tests are `*-LiveTest` `@Tag("live")`, default-off in CI,
-nightly only.
+nightly only — except the Risk #5 native real-provider turn (`OllamaNativeTurnIT`, a Failsafe `*IT`
+also `@Tag("live")`), the one live test the per-PR linux-only `native-turn` job gates on (retry budget 1).
 
 ---
 
@@ -186,10 +187,12 @@ contribution as if native is the only target; CI enforces it.
   milestone M1–M20 native-COMPILES and runs its native smoke path; the smoke fails the PR if cold-start
   > 200 ms. The only sanctioned carve-out is a *behavioral* native assertion skip (never the native
   compile) when the milestone's risk is provably JVM-host-only — today the sole case is **M4
-  `WatchService`** OS-polling semantics, with a written justification in its Verify block. A
-  per-provider native failure is marked JVM-only in release notes ONLY with an upstream issue filed;
-  for Vertex/Gemini the preferred remedy is switching to the REST `quarkus-langchain4j-ai-gemini`
-  extension, not a JVM-only carve-out.
+  `WatchService`** OS-polling semantics, with a written justification in its Verify block. The
+  real-provider native turn (Risk #5) is **no longer deferred**: a linux-only `native-turn` CI job
+  builds the binary and drives a real Ollama turn through `forvum ask`, catching native-only provider
+  JSON/HTTP/reflection gaps the boot-only smoke missed. For a provider whose native build genuinely
+  fails, the remedy is native-first (e.g. Vertex/Gemini's REST `quarkus-langchain4j-ai-gemini`
+  extension), not a JVM-only carve-out.
 
 ---
 
@@ -309,7 +312,9 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
   (M16), Telegram (M17), and the M20 cold-start gate run native.
 - **Per-turn performance gates** (excluding inference, via `FakeProvider`): TUI ≤200 ms, Web ≤300 ms,
   Telegram ≤500 ms — baselined at M5/M6.
-- **Flaky-test quarantine:** `*-LiveTest` `@Tag("live")`, default-off, nightly with retry budget 1.
+- **Flaky-test quarantine:** `*-LiveTest` `@Tag("live")`, default-off, nightly with retry budget 1 —
+  except `OllamaNativeTurnIT` (the Risk #5 native turn), which the per-PR `native-turn` job gates on, also
+  retry budget 1.
 - **Security-test layer** under `forvum-app/.../security/`: prompt-injection → no tool escalation; path
   traversal → denied; spawn-boundary identity override → rejected; `PermissionScope` mismatch → denied
   + audited.
@@ -704,3 +709,30 @@ Generalizable lessons from completed milestones; append here as milestones land.
   unable to converse. Verified locally: `echo '...' | forvum` on the native binary returns a real Ollama
   answer and writes `messages`/`provider_calls`. (Tool-loop/spawn paths add no new serialized types — the
   SCHEMA's only collection channel is the ArrayList appender — but were not separately live-tested.) [M20/Risk#5]
+- **Automating the native real-provider turn in CI needs a new `forvum ask` command — `@QuarkusMainIntegrationTest`/
+  `@Launch` have NO stdin, so PR #111's `echo '...' | forvum` (the TUI REPL) is unreachable from an IT.** A
+  native turn can only be driven out-of-process by a subcommand. `AskCommand` (`forvum ask "<prompt>"`) runs ONE
+  turn via the SDK `ChannelTurnDriver` (the engine's `TurnService` — it already binds CURRENT_AGENT/CURRENT_TURN,
+  resolves identity, activates the request context, and ledgers the turn, so DON'T re-hand-roll the
+  registry/ScopedValue dance) and prints `Done.finalMessage()` to stdout; an `ErrorEvent` → stderr + exit 1, so
+  **exit 0 is the real native-turn gate** (a "No HTTP client"/JSON-reflection regression surfaces as
+  ErrorEvent → exit 1). `ask` is deliberately NOT in `CommandMode.isOneShotCommand` (the turn needs Flyway/the DB),
+  so it boots the full path. Traps found wiring this: (1) **a `@QuarkusMainIntegrationTest`'s `getOutput()` includes
+  all boot logs** → `non-blank` is vacuous; route logs to stderr in the IT's `@TestProfile`
+  (`quarkus.log.console.stderr=true`) so stdout is the reply alone. (2) **Failsafe does NOT read the Surefire
+  `${excludedGroups}` property** — give it its own `<groups>${itGroups}</groups>` + `<excludedGroups>${itExcludedGroups}</excludedGroups>`
+  (default `itExcludedGroups=live`); the live opt-in is `-DitGroups=live -DitExcludedGroups=none`. A blank `<groups>`
+  is fine (no include filter) but a **blank `<excludedGroups>` makes JUnit discover ZERO tests** (`excludeTags` rejects
+  a blank expression) — clear the exclusion with a non-empty no-op tag (`none`), never an empty string. (3) **the
+  `@TestProfile`'s `getConfigOverrides()` DO propagate to the launched native binary** as `-D` system properties (the
+  IT-launcher applies them) — confirmed by the launch line `-Dforvum.home=...`; so a profile-seeded temp home works
+  out-of-process, no FORVUM_HOME env needed. (4) **forvum-app dev mode can't run its tests via the Quarkus Dev MCP**:
+  since M20 it's a `@QuarkusMain` CLI that runs the command and EXITS on boot (no server channel → `RootCommand.call()`
+  returns), so `quarkus:dev` shuts down immediately and the Dev-UI test runner gets "No CDI container available". Run
+  forvum-app's `@QuarkusMainTest` JVM tests via **Surefire** (`./mvnw -pl forvum-app -Dtest=… test`), same family as the
+  native `*IT` Failsafe step — a de-facto §4 exception for the CLI app. CI: a linux-only `native-turn` job
+  (`services: ollama/ollama`, pull `qwen2.5:0.5b` via the HTTP `/api/pull` with retry, then
+  `./mvnw -B -Pnative verify -DitGroups=live -DitExcludedGroups=none`); the binary reaches the service at the default
+  `quarkus.langchain4j.ollama.base-url=http://localhost:11434` (a `-D` on `mvnw` would NOT reach the out-of-process
+  binary, so map the service port instead). The two-cell `native` job (boot smoke + 200 ms cold-start) stays mandatory
+  and unchanged. [Risk#5]
