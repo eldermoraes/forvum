@@ -95,6 +95,12 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>
+        <!-- M20: picocli command-mode (help / version / init). Version via the platform BOM; the
+             extension registers picocli's reflection metadata for native. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-picocli</artifactId>
+        </dependency>
         <!-- HttpClientFactorySelector references JaxRsHttpClientBuilderFactory.class to pin the LangChain4j
              HTTP client app-wide (it is otherwise only a transitive of the ai-gemini extension). Declared
              directly so a class-name drift on a BOM bump is a compile error, not a runtime surprise.

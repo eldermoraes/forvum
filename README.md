@@ -13,7 +13,7 @@
 
 > **Forvum is being designed and built around the principles documented in [Context Engineering for Multi-LLM Low-Latency Agents](docs/CONTEXT-ENGINEERING.md). See [how Forvum maps to those principles](docs/CONTEXT-ENGINEERING-MAPPING.md).**
 
-Forvum is a JVM platform being built to let anyone run personal AI agents on their own machine — with the same discipline enterprise Java brings to any other production system. The full architectural vision lives in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md), covering the core contracts for agents, events, budgets, and scope isolation. The `main` branch currently ships the multi-module Maven bootstrap and the design documentation; a working vertical slice — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Implementation proceeds milestone by milestone. If you're a Java developer who wants an AI layer on your own terms, contributions to design or code are welcome.
+Forvum is a JVM platform being built to let anyone run personal AI agents on their own machine — with the same discipline enterprise Java brings to any other production system. The full architectural vision lives in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md), covering the core contracts for agents, events, budgets, and scope isolation. The `main` branch ships the complete v0.1 feature set (milestones M1–M20) and the design documentation; a working vertical slice — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Implementation proceeds milestone by milestone. If you're a Java developer who wants an AI layer on your own terms, contributions to design or code are welcome.
 
 ## The name
 
@@ -29,7 +29,21 @@ The result is not an orchestrator that commands silently from the center. It is 
 
 ## Status
 
-In active design and early implementation. `main` ships the multi-module Maven reactor, the core domain contracts, the plugin SDK, and the file-based config loader with `WatchService` hot reload (M1–M4 complete) plus the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Not yet production-ready.
+Phase-1 MVP feature-complete. `main` ships milestones **M1–M20 (EPIC-1 / v0.1)** — the multi-module reactor, core domain contracts, plugin SDK, and config loader (M1–M4); SQLite persistence, `@AgentScoped` isolation, `AgentRegistry`, and fallback chains (M5–M8); the provider fleet — Ollama, Anthropic, OpenAI, Google (M9–M12); the tool registry, permission scopes, and filesystem tools (M13–M14); the TUI, Web, and Telegram channels (M15–M17); the LangGraph4j supervisor graph that wires tool execution into the turn (M18); file-driven crons (M19); and the GraalVM native single-binary with a picocli command-mode/lazy-DB **&lt;200 ms cold-start gate** (M20) — plus the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. v0.1 is feature-complete; not yet hardened for production.
+
+### Build & run the v0.1 binary (`main`)
+
+```bash
+# Native single binary (primary target; needs GraalVM CE 25 / Mandrel 25.0.x-Final)
+./mvnw -f forvum-app -Pnative package
+./forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner --help     # usage; <200 ms cold start
+./forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner init       # scaffold ~/.forvum (owner-only)
+./forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner            # launch the configured channel(s)
+
+# JVM fast-jar (development / drop-in plugins)
+./mvnw package -pl forvum-app -am -DskipTests
+java -jar forvum-app/target/quarkus-app/quarkus-run.jar --help
+```
 
 ## Quick demo
 
@@ -77,7 +91,7 @@ forvum> /exit
 
 ## Architecture
 
-Forvum is organized as a Maven reactor with five modules, structured to match the architectural vision. The current `main` branch ships the module skeleton; implementation lands milestone by milestone per the roadmap below.
+Forvum is organized as a four-layer Maven reactor (foundation → SDK → engine → first-party channel/provider/tool extensions, assembled by `forvum-app`), structured to match the architectural vision. The `main` branch now implements the full v0.1 feature set; the five core modules below are the architectural backbone, with Layer-3 channel/provider/tool extensions added milestone by milestone.
 
 - **`forvum-core`** — pure Java value contracts with no framework dependencies (agent IDs, model references, event types). Specified in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §4.3.
 - **`forvum-sdk`** — public SPI for extension points (model providers, channels, tools). Specified in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §2.2.
@@ -89,10 +103,10 @@ For the full architecture — decisions, tradeoffs, and deferred design — read
 
 ## Roadmap
 
-Implementation proceeds in milestones M1 through M20:
+Phase 1 (the v0.1 MVP) — milestones M1 through M20 — is complete. Phase 2 (v0.5, parity with OpenClaw) is the next arc; see [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §7.2.
 
-- **M1–M4 (complete)** — multi-module Maven reactor (M1), the Tier 1 core domain contracts (M2), the plugin SDK — sealed provider interfaces + `@ForvumExtension` (M3), and the file-based config loader with `WatchService` hot reload (M4).
-- **M5–M20 (planned)** — persistence, budget enforcement, fallback chains, observability, channels, DevUI, sub-agents, judging, and production hardening.
+- **M1–M20 (complete)** — the multi-module reactor + core contracts + plugin SDK + config loader (M1–M4); SQLite/Flyway, `@AgentScoped`, `AgentRegistry`, and fallback chains (M5–M8); the provider fleet — Ollama, Anthropic, OpenAI, Google (M9–M12); the tool registry, permission scopes, and filesystem tools (M13–M14); the TUI, Web, and Telegram channels (M15–M17); the LangGraph4j supervisor graph (M18); file-driven crons (M19); and the GraalVM native single-binary + CI matrix with the &lt;200 ms cold-start gate (M20).
+- **Phase 2 (planned)** — browser tool, MCP bridge, sub-agent spawning, judging, observability dashboards, and production hardening.
 
 Detailed milestone scope is in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §7.
 

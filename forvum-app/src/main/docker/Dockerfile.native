@@ -1,0 +1,22 @@
+# Forvum — native single-binary OCI image (M20). Distributed as forvum/forvum:<version>-native.
+# This is the primary shipped target: a single executable, zero JVM, <200 ms cold start, <50 MB RSS.
+#
+# Build a LINUX/amd64 native runner, then the image (context = forvum-app):
+#   # on a Linux runner with GraalVM/Mandrel, or cross-build in a container on any host:
+#   ./mvnw -pl forvum-app -am -Pnative package -Dquarkus.native.container-build=true
+#   docker build -f forvum-app/src/main/docker/Dockerfile.native -t forvum/forvum:0.1.0-SNAPSHOT-native forvum-app
+#
+# ubi9/ubi-micro is the minimal glibc base Quarkus uses for native images (a true `scratch` base needs a
+# statically linked binary; the default Forvum native build links against glibc + the Xerial SQLite JNI).
+FROM registry.access.redhat.com/ubi9/ubi-micro:latest
+
+WORKDIR /work/
+COPY --chown=1001:root target/*-runner /work/forvum
+
+# Forvum is config-driven: with no ~/.forvum mounted (and no enabled server channel) the binary runs in
+# command mode and exits 0 immediately. To actually serve on 8080, mount a home with an enabled server
+# channel, e.g.:  podman run -p 8080:8080 -v "$HOME/.forvum:/work/.forvum:Z" -e FORVUM_HOME=/work/.forvum forvum:native
+EXPOSE 8080
+USER 1001
+
+ENTRYPOINT ["./forvum"]

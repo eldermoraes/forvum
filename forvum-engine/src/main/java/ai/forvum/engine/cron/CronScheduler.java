@@ -7,6 +7,7 @@ import ai.forvum.engine.config.ConfigurationChangedEvent;
 import ai.forvum.engine.config.CronReader;
 import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.engine.routing.LlmSelector;
+import ai.forvum.engine.runtime.CommandMode;
 
 import dev.langchain4j.model.chat.ChatModel;
 
@@ -52,8 +53,18 @@ public class CronScheduler {
     @Inject
     LlmSelector llmSelector;
 
+    @Inject
+    CommandMode commandMode;
+
     /** Schedule every cron present at startup. A missing {@code crons/} folder simply yields no jobs. */
     void onStart(@Observes StartupEvent event) {
+        if (commandMode.isOneShot()) {
+            // A one-shot command (--help/--version/init) never runs a turn — don't start the (forced)
+            // scheduler for it. Crucially, the cold-start path skips Flyway, so a cron must not fire a turn
+            // against an un-migrated DB (M20; mirrors PersistenceBootstrap/ConfigWatcher).
+            LOG.debugf("One-shot command — not scheduling crons.");
+            return;
+        }
         for (String id : cronReader.ids()) {
             scheduleFromFile(id);
         }

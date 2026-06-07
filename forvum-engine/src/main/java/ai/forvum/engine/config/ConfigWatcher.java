@@ -1,5 +1,7 @@
 package ai.forvum.engine.config;
 
+import ai.forvum.engine.runtime.CommandMode;
+
 import io.quarkus.runtime.StartupEvent;
 
 import jakarta.annotation.PreDestroy;
@@ -56,6 +58,7 @@ public class ConfigWatcher {
 
     private final ForvumHome home;
     private final Event<ConfigurationChangedEvent> emitter;
+    private final CommandMode commandMode;
     private final DebounceBuffer buffer = new DebounceBuffer();
     private final Map<WatchKey, Path> keyToDir = new ConcurrentHashMap<>();
 
@@ -64,13 +67,24 @@ public class ConfigWatcher {
     private Thread watcherThread;
 
     @Inject
-    public ConfigWatcher(ForvumHome home, Event<ConfigurationChangedEvent> emitter) {
+    public ConfigWatcher(ForvumHome home, Event<ConfigurationChangedEvent> emitter, CommandMode commandMode) {
         this.home = home;
         this.emitter = emitter;
+        this.commandMode = commandMode;
     }
 
     void onStart(@Observes StartupEvent ev) {
+        if (commandMode.isOneShot()) {
+            // A one-shot command (--help/--version/init) exits without serving — no hot reload needed; keep
+            // its cold-start off the WatchService (M20). start() is package-private for the M4 tests.
+            return;
+        }
         start();
+    }
+
+    /** Whether the watch loop is active. Package-private lifecycle predicate for tests. */
+    boolean isWatching() {
+        return running;
     }
 
     /** Registers the watch surface and launches the watch loop. Package-private for tests. */

@@ -1,0 +1,23 @@
+# Forvum — JVM fast-jar OCI image (M20). Distributed as forvum/forvum:<version>-jvm.
+#
+# Build the fast-jar, then the image (context = forvum-app):
+#   ./mvnw -pl forvum-app -am package
+#   docker build -f forvum-app/src/main/docker/Dockerfile.jvm -t forvum/forvum:0.1.0-SNAPSHOT-jvm forvum-app
+#
+# The JVM fast-jar is the development / drop-in-plugin runtime (~1 s start, ~200 MB RSS) — NOT the
+# primary shipped target. The native single binary (Dockerfile.native) is what end users install.
+FROM eclipse-temurin:25-jre
+
+ENV LANGUAGE='en_US:en'
+
+# Quarkus fast-jar layout: the JVM must boot quarkus-run.jar with lib/, app/, quarkus/ alongside it.
+COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
+COPY --chown=185 target/quarkus-app/*.jar /deployments/
+COPY --chown=185 target/quarkus-app/app/ /deployments/app/
+COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
+
+EXPOSE 8080
+USER 185
+WORKDIR /deployments
+
+ENTRYPOINT ["java", "-jar", "/deployments/quarkus-run.jar"]
