@@ -31,19 +31,40 @@ The result is not an orchestrator that commands silently from the center. It is 
 
 Phase-1 MVP feature-complete. `main` ships milestones **M1–M20 (EPIC-1 / v0.1)** — the multi-module reactor, core domain contracts, plugin SDK, and config loader (M1–M4); SQLite persistence, `@AgentScoped` isolation, `AgentRegistry`, and fallback chains (M5–M8); the provider fleet — Ollama, Anthropic, OpenAI, Google (M9–M12); the tool registry, permission scopes, and filesystem tools (M13–M14); the TUI, Web, and Telegram channels (M15–M17); the LangGraph4j supervisor graph that wires tool execution into the turn (M18); file-driven crons (M19); and the GraalVM native single-binary with a picocli command-mode/lazy-DB **&lt;200 ms cold-start gate** (M20) — plus the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. v0.1 is feature-complete; not yet hardened for production.
 
-### Build & run the v0.1 binary (`main`)
+### Install (provisional: build from source)
+
+> **There is no packaged installer yet.** Until a one-command native installer ships
+> ([#49](https://github.com/eldermoraes/forvum/issues/49), planned), building from source is the
+> provisional install path. v0.1 is feature-complete but not yet hardened for production.
+
+**Prerequisites:** Java 25 (the bundled `./mvnw` provides Maven); for the native binary, GraalVM CE 25 /
+Mandrel 25.0.x-Final. For a real conversation you need a model provider — the zero-config default is a local
+[Ollama](https://ollama.com):
 
 ```bash
-# Native single binary (primary target; needs GraalVM CE 25 / Mandrel 25.0.x-Final)
-./mvnw -f forvum-app -Pnative package
-./forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner --help     # usage; <200 ms cold start
-./forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner init       # scaffold ~/.forvum (owner-only)
-./forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner            # launch the configured channel(s)
-
-# JVM fast-jar (development / drop-in plugins)
-./mvnw package -pl forvum-app -am -DskipTests
-java -jar forvum-app/target/quarkus-app/quarkus-run.jar --help
+ollama serve &            # local model server, no API key
+ollama pull qwen3:1.7b    # the model the default agent is pinned to
 ```
+
+**Native single binary** (the primary target — one executable, no JVM, &lt;200 ms cold start):
+
+```bash
+./mvnw -f forvum-app -Pnative package
+BIN=forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner
+"$BIN" init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
+echo "who are you?" | "$BIN"    # one turn, then exit — or run "$BIN" for an interactive session
+"$BIN" --help                   # also --version
+```
+
+**JVM fast-jar** (no GraalVM needed — development / drop-in plugins):
+
+```bash
+./mvnw package -pl forvum-app -am -DskipTests
+java -jar forvum-app/target/quarkus-app/quarkus-run.jar
+```
+
+Cloud providers (Anthropic, OpenAI, Google) need an API key (env var / `~/.forvum`); point an agent at one
+by editing its model in `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`).
 
 ## Quick demo
 
