@@ -3,6 +3,7 @@ package ai.forvum.provider.ollama;
 import ai.forvum.core.ModelRef;
 import ai.forvum.sdk.AbstractModelProvider;
 import ai.forvum.sdk.ForvumExtension;
+import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,16 +26,18 @@ import java.util.concurrent.ConcurrentMap;
  * {@code ollama:<model>} on every turn (e.g. a per-minute cron) would churn clients; the cache reuses
  * one model per id.
  *
- * <p><strong>HTTP client selection:</strong> like Gemini (and unlike OpenAI/Anthropic, which are swapped
- * to the Quarkus REST client by their Quarkiverse builder-factories), {@code OllamaChatModel.builder()}
- * is the raw LangChain4j builder, so {@code OllamaClient} resolves its HTTP client via
- * {@code dev.langchain4j.http.client.HttpClientBuilderLoader}. When the assembled {@code forvum-app}
- * classpath carries more than one {@code HttpClientBuilderFactory}, that loader throws
- * {@code IllegalStateException("Conflict: multiple HTTP clients ...")} at {@code build()} time unless a
- * factory is named. {@code ai.forvum.app.HttpClientFactorySelector} names it app-wide (the
- * {@code langchain4j.http.clientBuilderFactory} system property) — so this provider needs no per-builder
- * pin, but it DOES rely on that selector being present in the assembly. {@code ProviderResolveInAppClasspathTest}
- * guards it; this module's own contract test passes regardless (its classpath has a single factory).
+ * <p><strong>HTTP client (native-critical):</strong> like Gemini (and unlike OpenAI/Anthropic, which are
+ * swapped to the Quarkus REST client by their Quarkiverse builder-factories), {@code OllamaChatModel.builder()}
+ * is the raw LangChain4j builder. Left to itself it resolves its HTTP client via
+ * {@code dev.langchain4j.http.client.HttpClientBuilderLoader}, whose {@code ServiceLoader} lookup returns
+ * EMPTY in a GraalVM native image (the langchain4j {@code HttpClientBuilderFactory} providers are not
+ * registered for native) — so a native turn fails at {@code build()} with
+ * {@code "No HTTP client has been found in the classpath"} (Risk #5; the JVM-only
+ * {@code HttpClientFactorySelector} system property cannot populate an empty native ServiceLoader). We
+ * therefore pin an explicit {@link JdkHttpClientBuilder} — a pure-LangChain4j JDK {@code java.net.http}
+ * client, directly instantiated (so the loader is never consulted) and native-safe — which makes the
+ * programmatic Ollama turn work on the native binary. {@code ProviderResolveInAppClasspathTest} guards the
+ * assembled classpath; this module's own contract test exercises the same build path.
  */
 @ForvumExtension
 @ApplicationScoped
@@ -57,6 +60,7 @@ public class OllamaModelProvider extends AbstractModelProvider {
         return modelsByName.computeIfAbsent(ref.model(), modelName -> OllamaChatModel.builder()
                 .baseUrl(baseUrl)
                 .modelName(modelName)
+                .httpClientBuilder(new JdkHttpClientBuilder()) // explicit: native ServiceLoader is empty (see class javadoc)
                 .build());
     }
 }

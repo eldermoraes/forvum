@@ -49,6 +49,13 @@
             <groupId>io.quarkiverse.langchain4j</groupId>
             <artifactId>quarkus-langchain4j-ai-gemini</artifactId>
         </dependency>
+        <!-- Explicit JDK HTTP client builder, pinned on the programmatic GoogleAiGeminiChatModel so it never
+             hits HttpClientBuilderLoader (whose ServiceLoader is EMPTY in native → "No HTTP client" — see the
+             provider javadoc). Version managed via the langchain4j BOM (quarkus-langchain4j-bom). -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-http-client-jdk</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
