@@ -869,12 +869,19 @@ reproduces the message sequence and tool outputs; parity verified. **[NATIVE]** 
 
 ## P2-9 — Config doctor
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`
-**Context.** `forvum doctor`. **Scope.** Validate the whole `~/.forvum/` layout against JSON Schemas with
-actionable hints. **Files.** `forvum-app/.../cli/DoctorCommand.java`,
-`forvum-engine/.../config/schema/*.json`. **Acceptance.** A malformed config
-produces a specific actionable error; valid config passes; parity verified. **[NATIVE]** native parity.
-**[PLUGIN]** scaffold via the MCP. **Dependencies.** M4. **Used by** P2-19 drift surfacing (P2-PAIR-SCOPE),
-P3-6. **Commit.** `feat(app): add config doctor validating ~/.forvum layout`
+**Context.** `forvum doctor`. **Scope.** Validate the whole `~/.forvum/` layout and surface problems with
+actionable hints, exiting non-zero on any error. v0.5 validates by reusing the M4 readers
+(`ConfigLoader`/`AgentReader`/…) and the engine's typed binders (`AgentSpecReader`/`CronSpecReader`) as the
+validation oracles — plus cross-reference checks (a model ref must resolve to an installed provider; a
+cron's `agentId` must name a known agent) — NOT a standalone JSON-Schema library, so doctor never drifts
+from how the engine actually parses config (maintainer-signed-off; formal JSON Schemas remain a deferred
+fast-follow). **Files.** `forvum-app/.../app/DoctorCommand.java`,
+`forvum-engine/.../doctor/ConfigDoctor.java` (+ `Finding`/`DoctorReport`/`Severity`), `CommandMode`
+(`doctor` one-shot). **Acceptance.** A malformed config produces a specific actionable error; valid config
+passes; parity verified. **[NATIVE]** native parity (offline + deterministic — `DoctorNativeIT` runs
+untagged in the default native leg). **[PLUGIN]** scaffold via the MCP. **Dependencies.** M4. **Used by**
+P2-19 drift surfacing (P2-PAIR-SCOPE), P3-6. **Commit.** `feat(app): add config doctor validating ~/.forvum
+layout`
 
 ## P2-10 — Provider onboarding wizard
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`

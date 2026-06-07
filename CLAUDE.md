@@ -736,3 +736,19 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `quarkus.langchain4j.ollama.base-url=http://localhost:11434` (a `-D` on `mvnw` would NOT reach the out-of-process
   binary, so map the service port instead). The two-cell `native` job (boot smoke + 200 ms cold-start) stays mandatory
   and unchanged. [Risk#5]
+- **A config validator (`forvum doctor`, P2-9) must drive the REAL loaders, never a second, drifting schema.**
+  Validate through the same machinery the engine loads with: the M4 readers (`ConfigLoader.readJson` rethrows
+  a malformed file as `UncheckedIOException`) + the typed binders (`AgentSpecReader`/`CronSpecReader` throw
+  `IllegalStateException` with a file-naming message), each wrapped in try/catch → a `Finding`. So a config
+  `doctor` passes is exactly one the engine can load — no parallel JSON-Schema definition to drift (maintainer
+  signed off on diverging from ULTRAPLAN's literal "against JSON Schemas"; §7.2 item 9 + `docs/ISSUES.md`
+  reworded, formal schemas deferred). Add only the cross-refs the binders can't see: a model ref → an installed
+  provider via `Instance<ModelProvider>.extensionId()` (the `LlmSelector` idiom — gathered in the app
+  `DoctorCommand`, the only layer that knows the provider set, and passed into the engine `ConfigDoctor`); a
+  cron `agentId` → a known agent. Exit non-zero on ERROR / 0 on WARNING-only so scripts + CI can gate. `doctor`
+  joins `CommandMode.isOneShotCommand` (reads files only → skips Flyway/watcher/cron; native cold-start ~36 ms);
+  keep that set in sync with `RootCommand.subcommands`. Because it is offline + deterministic, its native IT is
+  UNTAGGED (runs in the DEFAULT native leg, unlike the `@Tag("live")` Ollama turn IT) — a free real native
+  exercise of config validation + provider discovery. Review catch worth generalizing: when a helper LISTS a
+  directory from one source and PARSES it from a separate hardcoded literal, a name drift silently skips
+  validation — make listing and parsing share one `dir` (single source). [P2-9]
