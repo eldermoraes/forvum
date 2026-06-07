@@ -6,11 +6,12 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 /**
- * Detects a <em>one-shot CLI command</em> ({@code --help}/{@code --version}/{@code init}) from the
- * process arguments (M20). Such an invocation prints + exits without running an agent turn, so the heavy
- * {@code @Observes StartupEvent} work — Flyway migration, the config {@code WatchService}, and cron
+ * Detects a <em>one-shot CLI command</em> ({@code --help}/{@code --version}/{@code init}/{@code doctor})
+ * from the process arguments (M20). Such an invocation prints + exits without running an agent turn, so the
+ * heavy {@code @Observes StartupEvent} work — Flyway migration, the config {@code WatchService}, and cron
  * scheduling — is skipped for it, keeping the {@code --help} cold-start path off the DB/IO (the lever for
- * the &lt;200 ms gate). Interactive/server invocations ({@code oneShot == false}) boot normally. Reads
+ * the &lt;200 ms gate). {@code doctor} (P2-9) only reads the config files, so it too needs neither the DB nor
+ * the watcher. Interactive/server invocations ({@code oneShot == false}) boot normally. Reads
  * {@code @CommandLineArguments}, which Quarkus populates before any startup observer runs.
  *
  * <p>{@code isOneShotCommand} is also called by {@code ForvumApplication.main} (before Quarkus boots) to set
@@ -19,8 +20,8 @@ import jakarta.inject.Inject;
  * here. Net: a one-shot pays neither the HTTP bind nor the DB/watcher/cron work, and needs no free port.
  *
  * <p>The recognized set is the app's own CLI surface: the picocli-universal {@code --help}/{@code -h}/
- * {@code --version}/{@code -V} plus the app-defined {@code init} subcommand. It must stay in sync with
- * {@code RootCommand} (which owns {@code init}); only canonical single-token forms are matched — a
+ * {@code --version}/{@code -V} plus the app-defined {@code init} and {@code doctor} subcommands. It must
+ * stay in sync with {@code RootCommand} (which owns them); only canonical single-token forms are matched — a
  * non-canonical input (e.g. clustered {@code -hV}) merely pays the full boot once, never misbehaves.
  */
 @ApplicationScoped
@@ -41,8 +42,8 @@ public class CommandMode {
         for (String arg : args) {
             switch (arg) {
                 // Canonical one-shot forms only — must match RootCommand's surface (mixinStandardHelpOptions
-                // + the 'init' subcommand). Bare 'help'/'version' are NOT registered subcommands.
-                case "--help", "-h", "--version", "-V", "init" -> {
+                // + the 'init'/'doctor' subcommands). Bare 'help'/'version' are NOT registered subcommands.
+                case "--help", "-h", "--version", "-V", "init", "doctor" -> {
                     return true;
                 }
                 default -> {

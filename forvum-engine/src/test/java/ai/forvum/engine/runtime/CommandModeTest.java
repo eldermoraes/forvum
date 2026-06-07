@@ -19,6 +19,8 @@ class CommandModeTest {
         assertTrue(CommandMode.isOneShotCommand(new String[] {"--version"}));
         assertTrue(CommandMode.isOneShotCommand(new String[] {"-V"}));
         assertTrue(CommandMode.isOneShotCommand(new String[] {"init"}));
+        assertTrue(CommandMode.isOneShotCommand(new String[] {"doctor"}),
+                "'doctor' validates files and exits without a turn — it must skip the DB/watcher/cron boot");
     }
 
     @Test

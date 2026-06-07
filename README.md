@@ -52,6 +52,7 @@ ollama pull qwen3:1.7b    # the model the default agent is pinned to
 ./mvnw -f forvum-app -Pnative package
 BIN=forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner
 "$BIN" init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
+"$BIN" doctor                   # validate ~/.forvum config (exits non-zero on problems)
 echo "who are you?" | "$BIN"    # one turn, then exit — or run "$BIN" for an interactive session
 "$BIN" --help                   # also --version
 ```
