@@ -1,0 +1,7 @@
+{
+  "extension_id": "memory-qdrant",
+  "module_name": "forvum-provider-memory-qdrant",
+  "providers": [
+    { "type": "memory", "class": "ai.forvum.provider.memory.qdrant.QdrantMemoryProvider" }
+  ]
+}

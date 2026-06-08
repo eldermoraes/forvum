@@ -3,8 +3,13 @@ package ai.forvum.engine.persistence;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import ai.forvum.core.ChannelMessage;
+import ai.forvum.core.MemoryHit;
+import ai.forvum.core.MemoryPolicy;
+import ai.forvum.core.MemoryQuery;
+import ai.forvum.core.MemoryTier;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
+import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.RoleSpec;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.event.FallbackTriggered;
@@ -43,7 +48,12 @@ import ai.forvum.core.id.Identity;
         DayWindow.class,
         SessionWindow.class,
         ExhaustionCause.class,
-        FallbackTriggered.class
+        FallbackTriggered.class,
+        MemoryPolicy.class,
+        MemoryQuery.class,
+        MemoryHit.class,
+        RetrievalStrategy.class,
+        MemoryTier.class
 })
 public final class CoreReflectionRegistration {
     private CoreReflectionRegistration() {
