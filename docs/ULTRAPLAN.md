@@ -97,8 +97,8 @@ All first-party extensions depend only on `forvum-sdk`. They are separate Maven 
 
 - **`forvum-tools-filesystem`** — `fs.read`, `fs.write`, `fs.list`, guarded by `PermissionScope.FS_READ` / `FS_WRITE`.
 - **`forvum-tools-web`** — `web.fetch`, `web.search`, with a pluggable search backend.
-- **`forvum-tools-shell`** — `shell.exec` behind an allow-list plus a `USER_CONFIRM_REQUIRED` approval hook.
-- **`forvum-tools-mcp-bridge`** — dynamic MCP client; reads `~/.forvum/mcp-servers/*.json` and surfaces remote MCP tools as native `ToolSpec` instances that any agent's `allowedTools` list can reference.
+- **`forvum-tools-shell`** — `shell.exec` behind an allow-list plus a `USER_CONFIRM_REQUIRED` approval hook. Owned by M13 acceptance (X7).
+- **`forvum-tools-mcp-bridge`** — dynamic MCP client; reads `~/.forvum/mcp-servers/*.json` and surfaces remote MCP tools as native `ToolSpec` instances that any agent's `allowedTools` list can reference. Shipped flagged-OFF in v0.1 (Risk #9); baseline owned by M13 acceptance (X7).
 
 ### 2.5 Layer 4 — Assembly
 
@@ -163,12 +163,13 @@ Quarkus 3.33.x LTS. Provides build-time CDI (Arc), native OpenTelemetry integrat
 
 ### 3.6 Observability
 
-- **OpenTelemetry** is on by default via `quarkus-opentelemetry`. The engine defines four span kinds:
+- **OpenTelemetry** is on by default via `quarkus-opentelemetry`. This §3.6 OTel baseline (the four spans below) is owned by M18 acceptance (X7); the OTLP *export* path is the Phase-2 P2-15 follow-on. The engine defines four span kinds:
   - `forvum.agent.turn` — one per inbound user message; attributes include `agent.id`, `identity.id`, `channel.id`, `session.id`.
   - `forvum.llm.call` — one per row written to `provider_calls`; attributes include `model`, `tokens_in`, `tokens_out`, `cost_usd`, `latency_ms`, `fallback`.
   - `forvum.tool.call` — one per `tool_invocations` row.
   - `forvum.graph.node` — one per LangGraph4j node execution.
 - **CAPR** (Cost-Aware Pass Rate) is computed from a Panache aggregate over `provider_calls` joined with `capr_events`. It is exposed as a JSON endpoint at `/q/dashboard/capr` and rendered as a Dev UI card in development mode. The per-turn pass/fail verdict is produced by a cheap "judge" model (by default a local Ollama `qwen3:1.7b`), off by default in production and enabled selectively for evaluation runs. **As-built (M18, X6 scenario 10):** the `/q/dashboard/capr` endpoint ships as a minimal `GET` route (`forvum-app` `CaprDashboardRoute`) that returns the recorded `capr_events` rows as a JSON array (the cost-aware aggregate over `provider_calls` is a later refinement; v0.1 ships judge mode off, so every completed turn is a `passed=1`/`judgeModel="none"` row written by `CaprRecorder` from `Agent.respond`). It uses a `quarkus-reactive-routes` `@Route` (`type = BLOCKING` for the Panache read) over the Web channel's already-present `vertx-http` server — preferred over `quarkus-rest` so it does not perturb `HttpClientFactorySelector` or the REST-client stack — and is **server-path-only**: the route serves only when a server channel is up (`vertx-http` is left unbound in one-shot/command mode), carries no `@Startup`/`StartupEvent` work, and so adds no command-mode cold-start cost (the < 200 ms gate is unaffected).
+- **CAPR** (Cost-Aware Pass Rate) is computed from a Panache aggregate over `provider_calls` joined with `capr_events`. It is exposed as a JSON endpoint at `/q/dashboard/capr` (owned by M18 acceptance — X7) and rendered as a Dev UI card in development mode. The per-turn pass/fail verdict is produced by a cheap "judge" model (by default a local Ollama `qwen3:1.7b`), off by default in production and enabled selectively for evaluation runs.
 - The span set and CAPR aggregate are the operational-traceability foundation of the Context Engineering discipline (§1.4, §2.7): the four `forvum.*` spans make the Write/Select/Compress/Isolate boundaries observable per turn (which window was written, which tools/memory were selected, where the digest replaced raw context, where a worker boundary was crossed), so CE is a measured runtime property rather than a design intention.
 
 ### 3.7 Build and distribution
@@ -258,7 +259,7 @@ The entire user-editable surface sits under `$FORVUM_HOME`, which defaults to `~
 - **`config.json`** holds cross-cutting settings: the default fallback chain for agents that do not declare their own, the log level, the enabled-channel set, and the embedding model used for semantic memory. It never holds secrets — API keys live in platform keychains (macOS Keychain, Secret Service on Linux, Windows Credential Manager) referenced by key id.
 - **`identities/<id>.json`** links external accounts (Telegram user id, email, OS username) to a single Forvum identity. The engine resolves the identity at channel-message entry and carries it through the request via a `ScopedValue<Identity>` bound alongside `CURRENT_AGENT`.
 - **`agents/<agentId>.md`** is the agent's persona and system prompt, written in free-form Markdown. **`agents/<agentId>.json`** is the structural spec: allowed tools (by glob), LLM fallback chain, memory policy, optional parent pointer for sub-agents, and optional `costBudget` and `toolBudget` caps. This split — prose as `.md`, structure as `.json` — mirrors OpenClaw's convention so migration from an OpenClaw-style setup is largely a `cp`.
-- **`skills/<skill>.md`** is a named prompt template with front-matter declaring its input schema. Agents invoke skills by name through the `SkillInvokerTool`. Skills are globally visible to any agent allowed to call the skill tool — they are not per-agent.
+- **`skills/<skill>.md`** is a named prompt template with front-matter declaring its input schema. Agents invoke skills by name through the `SkillInvokerTool` (skills ARE tools; the surface is owned by M13 acceptance — X7). Skills are globally visible to any agent allowed to call the skill tool — they are not per-agent.
 - **`crons/<cronId>.json`** declares a scheduled job: cron expression, target agent id, LLM fallback chain distinct from the agent's default, and an input template that renders to the initial user-message content at fire time. The scheduler (`quarkus-scheduler`) picks them up at startup and on hot reload; concurrent overlaps of the same cron id are suppressed.
 - **`channels/<channelId>.json`** is per-channel configuration. Channels that need secrets (Telegram bot token) reference a key id resolved through the platform keychain at channel start.
 - **`mcp-servers/<name>.json`** declares an MCP server — transport, command or URL, environment variables. The `McpBridge` starts each configured server lazily on first tool call and keeps it alive until process shutdown.
@@ -1256,6 +1257,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Note:** Compiler config (release=25, encoding=UTF-8) consolidated in parent pom.xml — no `.mvn/maven-compiler.config` needed.
   - **Deps:** locks Java 25 (`maven.compiler.release=25`), Quarkus 3.33.x LTS platform BOM, Maven 3.9+.
   - **Verify:** `cd forvum && ./mvnw -N verify` succeeds on every module; `./mvnw -pl forvum-app -am package` produces `forvum-app/target/quarkus-app/quarkus-run.jar`.
+  - **Owns (X7):** the multi-module reactor + pom + wrapper bootstrap only. The `forvum init` first-run command surface is **not** M1's — it ships with M20's picocli command-mode (`forvum init`; see M20 As-built deviation (a)); M4 (below) owns the on-disk `~/.forvum/` layout the scaffold writes (§6.2 scenario 2).
   - **Commit:** `chore: bootstrap multi-module reactor`.
 
 - [ ] **M2 — Core domain types.**
@@ -1274,6 +1276,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/config/ConfigLoader.java`, `ConfigWatcher.java`, `ConfigurationChangedEvent.java`, `ForvumHome.java`, plus Panache-less repository-style readers for each `~/.forvum/` subfolder.
   - **Deps:** `quarkus-core`, `quarkus-jackson`.
   - **Verify:** integration test uses `@TempDir`, writes a synthetic `~/.forvum/` layout, fires modifications, asserts `ConfigurationChangedEvent` observers receive the correct `path` and `type`.
+  - **Owns (X7):** the `~/.forvum/` on-disk layout the `forvum init` scaffold writes (§4.1, §6.2 scenario 2) — the scaffold target; the `init` command surface itself ships with M20 picocli command-mode.
   - **Commit:** `feat(engine): add file-based config loader with WatchService`.
 
 - [ ] **M5 — SQLite + Flyway V1.**
@@ -1329,6 +1332,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
 - [ ] **M13 — `ToolRegistry`, filtering, `PermissionScope`.**
   - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/tools/ToolRegistry.java`, `ToolExecutor.java`, `PermissionDeniedException.java`, `ToolFilter.java` (glob matching); the `forvum-sdk` `ToolProvider.tools()` SPI prelude (contribution-only, forvum-core types); `forvum-engine/.../model/ToolInvocation.java` + `ToolInvocationRecorder.java` + `.../persistence/PanacheToolInvocationRecorder.java` (write seam over the existing V1 `tool_invocations`); `AgentToolBelt` filtered `tools()`. `PermissionScope` is **consumed** from `forvum-core` (already exists, M2) — M13 does NOT create it, and adds NO migration (the `tool_invocations` table is V1/M5).
   - **Deps:** builds on M3, M7, and M5 (the existing `tool_invocations` table). Tools are not wired into `Agent.respond()` here — that is M18.
+  - **Owns (X7):** the `forvum-tools-shell` tool (`shell.exec` + allow-list + `USER_CONFIRM_REQUIRED`, §2.4), the `SkillInvokerTool` skills surface (skills ARE tools, §4.1), and the `forvum-tools-mcp-bridge` baseline (flagged OFF in v0.1 per Risk #9, §2.4) — all ride the `ToolProvider.tools()` SPI this milestone establishes, so they are owned here, not unscheduled. The §3.6 OTel baseline + the `/q/dashboard/capr` endpoint fold into M18 instead.
   - **Verify:** register two synthetic tools (`a.read`, `a.write`), seed an agent with `allowedTools: ["a.read"]`, assert a call to `a.write` from that agent is refused with a `PermissionDeniedException` and logged in `tool_invocations` with `status = 'denied'`.
   - **Commit:** `feat(engine): add ToolRegistry with glob-based filtering and permission scopes`.
 
@@ -1360,6 +1364,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
 - [x] **M18 — LangGraph4j supervisor graph.**
   - **Files:** `forvum-engine/src/main/java/ai/forvum/engine/graph/SupervisorGraph.java` (the `StateGraph` compiler), node implementations for `route`, `generate`, `tool_loop`, `spawn_worker`, `worker_run`, `reduce`, `GraphState.java`.
   - **Deps:** `org.bsc.langgraph4j:langgraph4j-core` (and the Langchain4j integration module).
+  - **Owns (X7):** the §3.6 OTel baseline (the four `forvum.*` spans emitted per turn/graph node) and the `/q/dashboard/capr` CAPR endpoint — both surface once the supervisor turn produces graph-node + provider-call + CAPR rows, so M18 is their owning milestone (the OTLP *export* is the Phase-2 P2-15 follow-on).
   - **Verify:** a multi-tool scenario ("fetch X then summarize") routes through `tool_loop` -> `generate` and produces the expected final message; CAPR event written for the turn.
   - **Commit:** `feat(engine): add LangGraph4j supervisor-workers orchestration`.
   - **As-built note (CAPR endpoint, X7 → M18; X6 scenario 10).** The §3.6 `/q/dashboard/capr` dashboard endpoint — which X7 placed under M18 acceptance — ships as `forvum-app` `CaprDashboardRoute`: a minimal `quarkus-reactive-routes` `@Route` returning the `capr_events` rows as JSON (see §3.6 as-built). Server-path-only (no command-mode cold-start impact), `@Route` over the existing `vertx-http` (no `quarkus-rest`, so `HttpClientFactorySelector`/the REST-client stack are untouched). Guarded by `CaprDashboardE2E` (five turns → `GET /q/dashboard/capr` returns ≥ 5 rows).
@@ -1374,6 +1379,7 @@ Every Phase 1 milestone includes four subsections: **Files** (what is created or
   - **Files:** `forvum-app/src/main/resources/application.properties` (native-specific flags), `.github/workflows/ci.yml` (matrix: `linux-amd64`, `macos-arm64`; JVM and native builds; native smoke test with 200 ms cold-start gate), `Dockerfile.jvm`, `Dockerfile.native`.
   - **Deps:** `quarkus-container-image-docker`; GraalVM CE 25 / Mandrel 25.0.x-Final on runners.
   - **Verify:** `mvn -f forvum-app -Pnative package -Dquarkus.native.container-build=true` succeeds on a clean CI runner; `./forvum-app-<version>-runner --help` prints help in < 200 ms measured from process start.
+  - **Owns (X7):** the `forvum init` first-run command surface (picocli command-mode `--help`/`--version`/`init`) — see As-built deviation (a); it scaffolds the M4-owned `~/.forvum/` layout (§6.2 scenario 2).
   - **Commit:** `feat(app): add GraalVM native image profile and CI matrix`.
   - **As-built deviations:** (a) the cold-start lever is picocli command-mode (`--help`/`--version`/`init`) + a `CommandMode` one-shot detector that makes the DB/watcher/cron startup observers skip their work — native `forvum --help` measures ~45 ms (gate met). (b) `quarkus-container-image-docker` was deliberately **not** adopted: hand-authored `Dockerfile.jvm`/`Dockerfile.native` are simpler and CI never builds an image (it runs `forvum --help` on the bare runner). (c) one-shot commands leave HTTP **unbound**: `ForvumApplication.main` sets `quarkus.http.host-enabled=false` (read at RUNTIME_INIT, before `run()`) when the args name a one-shot, so they pay neither the bundled Web channel's `vertx-http` bind nor a free-port requirement. (Separately, the macOS CI cell paid a fixed ~5 s `InetAddress.getLocalHost()` stall at startup — OpenTelemetry's host-resource detector + the Vert.x address resolver call it, independent of the listener — so the workflow makes the runner's hostname resolvable; real Macs resolve fine.) (d) **Risk #5** (a real-provider native scripted-turn smoke) is now automated, not deferred: a linux-only `native-turn` CI job builds the binary and drives a real Ollama turn through the new `forvum ask` command (`OllamaNativeTurnIT`, a `@QuarkusMainIntegrationTest @Tag("live")` asserting exit 0 + a non-blank stdout reply) against an `ollama/ollama` service running `qwen2.5:0.5b` — closing the gap PR #111 fell through. The two-cell `native` job (boot smoke + 200 ms cold-start) stays mandatory on both cells; the `native-turn` job is linux-only because the macOS runner cannot host the service container.
 
