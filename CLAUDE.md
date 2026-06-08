@@ -870,3 +870,17 @@ Generalizable lessons from completed milestones; append here as milestones land.
   distinguished built-in id (`cron`/`server`) short-circuits exempt. Enforcement keys off `ChannelMessage`'s
   existing fields (`channelId` = the device endpoint) — do NOT add a `deviceId` to the core record this package
   (the turn entry `TurnService.dispatch` already wraps a thrown guard as the terminal `ErrorEvent`). [P2-4]
+- **"Decode the final message against a JSON Schema" stays native-clean as schema-STRING → `JsonNode`, NOT a
+  typed POJO.** P2-12's locked decision rejects LangChain4j `@Description`/`@StructuredPrompt` decoding: a
+  per-agent output class would force runtime reflection / classpath class loading and break the native binary.
+  Instead `Persona` carries an optional `outputSchema` STRING (null = free-text, backward compatible; blank-but-
+  present rejected — already in the §6.3 reflection holder), `AgentSpecReader` serializes an embedded object
+  spec to a compact string (or takes a string verbatim), and a pure-Java `OutputSchemaValidator` tree-walks the
+  decoded reply (`mapper.readTree`) checking the v0.5-parity subset (root `type`, `required`, each property's
+  primitive `type`) — no third-party JSON-Schema lib until one is proven to native-compile (documented fast-
+  follow). Thread it through `GraphTurnRequest` (add a backward-compatible secondary ctor defaulting it to null
+  so existing 5-arg callers/tests compile) and validate in `SupervisorGraph.run` AFTER the graph returns, not in
+  a node. A failure throws `SupervisorGraphException` naming the schema + field; `TurnService` already converts
+  any turn `RuntimeException` into a terminal `ErrorEvent.from(...)`, so the named message rides into the event —
+  no retry, no new event plumbing. A spawned worker child passes `null` (its digest is merged as a tool result,
+  never the validated top-level answer). [P2-12]

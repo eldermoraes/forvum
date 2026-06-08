@@ -101,15 +101,42 @@ public class SupervisorGraph {
     /** Run one turn through the compiled graph, returning the final assistant text. */
     public String run(GraphTurnRequest request) {
         Turn turn = new Turn(request, toolCallBridge.specificationsFor(request.belt()));
+        String finalText;
         try {
             CompiledGraph<GraphState> graph = compile(turn);
             Optional<GraphState> result = graph.invoke(Map.of());
-            return result.flatMap(GraphState::finalText).orElseGet(turn::lastAssistantText);
+            finalText = result.flatMap(GraphState::finalText).orElseGet(turn::lastAssistantText);
         } catch (SupervisorGraphException e) {
             throw e;
         } catch (Exception e) {
             throw new SupervisorGraphException("Supervisor graph failed for session "
                     + request.sessionId(), e);
+        }
+        return enforceOutputSchema(request, finalText);
+    }
+
+    /**
+     * When the turn declares a per-agent {@code outputSchema} (P2-12), the final reply must parse as JSON
+     * and validate against it; otherwise the raw text passes through unchanged. A validation failure is a
+     * terminal turn error (no retry): it is wrapped in a {@link SupervisorGraphException} that NAMES the
+     * schema and the failure, so {@code TurnService} renders it as an {@code ErrorEvent}. On success the
+     * reply is re-serialized from the validated {@code JsonNode} so the channel always sees canonical JSON.
+     */
+    private String enforceOutputSchema(GraphTurnRequest request, String finalText) {
+        String schema = request.outputSchema();
+        if (schema == null) {
+            return finalText;
+        }
+        try {
+            return mapper.writeValueAsString(new OutputSchemaValidator(mapper).validate(schema, finalText));
+        } catch (OutputSchemaException e) {
+            throw new SupervisorGraphException(
+                "Output-schema validation failed for session " + request.sessionId()
+              + " against schema " + schema + ": " + e.getMessage(), e);
+        } catch (JsonProcessingException e) {
+            throw new SupervisorGraphException(
+                "Output-schema validation failed for session " + request.sessionId()
+              + ": the validated reply could not be re-serialized.", e);
         }
     }
 
