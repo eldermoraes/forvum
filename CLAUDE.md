@@ -800,3 +800,20 @@ Generalizable lessons from completed milestones; append here as milestones land.
   in core. Parity with a simpler upstream (OpenClaw is binary owner/non-owner + tool-name lists, no abstract
   scopes) is semantic — reproduce its behavior (permissive default, restricted cron) in the local vocabulary,
   don't copy its types. [P2-11]
+- **`MemoryPolicy` is a flat Layer-0 record driving a Layer-1 retrieval SPI — settled by DR-5
+  (`docs/design-rounds/group-5-memory-policy.md`), §4.3.6.** `MemoryPolicy(RetrievalStrategy strategy,
+  Set<MemoryTier> tiers, int topK, double minScore, int compressThresholdChars)` + four siblings
+  (`RetrievalStrategy`/`MemoryTier` enums, `MemoryQuery`, `MemoryHit`) all in `ai.forvum.core` (no
+  sub-package — unlike budget, no service iface in core). It DRIVES the new SPI method
+  `MemoryProvider.retrieve(MemoryQuery, MemoryPolicy) → List<MemoryHit>` (blocking on a VT, NO reactive;
+  SDK stays Quarkus-free; SDK already deps core so no new dep/enforcer change), which P2-5 #30 implements.
+  `strategy=NONE` keeps the policy non-nullable on the agent spec ("memory off" is a value). One
+  `compressThresholdChars` knob serves both the §5.5 `reduce` merge AND retrieved-memory write-back
+  (chars not tokens = native-clean). Spawn-inherited like CostBudget/Identity but needs NO
+  `SpawnConfigurationException` analogue — unlike a `SessionWindow` budget, the tenant key (`agentId`)
+  is per-call via `MemoryQuery` from the child's `@AgentScoped` context, so a verbatim policy reads the
+  child's own memory. Retrieval framed as `<retrieved_memory>` DATA + pre-memory-write `OutputFilter` are
+  REFERENCED from DR-6a §9, never redefined (read/write split: policy governs read-back, filter governs
+  write). The five core records do NOT carry `@RegisterForReflection` (core bans `io.quarkus*`) — P2-5
+  appends them to the engine `CoreReflectionRegistration` holder (§6.3). Dissolves demo D2's
+  `memoryPolicy` sub-gap; residual `AgentSpec` composition is DR-8's. [DR-5]

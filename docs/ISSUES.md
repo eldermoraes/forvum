@@ -1199,16 +1199,22 @@ line-477 migration path (`String reason` → `FailureClass`) pinned to M8. **Dep
 (done); benefits from DR-6a. **Commit.** `docs(design): settle Group 4c — FallbackChain contract`
 
 ## DR-5 — Settle Group 5 (MemoryPolicy)
+**Status:** DELIBERATED — pending maintainer sign-off (`docs/design-rounds/group-5-memory-policy.md`,
+15 decision points DP-1…DP-15). **Unblocks P2-5 #30** (the memory-host reference impl, which implements
+`MemoryProvider.retrieve(...)` and appends the five new core types to `CoreReflectionRegistration`).
 **Labels:** `design`, `core`, `context-engineering` · **Milestone:** `Design & Contracts`
 **Context.** §4.3.6 is `*TBD (Group 5)*`; `MemoryPolicy` is already listed in `forvum-core` types and
 inherited at spawn. **Scope.** Define §4.3.6 — the `MemoryPolicy` record/shape, the Write/Compress
 governance role, retrieval framing as `<retrieved_memory>` data blocks (6a point 5), the pre-memory-write
 `OutputFilter` boundary (6a point 2c), spawn inheritance alongside `CostBudget`/`Identity`.
-**Files.** `docs/ULTRAPLAN.md` §4.3.6.
+**Files.** `docs/ULTRAPLAN.md` §4.3.6; `docs/design-rounds/group-5-memory-policy.md`.
+**Settled shape.** `MemoryPolicy(RetrievalStrategy strategy, Set<MemoryTier> tiers, int topK, double
+minScore, int compressThresholdChars)` + SPI `MemoryProvider.retrieve(MemoryQuery, MemoryPolicy) →
+List<MemoryHit>` (blocking on a VT, Quarkus-free SDK); five new `ai.forvum.core` types.
 **Acceptance.** §4.3.6 materialized; `MemoryPolicy` confirmed in the `forvum-core` type list; dissolves
-demo deferral D2's memoryPolicy gap. **Dependencies.** DR-6a (memory-write boundary + retrieval
-framing); touches M5 episodic+semantic memory. **Commit.** `docs(design): settle Group 5 —
-MemoryPolicy contract`
+demo deferral D2's `memoryPolicy` sub-gap (residual `AgentSpec` composition handed to DR-8).
+**Dependencies.** DR-6a (memory-write boundary + retrieval framing — referenced, not redefined); touches
+M5 episodic+semantic memory. **Commit.** `docs(design): settle Group 5 — MemoryPolicy contract`
 
 ## DR-8 — Settle Group 8 (Persona / AgentSpec composition)
 **Labels:** `design`, `core` · **Milestone:** `Design & Contracts`
