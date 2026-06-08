@@ -85,8 +85,10 @@ public class AgentRegistry {
                   + " must be a subset of parent '" + parentId.value() + "' tool belt "
                   + parent.allowedTools() + ".");
         }
+        // A worker's output is a digest merged back as a tool result (never the top-level final answer
+        // the SupervisorGraph validates), so the child does NOT inherit the parent's output schema (P2-12).
         Persona child = new Persona(childId, parent.systemPrompt(), allowedTools,
-                parent.primaryModel(), parentId, parent.costBudget(), parent.toolBudget());
+                parent.primaryModel(), parentId, parent.costBudget(), parent.toolBudget(), null);
         if (specs.putIfAbsent(childId, child) != null) {
             throw new IllegalStateException(
                     "spawn: agent id '" + childId.value() + "' is already registered; choose a distinct "

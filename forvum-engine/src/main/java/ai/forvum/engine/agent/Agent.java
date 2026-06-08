@@ -96,7 +96,8 @@ public class Agent {
         ChatModel model = modelOverride != null ? modelOverride : llmSelector.select(persona, sessionId);
         List<ToolSpec> belt = toolBelt.tools();
 
-        String reply = supervisorGraph.run(new GraphTurnRequest(sessionId, id, model, belt, messages));
+        String reply = supervisorGraph.run(
+                new GraphTurnRequest(sessionId, id, model, belt, messages, persona.outputSchema()));
 
         long turnId = memory.recordTurn(sessionId, userText, reply);
         caprRecorder.recordPassed(sessionId, id.value(), turnId);
