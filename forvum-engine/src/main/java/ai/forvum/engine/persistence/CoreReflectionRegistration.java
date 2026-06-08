@@ -2,6 +2,7 @@ package ai.forvum.engine.persistence;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import ai.forvum.core.BlockType;
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
@@ -43,7 +44,8 @@ import ai.forvum.core.id.Identity;
         DayWindow.class,
         SessionWindow.class,
         ExhaustionCause.class,
-        FallbackTriggered.class
+        FallbackTriggered.class,
+        BlockType.class
 })
 public final class CoreReflectionRegistration {
     private CoreReflectionRegistration() {

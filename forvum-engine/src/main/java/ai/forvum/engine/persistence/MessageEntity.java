@@ -34,6 +34,16 @@ public class MessageEntity extends PanacheEntityBase {
     @Column(name = "tokens")
     public Integer tokens;
 
+    /**
+     * Structural block discriminator (P2-COMPACT) carrying a {@link ai.forvum.core.BlockType} db-literal.
+     * Defaults to {@code turn_message} (every pre-P2-COMPACT row, via the V2 migration default) so the
+     * normal conversational path is unchanged; {@code turn_reasoning}/{@code turn_artifact}/
+     * {@code tool_execution} rows let session compaction strip orphaned reasoning/artifact blocks while
+     * conservatively retaining tool-execution blocks still connected to a retained turn.
+     */
+    @Column(name = "block_type", nullable = false)
+    public String blockType;
+
     @Column(name = "created_at", nullable = false)
     public long createdAt;
 }

@@ -33,4 +33,13 @@ public class SessionEntity extends PanacheEntityBase {
 
     @Column(name = "metadata_json")
     public String metadataJson;
+
+    /**
+     * The highest {@code messages.id} that belongs to the cached prompt prefix (P2-COMPACT). Null until
+     * the session is first compacted. Session compaction NEVER mutates a message with
+     * {@code id <= cachedPrefixEndIndex}, so the provider's prompt-cache prefix stays byte-stable across
+     * turns (ULTRAPLAN section 7.2 item 20).
+     */
+    @Column(name = "cached_prefix_end_index")
+    public Integer cachedPrefixEndIndex;
 }

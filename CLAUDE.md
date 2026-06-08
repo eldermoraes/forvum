@@ -800,3 +800,31 @@ Generalizable lessons from completed milestones; append here as milestones land.
   in core. Parity with a simpler upstream (OpenClaw is binary owner/non-owner + tool-name lists, no abstract
   scopes) is semantic — reproduce its behavior (permissive default, restricted cron) in the local vocabulary,
   don't copy its types. [P2-11]
+- **Prefix-preserving compaction needs an id-stable summary, so the summary RECLAIMS the oldest dropped id.**
+  The cached prefix is defined id-based (`id <= cached_prefix_end_index`, never mutated), and replay reads
+  `order by id` — so a summary inserted with a fresh IDENTITY id (always the highest) would sort LAST, not
+  at the prefix tail, and using that high id as the new prefix boundary would freeze EVERYTHING below it.
+  Fix: delete the dropped run, then native-INSERT the summary at the oldest dropped message's id (IDENTITY
+  forbids a manual id on `persist()`, so a controlled `em.createNativeQuery("INSERT ... (id, ...)")` is the
+  seam), and advance `cached_prefix_end_index` to it. The summary then sits numerically+chronologically
+  right after the old prefix and before every retained message, the existing `order by id` path is
+  untouched, and the prefix grows monotonically. The summarizer is an injectable `Summarizer` SPI
+  (default reuses the §1.4 small-and-fast model via `LlmSelector.resolve`, NOT a bespoke endpoint); tests
+  bind a deterministic `@Alternative @Priority(1)` stub so no live model is hit. Orphan stripping keys off
+  a new `messages.block_type` core enum (`BlockType`, registered in `CoreReflectionRegistration`): strip
+  `turn_reasoning`/`turn_artifact` + stale `tool_execution` older than the oldest retained user message,
+  retain connected `tool_execution`. CAPR is archived (`capr_events.is_archived`), never deleted. **Adding
+  a NOT-NULL column to an existing entity breaks every hand-built fixture** — `SchemaSmokeIT` (2 sites) +
+  `SessionReplayerTest` (1 site) set `MessageEntity` fields directly and needed `blockType`; the V2 `DEFAULT
+  'turn_message'` only covers raw SQL inserts that omit the column (the app native replay IT). Migration
+  is **V2** (the brief said V3, but only V1 existed — keep the chain contiguous). Seed-then-compact-then-read
+  ITs use `QuarkusTransaction.requiringNew()` (intra-class `this.seed()` bypasses `@Transactional`
+  interception). **The blocking summarizer LLM call must run OUTSIDE any DB transaction** (CLAUDE §14
+  [M7]): `compact()` is NOT `@Transactional` — a short read tx plans the pass (partition the region,
+  capture id/content primitives so the detached entities are never reused), the model is called with no
+  Agroal/SQLite connection held, then a short write tx applies the mutations (bulk delete-by-id +
+  native-insert + advance prefix). **Track the retain boundary on EVERY retained `TURN_MESSAGE`
+  regardless of role, not just USER rows** — else the newest turn, typically the assistant reply (since
+  compaction runs before the next user message is persisted), is left at `Long.MAX_VALUE` and summarized
+  away when it alone exceeds `retainTokens`; the user-then-assistant persist order keeps the common-case
+  boundary on the USER row unchanged. [P2-COMPACT]

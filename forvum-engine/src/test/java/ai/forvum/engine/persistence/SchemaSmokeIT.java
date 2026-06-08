@@ -43,7 +43,8 @@ class SchemaSmokeIT {
         Object version = em.createNativeQuery(
                 "select version from flyway_schema_history where success = 1 "
               + "order by installed_rank desc limit 1").getSingleResult();
-        assertEquals("1", String.valueOf(version), "Flyway V1 must have applied successfully");
+        // V2 (P2-COMPACT) is the latest migration: V1 baseline + V2 compaction columns.
+        assertEquals("2", String.valueOf(version), "Flyway must have applied through V2 (compaction)");
 
         @SuppressWarnings("unchecked")
         List<String> tables = em.createNativeQuery(
@@ -85,6 +86,7 @@ class SchemaSmokeIT {
         message.role = "user";
         message.content = "hello";
         message.tokens = 3;
+        message.blockType = "turn_message";
         message.createdAt = now;
         message.persist();
 
@@ -177,6 +179,7 @@ class SchemaSmokeIT {
         message.agentId = "main";
         message.role = "user";
         message.content = "hi";
+        message.blockType = "turn_message";
         message.createdAt = now;
         message.persist();
         em.flush();

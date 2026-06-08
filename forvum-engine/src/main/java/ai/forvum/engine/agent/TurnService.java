@@ -10,11 +10,15 @@ import ai.forvum.core.event.TokenDelta;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.engine.context.CurrentIdentity;
+import ai.forvum.engine.session.compaction.CompactionPolicy;
+import ai.forvum.engine.session.compaction.SessionCompactor;
 import ai.forvum.sdk.ChannelTurnDriver;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.time.Instant;
 import java.util.Set;
@@ -61,6 +65,17 @@ public class TurnService implements ChannelTurnDriver {
     @Inject
     RoleRegistry roles;
 
+    @Inject
+    SessionCompactor compactor;
+
+    /** Reserve-token floor above which the session is eagerly compacted before the turn (P2-COMPACT). */
+    @ConfigProperty(name = "forvum.compaction.reserve-floor-tokens", defaultValue = "8000")
+    int reserveFloorTokens;
+
+    /** Token budget the most-recent retained turns must fit within after a compaction pass. */
+    @ConfigProperty(name = "forvum.compaction.retain-tokens", defaultValue = "6000")
+    int retainTokens;
+
     /**
      * Drive a turn for an inbound {@link ChannelMessage}, rendering it to {@code sink}. The session is
      * keyed {@code channelId:nativeUserId} (one conversation per user per channel) and carries the
@@ -87,6 +102,12 @@ public class TurnService implements ChannelTurnDriver {
                     .orElse(ANONYMOUS_IDENTITY);
             registry.getOrCreate(agentId);
             sessions.ensureSession(sessionId, agentId, identityId, message.channelId());
+
+            // P2-COMPACT: eagerly compact the session BEFORE the turn runs, so the agent always reads a
+            // pre-compacted window (CE Compress, ULTRAPLAN section 7.2 item 20). A session under the
+            // reserve floor is a no-op; the prefix (id <= cachedPrefixEndIndex) is never mutated.
+            compactor.compact(sessionId, agentId.value(),
+                    new CompactionPolicy(reserveFloorTokens, retainTokens));
 
             // P2-11 RBAC: resolve the caller's effective scopes (union of its roles' scope-sets, or the
             // permissive default role for an identity that declares none) and bind them for the turn so
