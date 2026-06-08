@@ -49,7 +49,7 @@ ollama pull qwen3:1.7b    # the model the default agent is pinned to
 **Native single binary** (the primary target — one executable, no JVM, &lt;200 ms cold start):
 
 ```bash
-./mvnw -f forvum-app -Pnative package
+./mvnw -Pnative -pl forvum-app -am package   # -am pulls in the reactor deps — builds from a fresh clone
 BIN=forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner
 "$BIN" init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
 "$BIN" doctor                   # validate ~/.forvum config (exits non-zero on problems)
