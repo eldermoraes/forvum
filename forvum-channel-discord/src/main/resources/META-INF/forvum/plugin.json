@@ -1,0 +1,7 @@
+{
+  "extension_id": "discord",
+  "module_name": "forvum-channel-discord",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.discord.DiscordChannelProvider" }
+  ]
+}

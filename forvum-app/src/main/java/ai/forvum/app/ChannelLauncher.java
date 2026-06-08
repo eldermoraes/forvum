@@ -31,8 +31,14 @@ public class ChannelLauncher {
     /** Channel id of the Telegram channel, which additionally requires a {@code botToken} to serve. */
     static final String TELEGRAM_ID = "telegram";
 
+    /** Channel id of the Discord channel, which (like Telegram) additionally requires a {@code botToken}. */
+    static final String DISCORD_ID = "discord";
+
+    /** Channel ids that additionally require a non-blank {@code botToken} to actually serve. */
+    static final Set<String> TOKEN_GATED_CHANNELS = Set.of(TELEGRAM_ID, DISCORD_ID);
+
     /** Channel ids whose enablement keeps the process alive to serve. */
-    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID);
+    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID, DISCORD_ID);
 
     /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.
@@ -52,15 +58,16 @@ public class ChannelLauncher {
     }
 
     /**
-     * Whether channel {@code id} actually serves: enabled, and — for Telegram — carrying a non-blank
-     * {@code botToken}, since {@code TelegramChannel.onStart} starts its poll loop only with a token (an
-     * enabled but token-less {@code telegram.json} otherwise hangs the binary serving nothing).
+     * Whether channel {@code id} actually serves: enabled, and — for the token-gated channels (Telegram,
+     * Discord) — carrying a non-blank {@code botToken}, since their {@code onStart} starts the inbound
+     * surface (poll loop / gateway connection) only with a token (an enabled but token-less config would
+     * otherwise hang the binary in server mode serving nothing).
      */
     static boolean serves(String id, JsonNode spec) {
         if (!isEnabled(spec)) {
             return false;
         }
-        return !TELEGRAM_ID.equals(id) || hasBotToken(spec);
+        return !TOKEN_GATED_CHANNELS.contains(id) || hasBotToken(spec);
     }
 
     /** True if an interactive foreground channel (the TUI) is enabled — run it in the foreground. */
