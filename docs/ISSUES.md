@@ -1272,6 +1272,25 @@ upgrade the §1.4 governance bullet from principle to contract).
 prompt-injection-mitigation CE Guardrails pillar becomes structural; §10 forward-reference resolved.
 **Dependencies.** §3.8 (done), §10 (done). **Blocks:** DR-4c, DR-5, DR-6b, DR-8, TEST-SEC, P2-OUTPUTGUARD.
 **Commit.** `docs(design): settle Group 6a — threat model and tool-execution filters`
+**Status — DELIBERATED, pending maintainer sign-off (docs-draft).** §9 authored in `docs/ULTRAPLAN.md`
+between §8 and §10: **§9.1 Threat Model** (STRIDE by surface — five runtime surfaces: tool-spec design,
+`ToolExecutor` gate enforcement, prompt-injection, outbound filtering, memory isolation) + **§9.2
+`OutputFilter` contract** (sealed `FilteringOutcome` `Allowed`/`Redacted`/`Blocked`; `OutputGuard` SPI
+shape; three hook layers with only pre-channel-emit wired in v0.1; engine-local `OutputFilteredException`;
+`FallbackReasons.FILTERED` token with DR-4c name coordination). §10's "see §9 once it lands"
+forward-reference resolved; §1.4 governance bullet upgraded from principle to contract; §7.2 item 23
+forward-reference resolved. The 6 open design points are settled and flagged inline as **[DP-1..DP-6]** in `docs/ULTRAPLAN.md` §9
+(summarized for ratification in the live DR-6a issue, #59). The RBAC second gate (P2-11 #36
+`CURRENT_EFFECTIVE_SCOPES`) is confirmed in the threat model as-built — no new gate. fs/shell
+(`WorkspaceRoot` full contract, `ShellAllowlist`) deferral is confirmed, not re-opened.
+**Unblocks (pending sign-off):** **P2-OUTPUTGUARD #48** (the `OutputFilter`/`OutputGuard` SPI it implements
+next wave), **X5 #71** (the §9 section it tracks now exists), the full **TEST-SEC #65** (the §9 contracts
+its negative tests gate), and the **per-channel security UX of P2-14 #39** (the destructive-action approval
++ outbound-filter trip surface §9.1.b/§9.1.d name). Cross-links: §1.4 outbound-filter promise and the
+Context-Engineering Guardrails pillar (`CONTEXT-ENGINEERING-MAPPING.md` §"Governance, permissions, and
+security (Guardrails)", REQ #2). **NEXT:** maintainer ratifies/amends DP-1..DP-6, then DR-4c #62 (consumes
+the `Filtered` permit hand-off) and DR-5 #63 (consumes the pre-memory-write hook layer + `<retrieved_memory>`
+framing).
 
 ## DR-6b — Settle Group 6b (plugin trust + MCP server trust)
 **Labels:** `design`, `security` · **Milestone:** `Design & Contracts`
@@ -1434,6 +1453,10 @@ TEST-SEC for the actual tests). This issue is the umbrella linking the §9 gap t
 **Status.** Test-half delivered (TEST-SEC): the four negative categories gate the build (see TEST-SEC).
 The §9 doc-half (the threat-model section itself) lands via DR-6a #59.
 **Dependencies.** DR-6a, TEST-SEC. **Commit.** `test: add security negative-test layer`
+**Status — §9 half UNBLOCKED (pending sign-off).** The missing §9 Security section was authored by DR-6a
+(#59, docs-draft) — §9.1 threat model + §9.2 `OutputFilter` contract now exist in `docs/ULTRAPLAN.md`, and
+§10's "see §9 once it lands" forward-reference is resolved. The remaining half (the `forvum-app/.../security/`
+negative-test suite) stays delegated to TEST-SEC #65.
 
 ## X6 — End-to-end verification suite (10 scenarios, dual-target)
 **Labels:** `ci-infra`, `native` · **Milestone:** `CI/Test Infra`

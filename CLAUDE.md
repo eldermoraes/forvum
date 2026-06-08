@@ -1057,3 +1057,17 @@ Generalizable lessons from completed milestones; append here as milestones land.
   write). The five core records do NOT carry `@RegisterForReflection` (core bans `io.quarkus*`) — P2-5
   appends them to the engine `CoreReflectionRegistration` holder (§6.3). Dissolves demo D2's
   `memoryPolicy` sub-gap; residual `AgentSpec` composition is DR-8's. [DR-5]
+- **A security design round is "confirm what's built + name what's deferred", not "invent new gates".** DR-6a
+  authored §9 (threat model STRIDE-by-surface + the `OutputFilter` contract) by *confirming* the already-merged
+  controls in the threat context (the two `ToolExecutor` gates — belt + the P2-11 RBAC `CURRENT_EFFECTIVE_SCOPES`
+  second gate; `@AgentScoped` memory isolation; spawn-boundary identity inheritance) rather than proposing new
+  runtime machinery. Prompt-injection is **containment-by-structure** (the gates + the `reduce` Isolate boundary +
+  data/instruction framing), explicitly NOT a runtime injection-detector — and tool-execution filters are *output*
+  filters (catch egress leaks), never injection preventers; a user-defined-tool surface would breach the
+  author-authored tool-spec assumption and needs its own future contract. The `OutputFilter` disposition is a
+  3-subtype sealed `FilteringOutcome` (`Allowed`/`Redacted`/`Blocked`) in `forvum-core`; the brief's "FILTERED"
+  label is the `FallbackReasons.FILTERED` *reason token* on the `Blocked` path (mirrors `COST_BUDGET`), not a
+  fourth subtype — and the engine-only `OutputFilteredException` mirrors `BudgetExhaustedException` (unchecked,
+  engine-caught terminal short-circuit) so the SDK/core stay exception-free. Coordinate the `Filtered` spelling
+  with DR-4c's `FailureClass` (filtered = non-retryable). Flag each settled point inline as `[DP-n]` so a
+  maintainer can ratify/amend a draft surgically. [DR-6a]
