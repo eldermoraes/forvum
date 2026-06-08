@@ -817,3 +817,14 @@ Generalizable lessons from completed milestones; append here as milestones land.
   (`AgentRegistry`/`LlmSelector`/`RoleRegistry`/`Agent`) must carry `@Vetoed`: a CDI scope is `@Inherited`,
   so an un-vetoed subclass becomes a second ambiguous bean and breaks the module's `@QuarkusTest` boot
   (a sibling `RecordingSink` implementing the plain `CronDeliverySink` interface needs no veto). [P2-CRON-DELIVERY]
+- **A "sink SPI" lives in `forvum-sdk` as a PLAIN (non-sealed) interface with the engine as sole implementor —
+  not in the sealed channel/model/tool/memory hierarchy.** `TaskExecutor` (P2-TASKLEDGER) mirrors the
+  `ChannelTurnDriver` shape: SDK contract, single engine `@ApplicationScoped` impl (`TaskRecorder`), plugins do
+  NOT implement it; engine callers `@Inject TaskExecutor`. The Panache recorder pattern is exact
+  copy-`PanacheProviderCallRecorder` (`@ApplicationScoped` + `@Transactional record()` mapping a Layer-0 record
+  to an entity row). Record the write persist-after-success (never wrap the whole producer in `@Transactional`),
+  and isolate the recorder call in try/catch so a ledger failure cannot undo/kill the work that already
+  succeeded. Wire spawn-recording at the REAL chokepoint (`AgentRegistry.spawn`, where every spawn —
+  including the M18 `DefaultWorkerRunner` — converges), not at a facade (`TurnService` never spawns). A new
+  `V2__tasks.sql` bumps the Flyway head, so the M5 `SchemaSmokeIT` version/table/index assertions (it pins
+  version "1" + the V1 table & index lists) MUST be updated to the new head in the same change. [P2-TASKLEDGER]

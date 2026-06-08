@@ -1,9 +1,13 @@
 package ai.forvum.engine.agent;
 
 import ai.forvum.core.Persona;
+import ai.forvum.core.TaskRecord;
+import ai.forvum.core.TaskStatus;
+import ai.forvum.core.TaskType;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.config.AgentReader;
 import ai.forvum.engine.config.ConfigurationChangedEvent;
+import ai.forvum.sdk.TaskExecutor;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -11,8 +15,11 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 
+import org.jboss.logging.Logger;
+
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -26,11 +33,16 @@ import java.util.concurrent.ConcurrentMap;
 @ApplicationScoped
 public class AgentRegistry {
 
+    private static final Logger LOG = Logger.getLogger(AgentRegistry.class);
+
     @Inject
     AgentReader reader;
 
     @Inject
     Agent agent;
+
+    @Inject
+    TaskExecutor taskExecutor;
 
     private final AgentSpecReader specReader = new AgentSpecReader();
     private final ConcurrentMap<AgentId, Persona> specs = new ConcurrentHashMap<>();
@@ -92,7 +104,26 @@ public class AgentRegistry {
                     "spawn: agent id '" + childId.value() + "' is already registered; choose a distinct "
                   + "child id (spawn never overwrites an existing agent).");
         }
+        recordSpawnTask(parentId, childId);
         return childId;
+    }
+
+    /**
+     * Write one {@code SUB_AGENT} row to the {@code tasks} ledger after a successful spawn
+     * (persist-after-success — a rejected spawn throws before this). A recorder failure must not undo a
+     * spawn that already succeeded, so it is logged, never propagated. {@code agentId} is the parent (the
+     * agent that initiated the work); {@code subAgentId} is the spawned child. The spawn itself is
+     * instantaneous, so the row lands terminal {@code COMPLETED}.
+     */
+    private void recordSpawnTask(AgentId parentId, AgentId childId) {
+        long now = System.currentTimeMillis();
+        try {
+            taskExecutor.record(new TaskRecord(
+                    UUID.randomUUID().toString(), parentId, TaskType.SUB_AGENT, null, childId.value(),
+                    "spawn:" + childId.value(), now, now, now, TaskStatus.COMPLETED, null, null, 0L, now));
+        } catch (RuntimeException e) {
+            LOG.errorf(e, "Failed to record tasks-ledger row for spawn of '%s'", childId.value());
+        }
     }
 
     /**

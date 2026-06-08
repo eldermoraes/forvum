@@ -40,4 +40,13 @@ public record CronSpec(String id, String cron, AgentId agentId, ModelRef primary
             throw new IllegalStateException("CronSpec '" + id + "' delivery must be non-null.");
         }
     }
+
+    /**
+     * Backward-compatible constructor for a cron with no delivery directive: {@code delivery} defaults to
+     * {@link Delivery#NONE} (the reply is dropped). Mirrors the §7.2 item 22 default and lets pre-delivery
+     * callers (and tests) keep the five-argument form (P2-CRON-DELIVERY).
+     */
+    public CronSpec(String id, String cron, AgentId agentId, ModelRef primaryModel, String prompt) {
+        this(id, cron, agentId, primaryModel, prompt, Delivery.NONE);
+    }
 }

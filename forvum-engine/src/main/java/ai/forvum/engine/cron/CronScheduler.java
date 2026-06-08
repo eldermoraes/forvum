@@ -13,6 +13,11 @@ import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.routing.LlmSelector;
 import ai.forvum.engine.runtime.CommandMode;
 
+import ai.forvum.core.TaskRecord;
+import ai.forvum.core.TaskStatus;
+import ai.forvum.core.TaskType;
+import ai.forvum.sdk.TaskExecutor;
+
 import dev.langchain4j.model.chat.ChatModel;
 
 import io.quarkus.runtime.StartupEvent;
@@ -28,6 +33,7 @@ import org.jboss.logging.Logger;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Registers background agent turns from {@code $FORVUM_HOME/crons/*.json} programmatically (ULTRAPLAN
@@ -69,6 +75,9 @@ public class CronScheduler {
 
     @Inject
     CommandMode commandMode;
+
+    @Inject
+    TaskExecutor taskExecutor;
 
     /** Schedule every cron present at startup. A missing {@code crons/} folder simply yields no jobs. */
     void onStart(@Observes StartupEvent event) {
@@ -143,6 +152,7 @@ public class CronScheduler {
      */
     void fire(CronSpec spec) {
         String sessionId = "cron:" + spec.id();
+        long startedAt = System.currentTimeMillis();
         String reply;
         try {
             Agent agent = registry.getOrCreate(spec.agentId());
@@ -151,9 +161,14 @@ public class CronScheduler {
             reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, spec.agentId())
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, cronScopes)
                     .call(() -> agent.respond(sessionId, spec.prompt(), model));
+            // Record the cron task ONLY after the turn succeeds (persist-after-success; the turn's own
+            // ledger rows survive in their own transactions, and a failed turn's ERROR task is recorded
+            // below — the whole fire is never wrapped in one transaction).
+            recordCronTask(spec, startedAt, TaskStatus.COMPLETED, null);
         } catch (RuntimeException e) {
             LOG.errorf(e, "Cron '%s' turn failed for agent '%s'", spec.id(), spec.agentId().value());
-            return;
+            recordCronTask(spec, startedAt, TaskStatus.ERROR, e.getMessage());
+            return; // a failed turn has no reply to deliver
         }
         deliver(spec, reply);
     }
@@ -172,6 +187,19 @@ public class CronScheduler {
             deliverySink.deliver(new CronDelivery(spec.id(), spec.agentId().value(), reply, spec.delivery()));
         } catch (RuntimeException e) {
             LOG.errorf(e, "Cron '%s' delivery failed (%s)", spec.id(), spec.delivery().mode().wire());
+        }
+    }
+
+    /** Write one {@code tasks} ledger row for this cron fire. A recorder failure must not break the loop. */
+    private void recordCronTask(CronSpec spec, long startedAt, TaskStatus status, String error) {
+        long completedAt = System.currentTimeMillis();
+        try {
+            taskExecutor.record(new TaskRecord(
+                    UUID.randomUUID().toString(), spec.agentId(), TaskType.CRON, spec.id(), null,
+                    "cron:" + spec.id(), startedAt, startedAt, completedAt, status, null, error,
+                    completedAt - startedAt, completedAt));
+        } catch (RuntimeException e) {
+            LOG.errorf(e, "Failed to record tasks-ledger row for cron '%s'", spec.id());
         }
     }
 

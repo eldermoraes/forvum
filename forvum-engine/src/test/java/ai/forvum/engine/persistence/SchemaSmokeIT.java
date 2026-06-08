@@ -28,29 +28,32 @@ class SchemaSmokeIT {
 
     private static final List<String> EXPECTED_TABLES = List.of(
             "sessions", "messages", "episodic_memory", "semantic_memory",
-            "tool_invocations", "provider_calls", "capr_events");
+            "tool_invocations", "provider_calls", "capr_events", "tasks");
 
     private static final List<String> EXPECTED_INDEXES = List.of(
             "idx_sessions_identity", "idx_sessions_lastseen", "idx_messages_session", "idx_messages_agent",
             "idx_episodic_agent_session", "idx_semantic_agent", "idx_tool_session", "idx_tool_agent",
-            "idx_provider_session", "idx_provider_agent", "idx_provider_fallback", "idx_capr_agent");
+            "idx_provider_session", "idx_provider_agent", "idx_provider_fallback", "idx_capr_agent",
+            "idx_tasks_agent", "idx_tasks_status");
 
     @Inject
     EntityManager em;
 
     @Test
-    void flywayMigratedV1AndAllTablesExist() {
+    void flywayMigratedToHeadAndAllTablesExist() {
+        // P2-TASKLEDGER added V2__tasks.sql, so the head version is now 2 and the 'tasks' table joins
+        // the V1 set.
         Object version = em.createNativeQuery(
                 "select version from flyway_schema_history where success = 1 "
               + "order by installed_rank desc limit 1").getSingleResult();
-        assertEquals("1", String.valueOf(version), "Flyway V1 must have applied successfully");
+        assertEquals("2", String.valueOf(version), "Flyway must have migrated to the head version (V2)");
 
         @SuppressWarnings("unchecked")
         List<String> tables = em.createNativeQuery(
                 "select name from sqlite_master where type = 'table' and name not like 'sqlite_%'")
                 .getResultList();
         assertTrue(tables.containsAll(EXPECTED_TABLES),
-                "expected all V1 tables, found: " + tables);
+                "expected all migrated tables, found: " + tables);
     }
 
     @Test
@@ -147,12 +150,12 @@ class SchemaSmokeIT {
     }
 
     @Test
-    void allV1IndexesExist() {
+    void allMigratedIndexesExist() {
         @SuppressWarnings("unchecked")
         List<String> indexes = em.createNativeQuery(
                 "select name from sqlite_master where type = 'index' and name not like 'sqlite_%'")
                 .getResultList();
-        assertTrue(indexes.containsAll(EXPECTED_INDEXES), "expected all V1 indexes, found: " + indexes);
+        assertTrue(indexes.containsAll(EXPECTED_INDEXES), "expected all migrated indexes, found: " + indexes);
     }
 
     @Test

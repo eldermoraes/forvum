@@ -1027,6 +1027,14 @@ for `tasks`. **Acceptance.** Cron/sub-agent/background runs all register in the 
 queryable; parity verified. **[NATIVE]** native parity. **[PLUGIN]** `quarkus/skills` for the persistence
 extension; tests via Dev MCP. **Dependencies.** M5, M7, M18, M19.
 **Commit.** `feat(sdk): add TaskExecutor SPI with unified SQLite task ledger`
+**Built.** `TaskExecutor` sink SPI in `forvum-sdk` (plain interface — the engine is the sole
+implementor, plugins do NOT implement it); Layer-0 `TaskRecord` record + `TaskType`/`TaskStatus` enums
+in `forvum-core` (registered for native via `CoreReflectionRegistration`); engine `TaskEntity` (Panache,
+TEXT PK) + `TaskRecorder` `@ApplicationScoped` impl; Flyway `V2__tasks.sql` (table `tasks` + two
+indexes). Recording wired persist-after-success: `CronScheduler.fire` writes a `cron` row (COMPLETED on
+turn success, ERROR otherwise), and `AgentRegistry.spawn` — the single chokepoint all spawns flow
+through, including the M18 `DefaultWorkerRunner` — writes a `sub_agent` row after a successful spawn.
+Recorder failures are logged, never propagated. Operators query via direct SQL (no DSL in v0.5).
 
 ## P2-CRON-DELIVERY — Cron isolated-agent delivery modes (§7.2 item 22)
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`
