@@ -10,6 +10,7 @@ import ai.forvum.core.event.TokenDelta;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.engine.context.CurrentIdentity;
+import ai.forvum.engine.pairing.DeviceRegistry;
 import ai.forvum.engine.session.compaction.CompactionPolicy;
 import ai.forvum.engine.session.compaction.SessionCompactor;
 import ai.forvum.sdk.ChannelTurnDriver;
@@ -76,6 +77,9 @@ public class TurnService implements ChannelTurnDriver {
     @ConfigProperty(name = "forvum.compaction.retain-tokens", defaultValue = "6000")
     int retainTokens;
 
+    @Inject
+    DeviceRegistry devices;
+
     /**
      * Drive a turn for an inbound {@link ChannelMessage}, rendering it to {@code sink}. The session is
      * keyed {@code channelId:nativeUserId} (one conversation per user per channel) and carries the
@@ -98,6 +102,15 @@ public class TurnService implements ChannelTurnDriver {
         UUID turnId = UUID.randomUUID();
 
         try {
+            // P2-4 device pairing: reject an unpaired/revoked device BEFORE the responder runs. The
+            // channelId is the device endpoint id (one devices/<channelId>.json declares its pairing).
+            // A cheap no-op for a known-good device, and entirely disabled until devices/ is configured
+            // (opt-in, no migration). The cli device (forvum ask, the host's trusted primary surface) is
+            // exempt so enabling pairing never locks out the operator's own terminal. cron turns NEVER
+            // reach here — CronScheduler.fire calls agent.respond directly — so cron is exempt BY
+            // CONSTRUCTION; the cron/server entries in EXEMPT are a defensive belt should that ever change.
+            devices.requirePaired(message.channelId());
+
             String identityId = identities.resolveIdentityId(message.channelId(), message.nativeUserId())
                     .orElse(ANONYMOUS_IDENTITY);
             registry.getOrCreate(agentId);

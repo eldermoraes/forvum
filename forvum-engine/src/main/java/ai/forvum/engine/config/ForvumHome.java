@@ -98,6 +98,11 @@ public class ForvumHome {
         return root.resolve("channels");
     }
 
+    /** {@code $FORVUM_HOME/devices} — paired-device declarations ({@code .json}, P2-4). */
+    public Path devices() {
+        return root.resolve("devices");
+    }
+
     /** {@code $FORVUM_HOME/mcp-servers} — MCP server definitions ({@code .json}). */
     public Path mcpServers() {
         return root.resolve("mcp-servers");

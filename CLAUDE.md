@@ -856,3 +856,17 @@ Generalizable lessons from completed milestones; append here as milestones land.
   compaction runs before the next user message is persisted), is left at `Long.MAX_VALUE` and summarized
   away when it alone exceeds `retainTokens`; the user-then-assistant persist order keeps the common-case
   boundary on the USER row unchanged. [P2-COMPACT]
+- **A new `$FORVUM_HOME/<dir>/` config-file registry is a fixed five-edit recipe — copy `roles/`, don't
+  invent.** P2-4 device pairing added `devices/<id>.json` with ZERO schema change by mirroring P2-11/M7
+  exactly: (1) `ForvumHome.devices()`; (2) add `"devices"` to `ConfigWatcher.WATCHED_SUBFOLDERS` (this one line
+  is what makes hot-reload fire — the watcher already registers any listed subfolder created after boot); (3) a
+  raw `config/DeviceReader extends JsonDirectoryReader` (the base is PACKAGE-PRIVATE, so the raw reader MUST
+  live in `ai.forvum.engine.config` — only the typed `DeviceSpecReader`/registry live in the feature package);
+  (4) a Layer-2 `Device` record with its OWN `@RegisterForReflection` (a Layer-2 record, unlike a core record,
+  carries the annotation directly — NOT in `CoreReflectionRegistration`); (5) an `@ApplicationScoped`
+  `DeviceRegistry` = `ConcurrentMap` + `putIfAbsent` with IO off the lock + `@Observes ConfigurationChangedEvent`
+  evict (filter `path.getName(0)=="devices"`). Enforce opt-in like RBAC: an empty/absent dir disables the guard
+  (cache a `volatile Boolean enabled`, null it on config change) so an existing install needs no migration; a
+  distinguished built-in id (`cron`/`server`) short-circuits exempt. Enforcement keys off `ChannelMessage`'s
+  existing fields (`channelId` = the device endpoint) — do NOT add a `deviceId` to the core record this package
+  (the turn entry `TurnService.dispatch` already wraps a thrown guard as the terminal `ErrorEvent`). [P2-4]
