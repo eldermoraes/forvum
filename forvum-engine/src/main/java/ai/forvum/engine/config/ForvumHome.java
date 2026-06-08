@@ -102,4 +102,13 @@ public class ForvumHome {
     public Path mcpServers() {
         return root.resolve("mcp-servers");
     }
+
+    /**
+     * {@code $FORVUM_HOME/plugins} — drop-in plugin JARs ({@code forvum plugin install}, P2-6). Loaded by
+     * the JVM fast-jar via {@code ServiceLoader} only; the native binary fixes its plugins at build time
+     * (§6.2/§6.3), so a JAR added here after a native build is ignored until a rebuild.
+     */
+    public Path plugins() {
+        return root.resolve("plugins");
+    }
 }
