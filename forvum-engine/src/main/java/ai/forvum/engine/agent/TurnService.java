@@ -2,12 +2,14 @@ package ai.forvum.engine.agent;
 
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.ModelRef;
+import ai.forvum.core.PermissionScope;
 import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.Done;
 import ai.forvum.core.event.ErrorEvent;
 import ai.forvum.core.event.TokenDelta;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
+import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.sdk.ChannelTurnDriver;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -15,6 +17,7 @@ import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
 
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -55,6 +58,9 @@ public class TurnService implements ChannelTurnDriver {
     @Inject
     IdentityResolver identities;
 
+    @Inject
+    RoleRegistry roles;
+
     /**
      * Drive a turn for an inbound {@link ChannelMessage}, rendering it to {@code sink}. The session is
      * keyed {@code channelId:nativeUserId} (one conversation per user per channel) and carries the
@@ -82,8 +88,14 @@ public class TurnService implements ChannelTurnDriver {
             registry.getOrCreate(agentId);
             sessions.ensureSession(sessionId, agentId, identityId, message.channelId());
 
+            // P2-11 RBAC: resolve the caller's effective scopes (union of its roles' scope-sets, or the
+            // permissive default role for an identity that declares none) and bind them for the turn so
+            // ToolExecutor can gate each tool's required scope. Mirrors the CURRENT_AGENT/CURRENT_TURN binds.
+            Set<PermissionScope> effectiveScopes = roles.effectiveScopes(identities.rolesFor(identityId));
+
             String reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId)
                     .where(CurrentAgent.CURRENT_TURN, turnId)
+                    .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, effectiveScopes)
                     .call(() -> agent.respond(sessionId, message.content()));
 
             ModelRef model = registry.persona(agentId).primaryModel();

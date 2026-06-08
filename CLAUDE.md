@@ -773,3 +773,30 @@ Generalizable lessons from completed milestones; append here as milestones land.
   the app classpath); letting the binary own schema creation sidesteps it. These `@QuarkusMainIntegrationTest` ITs
   run native-only (`skipITs=true` in JVM); the `forvum.home` propagation they rely on is the proven native-leg
   mechanism (`DoctorNativeIT`/`OllamaNativeTurnIT`), so the same test errors under a JVM `-DskipITs=false` run. [P2-8]
+- **A second authorization gate belongs at the same `ScopedValue` seam as `CURRENT_AGENT`, enforced "only
+  when bound" — NOT fail-closed-when-unbound.** P2-11 RBAC gates a tool by the caller's effective scopes in
+  addition to belt membership. `ToolExecutor` is `@ApplicationScoped` (can't `@Inject` per-turn state), so it
+  reads a new `CurrentIdentity.CURRENT_EFFECTIVE_SCOPES` `ScopedValue` bound at the turn entry — mirroring how
+  `Agent` already reads `CURRENT_AGENT`, proven to survive the whole `respond → SupervisorGraph → ToolCallBridge
+  → ToolExecutor` chain on one virtual thread. ALL production turn entries that reach a tool call are exactly
+  two — `TurnService.dispatch` (channels + `forvum ask`) and `CronScheduler.fire` — and both bind it; sub-agent
+  workers (`DefaultWorkerRunner`) do a single direct generation with NO tool loop (M18), so they never reach the
+  executor. So "enforce iff bound, else belt-only" keeps the gate always-active in production while leaving the
+  many lower-level belt-focused unit tests (`ToolExecutorTest`, `ToolCallBridgeTest`, `SupervisorGraphTest`)
+  untouched. Fail-closed-when-unbound was the initial plan but is strictly worse: it forces RBAC bindings into
+  those unrelated tests for zero production benefit (it can't make production more secure — production always
+  binds). Enumerate every `agent.respond(` / turn entry before choosing the unbound semantics. [P2-11]
+- **"Extend `PermissionScope` to role-based sets" means cable role-sets ABOVE the enum, not add enum
+  constants.** ULTRAPLAN §4.3.4 mandates the role → scope-set mapping live above `PermissionScope`, which stays a
+  flat capability list. So P2-11 added ZERO `PermissionScope` constants: a Layer-0 `RoleSpec(name,
+  Set<PermissionScope>)` record + an additive `Identity.roles` (4-arg canonical ctor + a 3-arg delegating ctor
+  so existing `new Identity(a,b,c)` callers/tests compile and a `roles`-less JSON defaults to empty = backward
+  compatible, no migration), an engine `RoleRegistry` with code-level built-ins overridable by
+  `roles/<name>.json` (mirror `AgentRegistry`: `ConcurrentMap` + `putIfAbsent`, IO off the lock, `@Observes
+  ConfigurationChangedEvent` evict; built-in `default-user` = `EnumSet.allOf` so it grows with the enum, `cron`
+  = read-only). The new config subfolder is wired by adding `ForvumHome.roles()` + `"roles"` to
+  `ConfigWatcher.WATCHED_SUBFOLDERS` + a `RoleReader extends JsonDirectoryReader`; the new core record is
+  reflection-registered in the engine `CoreReflectionRegistration` holder (§6.3), NOT `@RegisterForReflection`
+  in core. Parity with a simpler upstream (OpenClaw is binary owner/non-owner + tool-name lists, no abstract
+  scopes) is semantic — reproduce its behavior (permissive default, restricted cron) in the local vocabulary,
+  don't copy its types. [P2-11]

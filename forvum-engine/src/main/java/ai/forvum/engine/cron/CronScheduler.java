@@ -1,11 +1,14 @@
 package ai.forvum.engine.cron;
 
+import ai.forvum.core.PermissionScope;
 import ai.forvum.engine.agent.Agent;
 import ai.forvum.engine.agent.AgentRegistry;
+import ai.forvum.engine.agent.RoleRegistry;
 import ai.forvum.engine.config.ChangeType;
 import ai.forvum.engine.config.ConfigurationChangedEvent;
 import ai.forvum.engine.config.CronReader;
 import ai.forvum.engine.context.CurrentAgent;
+import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.routing.LlmSelector;
 import ai.forvum.engine.runtime.CommandMode;
 
@@ -23,6 +26,7 @@ import org.jboss.logging.Logger;
 
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Registers background agent turns from {@code $FORVUM_HOME/crons/*.json} programmatically (ULTRAPLAN
@@ -52,6 +56,9 @@ public class CronScheduler {
 
     @Inject
     LlmSelector llmSelector;
+
+    @Inject
+    RoleRegistry roleRegistry;
 
     @Inject
     CommandMode commandMode;
@@ -117,13 +124,19 @@ public class CronScheduler {
         LOG.infof("Scheduled cron '%s' (%s) for agent '%s'.", spec.id(), spec.cron(), spec.agentId().value());
     }
 
-    /** Run one cron turn. Bound to the cron's agent + its own model; failures are logged, never fatal. */
+    /**
+     * Run one cron turn. Bound to the cron's agent + its own model, and to the distinguished restricted
+     * {@code cron} role's effective scopes (P2-11) so a scheduled job is denied a tool outside that role's
+     * scope-set. Failures are logged, never fatal.
+     */
     void fire(CronSpec spec) {
         String sessionId = "cron:" + spec.id();
         try {
             Agent agent = registry.getOrCreate(spec.agentId());
             ChatModel model = llmSelector.resolve(spec.primaryModel(), spec.agentId().value(), sessionId);
+            Set<PermissionScope> cronScopes = roleRegistry.scopesFor(RoleRegistry.CRON);
             ScopedValue.where(CurrentAgent.CURRENT_AGENT, spec.agentId())
+                    .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, cronScopes)
                     .run(() -> agent.respond(sessionId, spec.prompt(), model));
         } catch (RuntimeException e) {
             LOG.errorf(e, "Cron '%s' turn failed for agent '%s'", spec.id(), spec.agentId().value());
