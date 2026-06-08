@@ -21,6 +21,8 @@ class CommandModeTest {
         assertTrue(CommandMode.isOneShotCommand(new String[] {"init"}));
         assertTrue(CommandMode.isOneShotCommand(new String[] {"doctor"}),
                 "'doctor' validates files and exits without a turn — it must skip the DB/watcher/cron boot");
+        assertTrue(CommandMode.isOneShotCommand(new String[] {"plugin", "install", "g:a:1.0.0"}),
+                "'plugin' only resolves+writes a JAR — it must skip the DB/watcher/cron boot (P2-6)");
     }
 
     @Test

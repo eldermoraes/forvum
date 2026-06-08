@@ -870,6 +870,98 @@ Generalizable lessons from completed milestones; append here as milestones land.
   distinguished built-in id (`cron`/`server`) short-circuits exempt. Enforcement keys off `ChannelMessage`'s
   existing fields (`channelId` = the device endpoint) — do NOT add a `deviceId` to the core record this package
   (the turn entry `TurnService.dispatch` already wraps a thrown guard as the terminal `ErrorEvent`). [P2-4]
+- **A reference Layer-3 plugin against a third-party backend is just the Telegram blocking-REST recipe
+  reused.** P2-5's `forvum-provider-memory-qdrant` copied `forvum-channel-telegram` wholesale: same pom
+  (`forvum-sdk` + `quarkus-rest-client-jackson` + `quarkus-arc` + `quarkus-junit`, no `build` goal,
+  copied enforcer allowlist), same `@RegisterRestClient(configKey=...)` + per-invocation `@Url` (the
+  backend URL is operator config, not a compile constant), same `META-INF/{beans.xml, forvum/plugin.json,
+  microprofile-config.properties}` (rest-client defaults MUST ship in microprofile-config, ordinal 100,
+  not application.properties — a dependency's application.properties is inert in the assembled binary),
+  same on-demand file config reader mirroring `ForvumHome.resolve` (so it stays engine-independent and is
+  INERT/no-op with no `~/.forvum/`). The provider type in `plugin.json` is `"memory"`. Keep retrieval
+  logic PURE and Quarkus-free (`QdrantRetrieval` = request-build + response-map static fns) so most tests
+  are plain unit tests with a hand-written `FakeQdrantApi` double; one `@QuarkusTest *IT` proves CDI +
+  `@RestClient` wiring (pin `forvum.home` in test `application.properties` so the inert-no-config assertion
+  is hermetic regardless of the dev's real `~/.forvum/`). Adding a second rest-client to `forvum-app` does
+  NOT reintroduce the Gemini/Ollama multi-factory conflict (that was the langchain4j HTTP client, fixed by
+  `HttpClientFactorySelector`; plain JAX-RS rest-clients coexist). [P2-5]
+- **A normalized-score `[0,1]` contract must reject NaN explicitly.** `MemoryPolicy.minScore`/`MemoryHit.score`
+  validate `in [0,1]`, but `Double.isNaN(x)` makes both `x<0` and `x>1` false, so NaN slips a naive
+  range check — the property test caught it. Guard with `Double.isNaN(x) || x<0 || x>1`. When mapping an
+  external score (Qdrant cosine ∈ [-1,1]) into the contract, clamp (and NaN→0), don't assume the backend
+  pre-normalizes. [P2-5]
+- **The SPI method a plugin implements lands in the consumer's PR, but a reference plugin IS its own
+  consumer.** Unlike M7's `resolve` (added on the SDK in M7 because `LlmSelector` consumed it there),
+  P2-5 added `MemoryProvider.retrieve` AND its first implementor in the same PR — the engine does not yet
+  call it (host wiring of retrieval into the turn is a later item), so the method + the reference impl
+  ship together and the SDK enricher JavaDoc documents the host contract the engine will honor. [P2-5]
+- **Bundle Maven Resolver via `maven-resolver-supplier` (the no-DI bootstrap), not the Guice/Sisu path.**
+  P2-6 (`forvum plugin install <coords>`) resolves a coordinate against `~/.m2` + Central. The 1.9.x
+  `org.apache.maven.resolver:maven-resolver-supplier` hand-wires a `RepositorySystem`
+  (`RepositorySystemSupplier().get()` + `MavenRepositorySystemUtils.newSession()` from the transitive
+  `maven-resolver-provider`; 1.9.x uses `DefaultRepositorySystemSession` + `LocalRepository` +
+  `system.newLocalRepositoryManager`, NOT 2.x's `SessionBuilderSupplier`/`getPath()` — `ArtifactResult.
+  getArtifact().getFile()` in 1.9.x), so it pulls NO Guice/CGLib (only httpclient + maven-model + plexus-utils)
+  — clean for the import-grep ban. NATIVE containment: these classes ride the `forvum-app` native classpath
+  but RUN only in the fast-jar drop-in path; keep them inert by (a) `@ApplicationScoped` resolver (lazy — never
+  instantiated unless `install()` runs), (b) referencing aether types only inside method bodies, never as a
+  field/`@Startup` work, (c) registering NOTHING for reflection (the supplier needs no ServiceLoader/reflection).
+  The drop-in dir is JVM-fast-jar-ONLY BY DESIGN (§6.2/§6.3), so the command warns + still stages the JAR when
+  `ImageMode.current() == NATIVE_RUN` (the running-native constant; `NATIVE` does not exist on `ImageMode`).
+  Test the resolve+stream path HERMETICALLY against a `file://` remote seeded with a tiny jar+pom in a
+  `@TempDir` (no network/`~/.m2` flake); make `plugin` a `CommandMode` one-shot (it only resolves+writes). [P2-6]
+- **`maven-resolver-supplier` pulls a SPLIT-version transitive graph — pin the whole set in the BOM.**
+  Depending only on `maven-resolver-supplier:1.9.27` resolves `named-locks`/`transport-file`/`transport-http`
+  at 1.9.27 but `api`/`spi`/`impl`/`util`/`connector-basic` at 1.9.25 (a mismatched packaged app). Add explicit
+  `dependencyManagement` for the api/spi/impl/util/connector-basic set at `${maven-resolver.version}` so supplier
+  runs against a matching impl; verify the exact patch exists on repo1.maven.org first (solrsearch is stale). [P2-6]
+- **Resolve-from-the-fast-jar throws a loader-constraint `LinkageError` until the resolver artifacts are
+  parent-first.** Maven Resolver spreads its `org.eclipse.aether.*` packages across several JARs; under the
+  Quarkus runtime classloader they split across loaders, so `RepositorySystemSupplier.get()` fails wiring
+  `Maven2RepositoryLayoutFactory` against `ChecksumAlgorithmFactorySelector` (different `Class` objects).
+  Fix with `quarkus.class-loading.parent-first-artifacts=<the whole resolver set + org.apache.maven:maven-resolver-provider>`
+  so one loader owns every aether class — a classloading directive only (no eager init; stays native-inert). The
+  plain-JVM engine unit test (single classloader) CANNOT catch this; only an in-JVM `@QuarkusMainTest` success
+  path that actually reaches `RepositorySystemSupplier.get()` does — so the resolve+stream CLI MUST be tested
+  end-to-end through the Quarkus runtime, not just at the engine unit level. [P2-6]
+- **A persistent-WebSocket channel (Discord gateway) rides `quarkus-websockets-next` CLIENT mode, not a
+  reactive SDK.** JDA/Discord4J are native-broken/reactive and pull a transport stack that violates the SDK
+  boundary; a hand-rolled minimal Gateway v10 client over `@WebSocketClient` (the CLIENT-mode dual of the web
+  channel's `@WebSocket`) native-compiles + boots (the readiness spike proved the websockets-next-client +
+  rest-client combo). CLIENT-mode API (from the Dev MCP, NOT memory): `@WebSocketClient(path="/")` endpoint
+  with `@OnOpen(WebSocketClientConnection)` / `@OnTextMessage @RunOnVirtualThread void onText(conn, frame)` /
+  `@OnClose`; inject `Instance<WebSocketConnector<Endpoint>>` and `connectors.get().baseUri(URI)
+  .userData(UserData.TypedKey.forString(k), v).connectAndAwait()` to open (connectors are single-use +
+  not-thread-safe → `Instance.get()` per connect); pass per-connection secrets via `userData()` read back in
+  the endpoint, never a field. Keep the protocol layer SOCKET-FREE (a pure `GatewayProtocol.decide(payload,
+  state)→sealed Reaction` + frame parse/encode + an atomic `GatewayState`) so HELLO→IDENTIFY, the
+  heartbeat-carries-last-seq, and MESSAGE_CREATE flows are unit-testable with no live `wss://`. CONCURRENCY:
+  the op-1 heartbeat loop is a dedicated `Thread.ofVirtual()` driven by `heartbeat_interval`; shared
+  seq/session live in `AtomicLong`/`AtomicReference` (NO `synchronized`, §3.8); a `ReentrantLock` guards ONLY
+  the heartbeat-thread reference swap (interrupt the old thread OUTSIDE the lock — no blocking IO under any
+  lock → no carrier pinning). Token never logged: it rides the IDENTIFY frame + the REST `Authorization: Bot
+  <token>` header (a `@HeaderParam`, not a `@Url` path like Telegram), and `redact()` masks any `Bot <token>`
+  echo. Mirror Telegram for the rest (config reader, allowedUserIds, byte-identical `render()`, the
+  no-token→warn+no-op boot, the `ChannelLauncher` token-gated `serves()`). Native-gate caveat: heartbeat-loop
+  concurrency + reconnect/TLS edges only surface at runtime → keep plain JSON (no zlib-stream), gate any live
+  end-to-end behind `*-LiveTest @Tag("live")`. NATIVE-FRAME TRAP: the *outbound* envelope record (`{op,d}`
+  wrapping every IDENTIFY/HEARTBEAT via `writeValueAsString`) ALSO needs `@RegisterForReflection` — without it
+  the native binary emits an empty/malformed frame and the handshake silently fails, and the no-token native
+  smoke can NOT catch it (no token → never serialized). Pin it with a non-live encode test asserting the JSON
+  carries `op`/`d` with the right opcodes (2 IDENTIFY, 1 HEARTBEAT). RECONNECT (must, not optional): a gateway
+  connection is NOT permanent — Discord routinely sends op-7 RECONNECT, so a connect-once design dies on the
+  first routine event. Self-heal from `@OnClose(conn)` (read `conn.closeReason().getCode()`): if still
+  `running` (no ShutdownEvent) and the code is not a fatal 4xxx (`{4004,4010..4014}`), re-open on a VT with
+  exponential backoff (a pure clock-free `Backoff` atomic: 1s→2s→…cap 60s, `reset()` on READY); a deliberate
+  shutdown (`running=false`) never reconnects; a fatal code stops with a WARN (no infinite loop). v0.1 policy =
+  fresh IDENTIFY per reconnect (full op-6 RESUME with `resume_gateway_url`/`session_id`/last-seq is a deferred
+  follow-up; the captured resume context is unused). A failed heartbeat send must CLOSE the connection so the
+  same `@OnClose`→reconnect path fires (else the log claim "the gateway will reconnect" lies). The
+  endpoint(`@Singleton`)→channel(`@ApplicationScoped`) callback is plain `@Inject`; a test subclass of the
+  channel that overrides `connect()` to record must be `@Vetoed` or the module's `@QuarkusTest` sees two
+  `DiscordChannel` beans (AmbiguousResolution). Make the policy unit-testable via a `Sleeper` seam +
+  same-thread executor: assert growing backoff on transient close, no reconnect on shutdown, stop on fatal,
+  backoff reset on READY. [P2-CH/discord]
 - **"Decode the final message against a JSON Schema" stays native-clean as schema-STRING → `JsonNode`, NOT a
   typed POJO.** P2-12's locked decision rejects LangChain4j `@Description`/`@StructuredPrompt` decoding: a
   per-agent output class would force runtime reflection / classpath class loading and break the native binary.
