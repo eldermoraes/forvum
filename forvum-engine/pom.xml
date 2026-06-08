@@ -92,6 +92,16 @@
             <artifactId>langgraph4j-core</artifactId>
         </dependency>
 
+        <!-- P2-6 Maven plugin marketplace: Apache Maven Resolver resolves `forvum plugin install <coords>`
+             against Maven Central + the user's ~/.m2 local cache, streaming the JAR into ~/.forvum/plugins/.
+             Fast-jar-only by design (§6.2/§6.3): MavenPluginResolver references these classes lazily (only
+             when install() runs) and they are never registered for reflection nor eagerly initialized, so
+             they ride the native classpath inertly. Version managed by forvum-bom. -->
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-supplier</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>

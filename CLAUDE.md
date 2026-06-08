@@ -895,3 +895,32 @@ Generalizable lessons from completed milestones; append here as milestones land.
   P2-5 added `MemoryProvider.retrieve` AND its first implementor in the same PR — the engine does not yet
   call it (host wiring of retrieval into the turn is a later item), so the method + the reference impl
   ship together and the SDK enricher JavaDoc documents the host contract the engine will honor. [P2-5]
+- **Bundle Maven Resolver via `maven-resolver-supplier` (the no-DI bootstrap), not the Guice/Sisu path.**
+  P2-6 (`forvum plugin install <coords>`) resolves a coordinate against `~/.m2` + Central. The 1.9.x
+  `org.apache.maven.resolver:maven-resolver-supplier` hand-wires a `RepositorySystem`
+  (`RepositorySystemSupplier().get()` + `MavenRepositorySystemUtils.newSession()` from the transitive
+  `maven-resolver-provider`; 1.9.x uses `DefaultRepositorySystemSession` + `LocalRepository` +
+  `system.newLocalRepositoryManager`, NOT 2.x's `SessionBuilderSupplier`/`getPath()` — `ArtifactResult.
+  getArtifact().getFile()` in 1.9.x), so it pulls NO Guice/CGLib (only httpclient + maven-model + plexus-utils)
+  — clean for the import-grep ban. NATIVE containment: these classes ride the `forvum-app` native classpath
+  but RUN only in the fast-jar drop-in path; keep them inert by (a) `@ApplicationScoped` resolver (lazy — never
+  instantiated unless `install()` runs), (b) referencing aether types only inside method bodies, never as a
+  field/`@Startup` work, (c) registering NOTHING for reflection (the supplier needs no ServiceLoader/reflection).
+  The drop-in dir is JVM-fast-jar-ONLY BY DESIGN (§6.2/§6.3), so the command warns + still stages the JAR when
+  `ImageMode.current() == NATIVE_RUN` (the running-native constant; `NATIVE` does not exist on `ImageMode`).
+  Test the resolve+stream path HERMETICALLY against a `file://` remote seeded with a tiny jar+pom in a
+  `@TempDir` (no network/`~/.m2` flake); make `plugin` a `CommandMode` one-shot (it only resolves+writes). [P2-6]
+- **`maven-resolver-supplier` pulls a SPLIT-version transitive graph — pin the whole set in the BOM.**
+  Depending only on `maven-resolver-supplier:1.9.27` resolves `named-locks`/`transport-file`/`transport-http`
+  at 1.9.27 but `api`/`spi`/`impl`/`util`/`connector-basic` at 1.9.25 (a mismatched packaged app). Add explicit
+  `dependencyManagement` for the api/spi/impl/util/connector-basic set at `${maven-resolver.version}` so supplier
+  runs against a matching impl; verify the exact patch exists on repo1.maven.org first (solrsearch is stale). [P2-6]
+- **Resolve-from-the-fast-jar throws a loader-constraint `LinkageError` until the resolver artifacts are
+  parent-first.** Maven Resolver spreads its `org.eclipse.aether.*` packages across several JARs; under the
+  Quarkus runtime classloader they split across loaders, so `RepositorySystemSupplier.get()` fails wiring
+  `Maven2RepositoryLayoutFactory` against `ChecksumAlgorithmFactorySelector` (different `Class` objects).
+  Fix with `quarkus.class-loading.parent-first-artifacts=<the whole resolver set + org.apache.maven:maven-resolver-provider>`
+  so one loader owns every aether class — a classloading directive only (no eager init; stays native-inert). The
+  plain-JVM engine unit test (single classloader) CANNOT catch this; only an in-JVM `@QuarkusMainTest` success
+  path that actually reaches `RepositorySystemSupplier.get()` does — so the resolve+stream CLI MUST be tested
+  end-to-end through the Quarkus runtime, not just at the engine unit level. [P2-6]
