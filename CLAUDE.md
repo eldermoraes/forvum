@@ -800,3 +800,24 @@ Generalizable lessons from completed milestones; append here as milestones land.
   in core. Parity with a simpler upstream (OpenClaw is binary owner/non-owner + tool-name lists, no abstract
   scopes) is semantic — reproduce its behavior (permissive default, restricted cron) in the local vocabulary,
   don't copy its types. [P2-11]
+- **A server-only dashboard endpoint must not touch the command-mode cold-start path.** The `/q/dashboard/capr`
+  CAPR endpoint (X6 scenario 10) is a `quarkus-reactive-routes` `@Route` (`CaprDashboardRoute`, `type =
+  BLOCKING` for the Panache read) over the Web channel's already-present `vertx-http` — chosen over
+  `quarkus-rest` so it does not perturb `HttpClientFactorySelector` (the `langchain4j.http.clientBuilderFactory`
+  pin) or the REST-client stack. A `@Route` handler binds only when a server channel is up; one-shot/command
+  mode leaves `vertx-http` unbound (`quarkus.http.host-enabled=false` from `ForvumApplication.main`), so the
+  route never serves there. The discipline: give the endpoint NO `@Startup`/`StartupEvent` observer and do its
+  DB/HTTP work only inside the handler — then it cannot regress the < 200 ms command-mode boot-smoke nor the
+  `ask`/`doctor` one-shot path (the gate measures those). Add the extension via the platform BOM, never pinned;
+  the DTO it serializes is a record carrying the real Quarkus `@RegisterForReflection` (Layer 4 is
+  Quarkus-bearing, so the SDK re-export is unnecessary here). [X6]
+- **Author span-less e2e scenarios against existing machinery + observable DB side-effects.** OTel spans do not
+  exist in v0.1, so an e2e asserts the ledger rows the turn wrote, not a span. The five X6 scenarios reuse the
+  in-process `FakeModelProvider` (no live inference, per the perf-gate convention) and the production seams:
+  spawn → `AgentRegistry.spawn` + a per-child `capr_events` row; cron → seed a `0/1 * * * * ?` `tick.json` and
+  poll for the `cron:<id>` ledger rows (the real `Scheduler` fires in a `@QuarkusTest` because `CommandMode`
+  sees no one-shot arg); hot-reload → fire the same `ConfigurationChangedEvent` the `WatchService` would (the
+  macOS poll latency makes a real watcher non-deterministic) and assert the next turn re-reads the edited spec;
+  Telegram allow/deny → drive the real `UpdateProcessor` over an in-test recording `TelegramBotApi` impl. A
+  package-private production constant (`UpdateProcessor.REFUSAL_MESSAGE`) is asserted by its observable content,
+  not widened to `public` for a test. [X6]

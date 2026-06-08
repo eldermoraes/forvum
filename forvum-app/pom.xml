@@ -112,6 +112,16 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-picocli</artifactId>
         </dependency>
+        <!-- X6 scenario 10 / X7 (M18-owned): the GET /q/dashboard/capr CAPR dashboard endpoint uses a
+             @Route handler (CaprDashboardRoute). reactive-routes adds @Route over the already-present
+             vertx-http server (brought by the Web channel's WebSockets Next) — preferred over quarkus-rest
+             so it does not perturb HttpClientFactorySelector or the REST-client stack. Version via the
+             platform BOM (never pinned). The route is server-path only (vertx-http binds only when a
+             server channel is up), so it adds no command-mode cold-start cost. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-reactive-routes</artifactId>
+        </dependency>
         <!-- HttpClientFactorySelector references JaxRsHttpClientBuilderFactory.class to pin the LangChain4j
              HTTP client app-wide (it is otherwise only a transitive of the ai-gemini extension). Declared
              directly so a class-name drift on a BOM bump is a compile error, not a runtime surprise.
