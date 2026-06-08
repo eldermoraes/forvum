@@ -870,3 +870,28 @@ Generalizable lessons from completed milestones; append here as milestones land.
   distinguished built-in id (`cron`/`server`) short-circuits exempt. Enforcement keys off `ChannelMessage`'s
   existing fields (`channelId` = the device endpoint) — do NOT add a `deviceId` to the core record this package
   (the turn entry `TurnService.dispatch` already wraps a thrown guard as the terminal `ErrorEvent`). [P2-4]
+- **A reference Layer-3 plugin against a third-party backend is just the Telegram blocking-REST recipe
+  reused.** P2-5's `forvum-provider-memory-qdrant` copied `forvum-channel-telegram` wholesale: same pom
+  (`forvum-sdk` + `quarkus-rest-client-jackson` + `quarkus-arc` + `quarkus-junit`, no `build` goal,
+  copied enforcer allowlist), same `@RegisterRestClient(configKey=...)` + per-invocation `@Url` (the
+  backend URL is operator config, not a compile constant), same `META-INF/{beans.xml, forvum/plugin.json,
+  microprofile-config.properties}` (rest-client defaults MUST ship in microprofile-config, ordinal 100,
+  not application.properties — a dependency's application.properties is inert in the assembled binary),
+  same on-demand file config reader mirroring `ForvumHome.resolve` (so it stays engine-independent and is
+  INERT/no-op with no `~/.forvum/`). The provider type in `plugin.json` is `"memory"`. Keep retrieval
+  logic PURE and Quarkus-free (`QdrantRetrieval` = request-build + response-map static fns) so most tests
+  are plain unit tests with a hand-written `FakeQdrantApi` double; one `@QuarkusTest *IT` proves CDI +
+  `@RestClient` wiring (pin `forvum.home` in test `application.properties` so the inert-no-config assertion
+  is hermetic regardless of the dev's real `~/.forvum/`). Adding a second rest-client to `forvum-app` does
+  NOT reintroduce the Gemini/Ollama multi-factory conflict (that was the langchain4j HTTP client, fixed by
+  `HttpClientFactorySelector`; plain JAX-RS rest-clients coexist). [P2-5]
+- **A normalized-score `[0,1]` contract must reject NaN explicitly.** `MemoryPolicy.minScore`/`MemoryHit.score`
+  validate `in [0,1]`, but `Double.isNaN(x)` makes both `x<0` and `x>1` false, so NaN slips a naive
+  range check — the property test caught it. Guard with `Double.isNaN(x) || x<0 || x>1`. When mapping an
+  external score (Qdrant cosine ∈ [-1,1]) into the contract, clamp (and NaN→0), don't assume the backend
+  pre-normalizes. [P2-5]
+- **The SPI method a plugin implements lands in the consumer's PR, but a reference plugin IS its own
+  consumer.** Unlike M7's `resolve` (added on the SDK in M7 because `LlmSelector` consumed it there),
+  P2-5 added `MemoryProvider.retrieve` AND its first implementor in the same PR — the engine does not yet
+  call it (host wiring of retrieval into the turn is a later item), so the method + the reference impl
+  ship together and the SDK enricher JavaDoc documents the host contract the engine will honor. [P2-5]

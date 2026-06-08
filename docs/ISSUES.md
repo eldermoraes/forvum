@@ -853,6 +853,23 @@ the SPI; parity verified. **[NATIVE]** reference impl native-clean. **[PLUGIN]**
 module via the MCP. **Dependencies.** M3, semantic_memory (M5). DR-5 (`MemoryPolicy`) informs the SPI.
 **Commit.** `feat(sdk): document MemoryProvider host SPI with reference implementation`
 
+**Status (landed).** DR-5 settled the contract and this PR implements it. (1) `forvum-core` gains the
+five DR-5 types — `MemoryPolicy(strategy, tiers, topK, minScore, compressThresholdChars)` +
+`MemoryPolicy.defaults()`, enums `RetrievalStrategy`/`MemoryTier`, records `MemoryQuery`/`MemoryHit`
+(canonical-constructor validation: minScore∈[0,1], topK>0, empty tiers legal only with `NONE`;
+registered for native via `CoreReflectionRegistration`). (2) The SPI method
+`List<MemoryHit> retrieve(MemoryQuery, MemoryPolicy)` lands on the sealed `MemoryProvider` (blocking on a
+VT, Quarkus-free), with the interface JavaDoc enriched into a real HOST-SPI contract (discovery via
+`@ForvumExtension` + `plugin.json` provider type `memory`; the retrieve/tiers/topK/minScore contract;
+native-clean + blocking expectations). (3) Reference impl `forvum-provider-memory-qdrant` (Layer-3, only
+`forvum-sdk` + `quarkus-rest-client-jackson` + `quarkus-arc`) maps `MemoryQuery`+`MemoryPolicy` → a Qdrant
+`points/search` (vector) or `points/scroll` (embedding-free METADATA) REST call → `List<MemoryHit>`,
+honoring topK/minScore/tiers. The query embedding is a **documented deterministic reference**
+(`ReferenceEmbedding`, a hashing bag-of-words vector — reference-only, operators supply a real model); no
+heavy embedding dependency. Bundled into `forvum-app` so it native-COMPILES but **INERT** unless an
+operator configures `memory/qdrant.json` and a policy selects it. Live Qdrant tests are `*-LiveTest`
+`@Tag("live")` (nightly, not yet authored).
+
 ## P2-6 — Maven plugin marketplace
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`
 **Context.** `forvum plugin install <coords>`. **Scope.** Resolve a Maven coordinate, write to
