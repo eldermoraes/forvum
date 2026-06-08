@@ -17,6 +17,14 @@ import ai.forvum.core.id.AgentId;
  * {@code primaryModel} is carried today.
  *
  * <p>{@code allowedTools} is defensively copied to an immutable list by the canonical constructor.
+ *
+ * <p>{@code outputSchema} (P2-12) is an optional JSON Schema, carried as a raw {@code String}, that
+ * constrains the turn's final assistant message: when present the engine parses the reply as JSON and
+ * validates it against this schema (a failure aborts the turn with a named error). {@code null} keeps the
+ * current free-text behavior, so the field is backward-compatible. It is a {@code String} (not a typed
+ * POJO) on purpose: a per-agent output class would force runtime reflection / classpath class loading,
+ * breaking the native binary — the schema stays config-driven (CLAUDE.md section 5). A blank-but-present
+ * schema is a config error and is rejected.
  */
 public record Persona(
     AgentId id,
@@ -25,7 +33,8 @@ public record Persona(
     ModelRef primaryModel,
     AgentId parent,
     CostBudget costBudget,
-    Long toolBudget
+    Long toolBudget,
+    String outputSchema
 ) {
     public Persona {
         if (id == null) {
@@ -59,6 +68,11 @@ public record Persona(
             throw new IllegalStateException(
                 "Persona toolBudget must be non-negative. Got: " + toolBudget
               + ". A negative per-agent tool-loop cap is nonsensical — check agents/<id>.json.");
+        }
+        if (outputSchema != null && outputSchema.isBlank()) {
+            throw new IllegalStateException(
+                "Persona outputSchema, when present, must be non-blank. Use null for free-text output, "
+              + "or supply a JSON Schema in the 'outputSchema' field of agents/<id>.json.");
         }
     }
 }

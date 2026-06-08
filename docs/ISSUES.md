@@ -972,12 +972,24 @@ reflection-registered) + boot smoke with no `~/.forvum/` (built-in `cron` enforc
 
 ## P2-12 — Per-agent structured output schemas
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`
-**Context.** Agents declare an output JSON Schema. **Scope.** `AgentGraph` decodes the final message
-against the schema via LangChain4j structured output. **Files.** engine agent/graph. **Acceptance.** An
+**Context.** Agents declare an output JSON Schema. **Scope.** `SupervisorGraph` decodes the final message
+against the schema. **Files.** engine agent/graph. **Acceptance.** An
 agent with a declared schema returns a decoded, schema-valid object; invalid output surfaces an error;
 parity verified. **[NATIVE]** native parity. **[PLUGIN]** `context7` for langchain4j structured output
 (`@Description`/`@StructuredPrompt`, §3.3). **Dependencies.** M7, M18.
 **Commit.** `feat(engine): add per-agent structured output schema decoding`
+**Built (P2-12).** `Persona` carries an optional `outputSchema` (a JSON-Schema STRING; null = free-text;
+canonical-constructor rejects a present-but-blank value); `AgentSpecReader` parses `outputSchema` from
+`agents/<id>.json` (an embedded object is re-serialized to a compact string; a string is taken verbatim).
+`GraphTurnRequest` carries the schema; `SupervisorGraph.run` validates the final reply against it via a
+pure-Java `OutputSchemaValidator` and re-serializes the validated `JsonNode` as canonical JSON. A failure
+(not-valid-JSON / missing-required / wrong-typed property) throws a `SupervisorGraphException` NAMING the
+schema + the field/cause, which `TurnService` already renders as a terminal `ErrorEvent` — NO retry.
+**Decision (locked):** JSON-Schema → `JsonNode`, NOT a typed POJO (no per-agent class loading / reflection
+— native-clean, config-driven). The validator covers the v0.5-parity subset (root `type`, `required`, and
+each declared property's primitive `type`); full JSON-Schema-draft validation (nested schemas, `enum`,
+`allOf`/`anyOf`, `format`) is a documented fast-follow. A spawned worker child does NOT inherit the
+schema (its output is a digest merged as a tool result, never the validated top-level final answer).
 
 ## P2-13 — MCP server registry enrichments
 **Labels:** `phase-2`, `tool`, `native` · **Milestone:** `v0.5 Parity`

@@ -2,6 +2,7 @@ package ai.forvum.engine.graph;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.InvocationStatus;
@@ -27,6 +28,8 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -240,6 +243,115 @@ class SupervisorGraphTest {
 
         assertEquals("Finished", reply, "the turn completes via MAX_ROUNDS instead of throwing on the recursion limit");
         assertEquals(7, workerRunner.ran.size(), "all seven workers ran");
+    }
+
+    /** A schema requiring a string {@code answer} field; reused by the P2-12 structured-output tests. */
+    private static final String ANSWER_SCHEMA =
+            "{\"type\":\"object\",\"required\":[\"answer\"],"
+          + "\"properties\":{\"answer\":{\"type\":\"string\"}}}";
+
+    @Test
+    void validJsonReplyMatchingTheOutputSchemaIsDecodedAndReturned() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        // A reply that parses as JSON and satisfies the schema (has the required string 'answer').
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("{\"answer\":\"42\"}"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("emit JSON"), UserMessage.from("the answer?"));
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                List.of(), seed, ANSWER_SCHEMA));
+
+        // Surfaced as canonical JSON (re-serialized from the validated node).
+        assertEquals("{\"answer\":\"42\"}", reply);
+    }
+
+    @Test
+    void aReplyThatIsNotValidJsonFailsTheTurnNamingTheSchema() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("sorry, here is prose not JSON"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("emit JSON"), UserMessage.from("the answer?"));
+
+        SupervisorGraphException thrown = assertThrows(SupervisorGraphException.class,
+                () -> graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                        List.of(), seed, ANSWER_SCHEMA)),
+                "a non-JSON reply under an outputSchema must abort the turn (no retry)");
+        assertTrue(thrown.getMessage().contains(ANSWER_SCHEMA),
+                "the error names the declared schema, message was: " + thrown.getMessage());
+        assertTrue(thrown.getMessage().toLowerCase().contains("not valid json"),
+                "the error explains the reply is not valid JSON, message was: " + thrown.getMessage());
+    }
+
+    @Test
+    void aReplyMissingARequiredFieldFailsTheTurnNamingTheField() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        // Valid JSON object, but the schema-required 'answer' field is absent.
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("{\"other\":\"value\"}"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("emit JSON"), UserMessage.from("the answer?"));
+
+        SupervisorGraphException thrown = assertThrows(SupervisorGraphException.class,
+                () -> graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                        List.of(), seed, ANSWER_SCHEMA)),
+                "a missing required field under an outputSchema must abort the turn (no retry)");
+        assertTrue(thrown.getMessage().contains("answer"),
+                "the error names the missing required field, message was: " + thrown.getMessage());
+    }
+
+    @Test
+    void aReplyWithAWrongTypedFieldFailsTheTurnNamingTheField() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        // 'answer' is present but a number, while the schema declares it a string.
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("{\"answer\":42}"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("emit JSON"), UserMessage.from("the answer?"));
+
+        SupervisorGraphException thrown = assertThrows(SupervisorGraphException.class,
+                () -> graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                        List.of(), seed, ANSWER_SCHEMA)));
+        assertTrue(thrown.getMessage().contains("answer"),
+                "the error names the mistyped field, message was: " + thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("string"),
+                "the error names the declared type, message was: " + thrown.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\"just a string\"", "[1,2,3]"})
+    void aBareJsonValueUnderAnObjectSchemaFailsTheTurnNamingTheRootType(String bareReply) {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        // Valid JSON, but a bare scalar/array — not the object the schema's root 'type' declares; this
+        // exercises the root-type check (the other structured tests only ever pass an object value).
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from(bareReply));
+        List<ChatMessage> seed = List.of(SystemMessage.from("emit JSON"), UserMessage.from("the answer?"));
+
+        SupervisorGraphException thrown = assertThrows(SupervisorGraphException.class,
+                () -> graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                        List.of(), seed, ANSWER_SCHEMA)),
+                "a bare JSON value under an object outputSchema must abort the turn (no retry)");
+        assertTrue(thrown.getMessage().contains("(root)"),
+                "the error names the root, message was: " + thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("declares it as object"),
+                "the error names the declared root object type, message was: " + thrown.getMessage());
+    }
+
+    @Test
+    void anAbsentOutputSchemaLeavesTheReplyAsFreeText() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        // The same prose that would FAIL validation passes through untouched when no schema is declared.
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("just some prose"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("hi"));
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed));
+
+        assertEquals("just some prose", reply, "no schema = backward-compatible free text");
     }
 
     @Test
