@@ -829,6 +829,20 @@ scaffold channel module via the MCP. **Dependencies.** M3, M7, MVP stable.
 verified. **[NATIVE]** engine submodule, native parity. **[PLUGIN]** `quarkus/skills` for any extension.
 **Dependencies.** M6, M7, MVP stable. **Extended by** P2-PAIR-SCOPE.
 **Commit.** `feat(engine): add device pairing reusing identity and memory`
+**Built (engine submodule).** Config-file-driven, NO SQL table / NO migration (mirrors roles/agents):
+a device is declared in `$FORVUM_HOME/devices/<id>.json` (`identityId`, optional `token`/`revoked`).
+New `forvum-engine/.../pairing/` package: `Device` record (`@RegisterForReflection`), `DeviceSpecReader`
+(typed bind, like `RoleSpecReader`), `DeviceRegistry` (`@ApplicationScoped`, `ConcurrentMap` + IO-off-lock,
+`@Observes ConfigurationChangedEvent` evict), `DeviceNotPairedException`; raw `config/DeviceReader extends
+JsonDirectoryReader`; `ForvumHome.devices()` + `"devices"` in `ConfigWatcher.WATCHED_SUBFOLDERS`. Enforced at
+the turn entry `TurnService.dispatch` keyed by `channelId` (the device endpoint), BEFORE the responder runs —
+opt-in (no `devices/` ⇒ disabled, backward compatible), `cron`/`server`/`cli` devices exempt (always paired;
+the local operator CLI `forvum ask` must never be locked out by enabling pairing, and `cron` never reaches
+`dispatch` — `CronScheduler.fire` calls `agent.respond` directly — so `cron`/`server` `EXEMPT` is a defensive
+belt). A paired device's `identityId` is RECORDED in its file (read by the #44 CLI surface); the memory
+namespace is shared via the existing `IdentityResolver` `(channelId, nativeUserId)` ⇒ identity mapping, not
+via the `Device` record. CLI (`forvum pair`/`devices`), doctor drift, and scope-upgrade approval deferred to
+P2-PAIR-SCOPE #44.
 
 ## P2-5 — Memory-host SDK
 **Labels:** `phase-2`, `sdk`, `native` · **Milestone:** `v0.5 Parity`
