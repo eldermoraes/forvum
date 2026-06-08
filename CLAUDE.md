@@ -115,11 +115,12 @@ Maven). Prereqs: Java 25, Maven 3.9+ (or `./mvnw`), GraalVM CE 25 / Mandrel 25.0
 dev loop and the JVM drop-in-plugin path only.
 
 ```bash
-# Native single-binary — PRIMARY target
-./mvnw -f forvum-app -Pnative package        # → forvum-app/target/forvum-app-<version>-runner
+# Native single-binary — PRIMARY target. `-pl forvum-app -am` builds the reactor modules it depends
+# on, so it resolves from a fresh clone (a bare `-f forvum-app` needs them already in ~/.m2).
+./mvnw -Pnative -pl forvum-app -am package   # → forvum-app/target/forvum-app-<version>-runner
                                              #   startup <200 ms, RSS <50 MB, no end-user JVM
 # CI / no local GraalVM: container build
-./mvnw -f forvum-app -Pnative package -Dquarkus.native.container-build=true
+./mvnw -Pnative -pl forvum-app -am package -Dquarkus.native.container-build=true
 
 # JVM fast-jar — development + JVM drop-in plugins
 ./mvnw -pl forvum-app -am package            # → forvum-app/target/quarkus-app/quarkus-run.jar
