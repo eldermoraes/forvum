@@ -1,6 +1,7 @@
 package ai.forvum.engine.agent;
 
 import ai.forvum.core.AgentScoped;
+import ai.forvum.core.BlockType;
 import ai.forvum.core.EventType;
 import ai.forvum.core.Role;
 import ai.forvum.engine.context.CurrentAgent;
@@ -112,6 +113,9 @@ public class AgentMemory {
         message.role = role.dbValue();
         message.content = content;
         message.tokens = null;
+        // v0.1 conversational writes are plain turn messages; reasoning/artifact/tool-execution blocks
+        // (the discriminator session compaction strips/retains) are written by the M18 graph path.
+        message.blockType = BlockType.TURN_MESSAGE.dbValue();
         message.createdAt = System.currentTimeMillis();
         message.persist();
         return message;

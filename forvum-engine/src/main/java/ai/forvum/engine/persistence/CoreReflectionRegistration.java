@@ -2,10 +2,14 @@ package ai.forvum.engine.persistence;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import ai.forvum.core.BlockType;
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
 import ai.forvum.core.RoleSpec;
+import ai.forvum.core.TaskRecord;
+import ai.forvum.core.TaskStatus;
+import ai.forvum.core.TaskType;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.event.FallbackTriggered;
 import ai.forvum.core.budget.CostBudget;
@@ -36,6 +40,9 @@ import ai.forvum.core.id.Identity;
         Persona.class,
         ToolSpec.class,
         RoleSpec.class,
+        TaskRecord.class,
+        TaskType.class,
+        TaskStatus.class,
         ModelRef.class,
         CostBudget.class,
         Spend.class,
@@ -43,7 +50,8 @@ import ai.forvum.core.id.Identity;
         DayWindow.class,
         SessionWindow.class,
         ExhaustionCause.class,
-        FallbackTriggered.class
+        FallbackTriggered.class,
+        BlockType.class
 })
 public final class CoreReflectionRegistration {
     private CoreReflectionRegistration() {

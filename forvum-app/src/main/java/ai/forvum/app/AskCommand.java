@@ -3,6 +3,7 @@ package ai.forvum.app;
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.event.Done;
 import ai.forvum.core.event.ErrorEvent;
+import ai.forvum.engine.pairing.DeviceRegistry;
 import ai.forvum.sdk.ChannelTurnDriver;
 
 import jakarta.inject.Inject;
@@ -34,8 +35,12 @@ import java.util.concurrent.Callable;
         description = "Run a single non-interactive turn for the main agent and print the reply.")
 public class AskCommand implements Callable<Integer> {
 
-    /** The channel id presented to the engine for a CLI-driven turn (a non-blank, whitespace-free token). */
-    private static final String CLI_CHANNEL = "cli";
+    /**
+     * The channel id presented to the engine for a CLI-driven turn. It is the engine's distinguished,
+     * always-paired CLI device ({@link DeviceRegistry#CLI}) so enabling device pairing never locks out the
+     * host operator's own terminal — the host CLI is the inherently-trusted primary surface (P2-4).
+     */
+    private static final String CLI_CHANNEL = DeviceRegistry.CLI;
 
     @Inject
     ChannelTurnDriver turns;

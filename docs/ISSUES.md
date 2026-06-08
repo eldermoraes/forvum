@@ -829,6 +829,20 @@ scaffold channel module via the MCP. **Dependencies.** M3, M7, MVP stable.
 verified. **[NATIVE]** engine submodule, native parity. **[PLUGIN]** `quarkus/skills` for any extension.
 **Dependencies.** M6, M7, MVP stable. **Extended by** P2-PAIR-SCOPE.
 **Commit.** `feat(engine): add device pairing reusing identity and memory`
+**Built (engine submodule).** Config-file-driven, NO SQL table / NO migration (mirrors roles/agents):
+a device is declared in `$FORVUM_HOME/devices/<id>.json` (`identityId`, optional `token`/`revoked`).
+New `forvum-engine/.../pairing/` package: `Device` record (`@RegisterForReflection`), `DeviceSpecReader`
+(typed bind, like `RoleSpecReader`), `DeviceRegistry` (`@ApplicationScoped`, `ConcurrentMap` + IO-off-lock,
+`@Observes ConfigurationChangedEvent` evict), `DeviceNotPairedException`; raw `config/DeviceReader extends
+JsonDirectoryReader`; `ForvumHome.devices()` + `"devices"` in `ConfigWatcher.WATCHED_SUBFOLDERS`. Enforced at
+the turn entry `TurnService.dispatch` keyed by `channelId` (the device endpoint), BEFORE the responder runs —
+opt-in (no `devices/` ⇒ disabled, backward compatible), `cron`/`server`/`cli` devices exempt (always paired;
+the local operator CLI `forvum ask` must never be locked out by enabling pairing, and `cron` never reaches
+`dispatch` — `CronScheduler.fire` calls `agent.respond` directly — so `cron`/`server` `EXEMPT` is a defensive
+belt). A paired device's `identityId` is RECORDED in its file (read by the #44 CLI surface); the memory
+namespace is shared via the existing `IdentityResolver` `(channelId, nativeUserId)` ⇒ identity mapping, not
+via the `Device` record. CLI (`forvum pair`/`devices`), doctor drift, and scope-upgrade approval deferred to
+P2-PAIR-SCOPE #44.
 
 ## P2-5 — Memory-host SDK
 **Labels:** `phase-2`, `sdk`, `native` · **Milestone:** `v0.5 Parity`
@@ -1017,6 +1031,20 @@ first, the cached prefix is preserved, orphaned blocks are stripped, and CAPR is
 verified. **[NATIVE]** native parity. **[PLUGIN]** `context7` for langchain4j memory/summarization.
 **Dependencies.** M5, M18 (the `reduce` Compress path). **Commit.** `feat(engine): add prefix-preserving
 session compaction`
+**Built.** New `forvum-engine/.../session/compaction/`: `SessionCompactor` (eager, called from
+`TurnService.dispatch` before the turn so the agent reads a pre-compacted window), the injectable
+`Summarizer` SPI (`DefaultSummarizer` reuses the §1.4 small-and-fast model `ollama:qwen3:1.7b` via
+`LlmSelector.resolve` — NOT a bespoke endpoint — tests bind a deterministic `@Alternative` stub),
+`CompactionPolicy`/`CompactionResult` records. Schema (Flyway **V2** — the brief said V3 but only V1
+existed, so the chain stays contiguous): `sessions.cached_prefix_end_index` (INTEGER, nullable), a
+`messages.block_type` discriminator (new core enum `BlockType`: `turn_message` default |
+`turn_reasoning` | `turn_artifact` | `tool_execution`), and `capr_events.is_archived` (compaction marks,
+never deletes). Algorithm: never reads/mutates `id <= cachedPrefixEndIndex`; retains the most-recent
+turns within `retainTokens`, drops older turn-messages into one summary that RECLAIMS the oldest dropped
+id (native insert, IDENTITY forbids a manual id) so it joins the frozen prefix in id-order and
+`cachedPrefixEndIndex` advances monotonically; strips orphaned `turn_reasoning`/`turn_artifact` + stale
+`tool_execution` older than the oldest retained user message, conservatively retains connected
+`tool_execution`; archives (never deletes) `capr_events` for dropped assistant turns.
 
 ## P2-TASKLEDGER — Detached task runtime registration (§7.2 item 21)
 **Labels:** `phase-2`, `engine`, `sdk`, `native` · **Milestone:** `v0.5 Parity`
@@ -1027,6 +1055,14 @@ for `tasks`. **Acceptance.** Cron/sub-agent/background runs all register in the 
 queryable; parity verified. **[NATIVE]** native parity. **[PLUGIN]** `quarkus/skills` for the persistence
 extension; tests via Dev MCP. **Dependencies.** M5, M7, M18, M19.
 **Commit.** `feat(sdk): add TaskExecutor SPI with unified SQLite task ledger`
+**Built.** `TaskExecutor` sink SPI in `forvum-sdk` (plain interface — the engine is the sole
+implementor, plugins do NOT implement it); Layer-0 `TaskRecord` record + `TaskType`/`TaskStatus` enums
+in `forvum-core` (registered for native via `CoreReflectionRegistration`); engine `TaskEntity` (Panache,
+TEXT PK) + `TaskRecorder` `@ApplicationScoped` impl; Flyway `V2__tasks.sql` (table `tasks` + two
+indexes). Recording wired persist-after-success: `CronScheduler.fire` writes a `cron` row (COMPLETED on
+turn success, ERROR otherwise), and `AgentRegistry.spawn` — the single chokepoint all spawns flow
+through, including the M18 `DefaultWorkerRunner` — writes a `sub_agent` row after a successful spawn.
+Recorder failures are logged, never propagated. Operators query via direct SQL (no DSL in v0.5).
 
 ## P2-CRON-DELIVERY — Cron isolated-agent delivery modes (§7.2 item 22)
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`
@@ -1036,6 +1072,25 @@ none|last|explicit-to`; per-execution dedupe; ambiguity rejected at add/update; 
 mode routes output correctly; per-execution dedupe holds; an ambiguous spec is rejected at add/update;
 parity verified. **[NATIVE]** native parity. **[PLUGIN]** `quarkus/skills`. **Dependencies.** M19, P2-11.
 **Commit.** `feat(engine): add cron isolated-agent delivery modes`
+
+**Status (as-built, P2-CRON-DELIVERY).** DONE. `CronSpec` grows a `Delivery(DeliveryMode mode, String
+target)` field; `DeliveryMode` = `none|last|explicit-to` (lower-kebab wire). The `Delivery` canonical
+constructor rejects the mode↔target ambiguity (a target with a non-explicit mode); `CronSpecReader.parse`
+gains a `Set<String> knownChannels` arg and rejects `explicit-to` with a missing/blank/unknown-channel
+target — so an invalid/ambiguous spec throws at PARSE, which makes `CronScheduler` disable the bad cron
+(its existing catch→`unscheduleJob`) and `ConfigDoctor` surface it (doctor passes the configured
+`channels/` ids as the known set). Known channels = the configured `channels/<id>.json` stems (no live
+channel registry exists). Routing is inline in `CronScheduler.fire()` AFTER a successful turn, via a
+new `CronDeliverySink` seam (default `LoggingCronDeliverySink`): `none` drops, `last`/`explicit-to`
+hand the reply to the sink exactly once (in-execution dedupe = the single `deliver()` call site; NO
+table, NO migration); a sink failure is isolated (fire-and-forget). **Limitation:** the channel SPI is a
+pure build-time discovery marker (M16 Resolution B) — channels are self-driving consumers of
+`ChannelTurnDriver`, the engine has no outbound channel-send API. So delivery currently reaches the
+isolated-agent result sink (logged), not a live channel session; a future outbound send surface backs
+the sink without changing the cron contract. Tests (forvum-engine Surefire): `CronSpecReaderTest` (17,
+incl. a `@CsvSource` over the three modes + every reject path), `DeliveryTest` (11, `@EnumSource`
+invariants + `fromWire` round-trip), `CronDeliveryRoutingTest` (5, stub-sink routing + dedupe + isolated
+sink failure); engine suite 225 green, app doctor tests green.
 
 ## P2-OUTPUTGUARD — OutputGuard SPI (§7.2 item 23; CE REQ #2)
 **Labels:** `phase-2`, `sdk`, `security`, `context-engineering`, `native`, `blocked` · **Milestone:** `v0.5 Parity`

@@ -800,3 +800,73 @@ Generalizable lessons from completed milestones; append here as milestones land.
   in core. Parity with a simpler upstream (OpenClaw is binary owner/non-owner + tool-name lists, no abstract
   scopes) is semantic — reproduce its behavior (permissive default, restricted cron) in the local vocabulary,
   don't copy its types. [P2-11]
+- **There is NO outbound channel-send API — channels are self-driving consumers, not sinks.** The channel SPI
+  (`ChannelProvider`) is a pure build-time discovery marker (M16 Resolution B); a channel pulls turns via
+  `ChannelTurnDriver.dispatch`, the engine never pushes to one. So "deliver a cron's output to a channel"
+  cannot target a live session — route it to an isolated-agent result sink (`CronDeliverySink`, default logs)
+  keyed by the resolved target, and document the limitation. Validate an `explicit-to` target against the
+  CONFIGURED channels (`channels/<id>.json` stems via `ChannelReader.ids()`), not a live registry. Reject the
+  whole delivery directive at PARSE (grow the typed record's canonical constructor for the mode↔target
+  ambiguity; layer the known-channel cross-check in the reader, which holds the set) so the existing
+  `CronScheduler` catch→`unscheduleJob` disables the bad cron AND `ConfigDoctor` (which reuses the same reader
+  as its oracle) surfaces it for free — give doctor the same known-channel set. In-execution dedupe = a single
+  `deliver()` call site after a successful `fire()`; no table, no migration. The new payload records
+  (`Delivery`/`CronDelivery`) are never JSON-serialized, so they carry no `@RegisterForReflection` (mirror
+  `GraphTurnRequest`). To drive `fire()` end-to-end in a NON-boot unit test, construct `CronScheduler`
+  directly and set its package-private collaborators to stubs — but a stub that `extends` a CDI bean
+  (`AgentRegistry`/`LlmSelector`/`RoleRegistry`/`Agent`) must carry `@Vetoed`: a CDI scope is `@Inherited`,
+  so an un-vetoed subclass becomes a second ambiguous bean and breaks the module's `@QuarkusTest` boot
+  (a sibling `RecordingSink` implementing the plain `CronDeliverySink` interface needs no veto). [P2-CRON-DELIVERY]
+- **A "sink SPI" lives in `forvum-sdk` as a PLAIN (non-sealed) interface with the engine as sole implementor —
+  not in the sealed channel/model/tool/memory hierarchy.** `TaskExecutor` (P2-TASKLEDGER) mirrors the
+  `ChannelTurnDriver` shape: SDK contract, single engine `@ApplicationScoped` impl (`TaskRecorder`), plugins do
+  NOT implement it; engine callers `@Inject TaskExecutor`. The Panache recorder pattern is exact
+  copy-`PanacheProviderCallRecorder` (`@ApplicationScoped` + `@Transactional record()` mapping a Layer-0 record
+  to an entity row). Record the write persist-after-success (never wrap the whole producer in `@Transactional`),
+  and isolate the recorder call in try/catch so a ledger failure cannot undo/kill the work that already
+  succeeded. Wire spawn-recording at the REAL chokepoint (`AgentRegistry.spawn`, where every spawn —
+  including the M18 `DefaultWorkerRunner` — converges), not at a facade (`TurnService` never spawns). A new
+  `V2__tasks.sql` bumps the Flyway head, so the M5 `SchemaSmokeIT` version/table/index assertions (it pins
+  version "1" + the V1 table & index lists) MUST be updated to the new head in the same change. [P2-TASKLEDGER]
+- **Prefix-preserving compaction needs an id-stable summary, so the summary RECLAIMS the oldest dropped id.**
+  The cached prefix is defined id-based (`id <= cached_prefix_end_index`, never mutated), and replay reads
+  `order by id` — so a summary inserted with a fresh IDENTITY id (always the highest) would sort LAST, not
+  at the prefix tail, and using that high id as the new prefix boundary would freeze EVERYTHING below it.
+  Fix: delete the dropped run, then native-INSERT the summary at the oldest dropped message's id (IDENTITY
+  forbids a manual id on `persist()`, so a controlled `em.createNativeQuery("INSERT ... (id, ...)")` is the
+  seam), and advance `cached_prefix_end_index` to it. The summary then sits numerically+chronologically
+  right after the old prefix and before every retained message, the existing `order by id` path is
+  untouched, and the prefix grows monotonically. The summarizer is an injectable `Summarizer` SPI
+  (default reuses the §1.4 small-and-fast model via `LlmSelector.resolve`, NOT a bespoke endpoint); tests
+  bind a deterministic `@Alternative @Priority(1)` stub so no live model is hit. Orphan stripping keys off
+  a new `messages.block_type` core enum (`BlockType`, registered in `CoreReflectionRegistration`): strip
+  `turn_reasoning`/`turn_artifact` + stale `tool_execution` older than the oldest retained user message,
+  retain connected `tool_execution`. CAPR is archived (`capr_events.is_archived`), never deleted. **Adding
+  a NOT-NULL column to an existing entity breaks every hand-built fixture** — `SchemaSmokeIT` (2 sites) +
+  `SessionReplayerTest` (1 site) set `MessageEntity` fields directly and needed `blockType`; the V2 `DEFAULT
+  'turn_message'` only covers raw SQL inserts that omit the column (the app native replay IT). Migration
+  is **V2** (the brief said V3, but only V1 existed — keep the chain contiguous). Seed-then-compact-then-read
+  ITs use `QuarkusTransaction.requiringNew()` (intra-class `this.seed()` bypasses `@Transactional`
+  interception). **The blocking summarizer LLM call must run OUTSIDE any DB transaction** (CLAUDE §14
+  [M7]): `compact()` is NOT `@Transactional` — a short read tx plans the pass (partition the region,
+  capture id/content primitives so the detached entities are never reused), the model is called with no
+  Agroal/SQLite connection held, then a short write tx applies the mutations (bulk delete-by-id +
+  native-insert + advance prefix). **Track the retain boundary on EVERY retained `TURN_MESSAGE`
+  regardless of role, not just USER rows** — else the newest turn, typically the assistant reply (since
+  compaction runs before the next user message is persisted), is left at `Long.MAX_VALUE` and summarized
+  away when it alone exceeds `retainTokens`; the user-then-assistant persist order keeps the common-case
+  boundary on the USER row unchanged. [P2-COMPACT]
+- **A new `$FORVUM_HOME/<dir>/` config-file registry is a fixed five-edit recipe — copy `roles/`, don't
+  invent.** P2-4 device pairing added `devices/<id>.json` with ZERO schema change by mirroring P2-11/M7
+  exactly: (1) `ForvumHome.devices()`; (2) add `"devices"` to `ConfigWatcher.WATCHED_SUBFOLDERS` (this one line
+  is what makes hot-reload fire — the watcher already registers any listed subfolder created after boot); (3) a
+  raw `config/DeviceReader extends JsonDirectoryReader` (the base is PACKAGE-PRIVATE, so the raw reader MUST
+  live in `ai.forvum.engine.config` — only the typed `DeviceSpecReader`/registry live in the feature package);
+  (4) a Layer-2 `Device` record with its OWN `@RegisterForReflection` (a Layer-2 record, unlike a core record,
+  carries the annotation directly — NOT in `CoreReflectionRegistration`); (5) an `@ApplicationScoped`
+  `DeviceRegistry` = `ConcurrentMap` + `putIfAbsent` with IO off the lock + `@Observes ConfigurationChangedEvent`
+  evict (filter `path.getName(0)=="devices"`). Enforce opt-in like RBAC: an empty/absent dir disables the guard
+  (cache a `volatile Boolean enabled`, null it on config change) so an existing install needs no migration; a
+  distinguished built-in id (`cron`/`server`) short-circuits exempt. Enforcement keys off `ChannelMessage`'s
+  existing fields (`channelId` = the device endpoint) — do NOT add a `deviceId` to the core record this package
+  (the turn entry `TurnService.dispatch` already wraps a thrown guard as the terminal `ErrorEvent`). [P2-4]

@@ -158,6 +158,7 @@ class SessionReplayerTest {
         message.role = role;
         message.content = content;
         message.tokens = null;
+        message.blockType = "turn_message";
         message.createdAt = createdAt;
         message.persist();
     }

@@ -40,6 +40,15 @@ public class CaprEventEntity extends PanacheEntityBase {
     @Column(name = "rationale")
     public String rationale;
 
+    /**
+     * Marked {@code true} (1) by session compaction when this verdict's {@link #turnId} references an
+     * assistant message that was compacted out of the live window (P2-COMPACT). The row is NEVER
+     * deleted — CAPR history is append-only and must not regress — only archived so live CAPR
+     * aggregation can exclude it (ULTRAPLAN section 7.2 item 20).
+     */
+    @Column(name = "is_archived", nullable = false)
+    public boolean archived;
+
     @Column(name = "created_at", nullable = false)
     public long createdAt;
 }
