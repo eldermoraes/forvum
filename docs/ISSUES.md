@@ -1017,6 +1017,20 @@ first, the cached prefix is preserved, orphaned blocks are stripped, and CAPR is
 verified. **[NATIVE]** native parity. **[PLUGIN]** `context7` for langchain4j memory/summarization.
 **Dependencies.** M5, M18 (the `reduce` Compress path). **Commit.** `feat(engine): add prefix-preserving
 session compaction`
+**Built.** New `forvum-engine/.../session/compaction/`: `SessionCompactor` (eager, called from
+`TurnService.dispatch` before the turn so the agent reads a pre-compacted window), the injectable
+`Summarizer` SPI (`DefaultSummarizer` reuses the §1.4 small-and-fast model `ollama:qwen3:1.7b` via
+`LlmSelector.resolve` — NOT a bespoke endpoint — tests bind a deterministic `@Alternative` stub),
+`CompactionPolicy`/`CompactionResult` records. Schema (Flyway **V2** — the brief said V3 but only V1
+existed, so the chain stays contiguous): `sessions.cached_prefix_end_index` (INTEGER, nullable), a
+`messages.block_type` discriminator (new core enum `BlockType`: `turn_message` default |
+`turn_reasoning` | `turn_artifact` | `tool_execution`), and `capr_events.is_archived` (compaction marks,
+never deletes). Algorithm: never reads/mutates `id <= cachedPrefixEndIndex`; retains the most-recent
+turns within `retainTokens`, drops older turn-messages into one summary that RECLAIMS the oldest dropped
+id (native insert, IDENTITY forbids a manual id) so it joins the frozen prefix in id-order and
+`cachedPrefixEndIndex` advances monotonically; strips orphaned `turn_reasoning`/`turn_artifact` + stale
+`tool_execution` older than the oldest retained user message, conservatively retains connected
+`tool_execution`; archives (never deletes) `capr_events` for dropped assistant turns.
 
 ## P2-TASKLEDGER — Detached task runtime registration (§7.2 item 21)
 **Labels:** `phase-2`, `engine`, `sdk`, `native` · **Milestone:** `v0.5 Parity`

@@ -41,12 +41,12 @@ class SchemaSmokeIT {
 
     @Test
     void flywayMigratedToHeadAndAllTablesExist() {
-        // P2-TASKLEDGER added V2__tasks.sql, so the head version is now 2 and the 'tasks' table joins
-        // the V1 set.
+        // V1 baseline + V2__tasks.sql (P2-TASKLEDGER, the 'tasks' table) + V3__compaction.sql (P2-COMPACT,
+        // the compaction columns), so the head version is now 3.
         Object version = em.createNativeQuery(
                 "select version from flyway_schema_history where success = 1 "
               + "order by installed_rank desc limit 1").getSingleResult();
-        assertEquals("2", String.valueOf(version), "Flyway must have migrated to the head version (V2)");
+        assertEquals("3", String.valueOf(version), "Flyway must have migrated to the head version (V3)");
 
         @SuppressWarnings("unchecked")
         List<String> tables = em.createNativeQuery(
@@ -88,6 +88,7 @@ class SchemaSmokeIT {
         message.role = "user";
         message.content = "hello";
         message.tokens = 3;
+        message.blockType = "turn_message";
         message.createdAt = now;
         message.persist();
 
@@ -180,6 +181,7 @@ class SchemaSmokeIT {
         message.agentId = "main";
         message.role = "user";
         message.content = "hi";
+        message.blockType = "turn_message";
         message.createdAt = now;
         message.persist();
         em.flush();
