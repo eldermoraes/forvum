@@ -10,12 +10,14 @@ import ai.forvum.core.InvocationStatus;
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.model.InMemoryToolInvocationRecorder;
 import ai.forvum.engine.model.ToolInvocation;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -28,6 +30,7 @@ import java.util.function.Supplier;
 class ToolExecutorTest {
 
     private static final ToolSpec READ = new ToolSpec("a.read", "read a thing", PermissionScope.FS_READ, "{}");
+    private static final ToolSpec WRITE = new ToolSpec("a.write", "write a thing", PermissionScope.FS_WRITE, "{}");
 
     private ToolExecutor executor(InMemoryToolInvocationRecorder recorder) {
         ToolExecutor executor = new ToolExecutor();
@@ -82,5 +85,55 @@ class ToolExecutorTest {
         assertSame(InvocationStatus.ERROR, audited.status());
         assertTrue(audited.result().contains("disk on fire"),
                 "the error row captures the failure, got: " + audited.result());
+    }
+
+    @Test
+    void inBeltButOutOfScopeIsDeniedWithoutRunningAndAuditedDenied() throws Exception {
+        // P2-11 RBAC: a.write IS in the belt, but the caller's effective scopes grant only FS_READ — the
+        // orthogonal scope gate must deny it (belt membership alone no longer authorizes).
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        ToolExecutor executor = executor(recorder);
+        Supplier<String> mustNotRun = () -> {
+            throw new AssertionError("an out-of-scope tool must not run");
+        };
+
+        assertThrows(PermissionDeniedException.class, () ->
+                ScopedValue.where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, Set.of(PermissionScope.FS_READ))
+                        .call(() -> executor.execute("sess-1", new AgentId("main"),
+                                List.of(READ, WRITE), "a.write", "{}", mustNotRun)));
+
+        assertEquals(1, recorder.invocations().size());
+        ToolInvocation audited = recorder.invocations().get(0);
+        assertEquals("a.write", audited.toolName());
+        assertSame(InvocationStatus.DENIED, audited.status());
+        assertNull(audited.result(), "a scope-denied call produced no result");
+    }
+
+    @Test
+    void inBeltAndInScopeRunsAndIsAuditedOk() throws Exception {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        ToolExecutor executor = executor(recorder);
+
+        String result = ScopedValue
+                .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES,
+                        Set.of(PermissionScope.FS_READ, PermissionScope.FS_WRITE))
+                .call(() -> executor.execute("sess-1", new AgentId("main"),
+                        List.of(READ, WRITE), "a.write", "{}", () -> "written"));
+
+        assertEquals("written", result);
+        assertSame(InvocationStatus.OK, recorder.invocations().get(0).status());
+    }
+
+    @Test
+    void unboundEffectiveScopesFallBackToBeltOnlyAuthorization() {
+        // A caller outside a turn entry (a lower-level unit test) leaves CURRENT_EFFECTIVE_SCOPES unbound;
+        // the belt remains the sole gate — the pre-P2-11 behavior. Production turn entries always bind it.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+
+        String result = executor(recorder).execute("sess-1", new AgentId("main"),
+                List.of(READ, WRITE), "a.write", "{}", () -> "written");
+
+        assertEquals("written", result);
+        assertSame(InvocationStatus.OK, recorder.invocations().get(0).status());
     }
 }

@@ -77,6 +77,15 @@ class SubfolderReadersTest {
     }
 
     @Test
+    void roleReaderListsAndReads() throws IOException {
+        write("roles/reader.json", "{\"scopes\":[\"FS_READ\"]}");
+
+        RoleReader reader = new RoleReader(loader, forvumHome);
+        assertEquals(List.of("reader"), reader.ids());
+        assertTrue(reader.read("reader").orElseThrow().get("scopes").isArray());
+    }
+
+    @Test
     void missingSubfolderYieldsEmpty() {
         CronReader reader = new CronReader(loader, forvumHome);
         assertEquals(List.of(), reader.ids());

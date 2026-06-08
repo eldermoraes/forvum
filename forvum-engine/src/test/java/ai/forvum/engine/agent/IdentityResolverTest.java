@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -44,7 +45,24 @@ class IdentityResolverTest {
         assertTrue(resolver.resolveIdentityId("nosuchchannel", "111").isEmpty());
     }
 
-    /** Seeds {@code identities/alice.json} so the resolver has a forward map to invert. */
+    @Test
+    void rolesForReturnsTheDeclaredRoles() {
+        // alice declares roles: ["reader"].
+        assertEquals(List.of("reader"), resolver.rolesFor("alice"));
+    }
+
+    @Test
+    void rolesForIsEmptyWhenAnIdentityDeclaresNone() {
+        // carol is seeded with no 'roles' key — backward compatible (the registry applies the default).
+        assertEquals(List.of(), resolver.rolesFor("carol"));
+    }
+
+    @Test
+    void rolesForIsEmptyForAnUnknownIdentity() {
+        assertEquals(List.of(), resolver.rolesFor("nobody"));
+    }
+
+    /** Seeds {@code identities/alice.json} (with roles) + {@code identities/carol.json} (no roles). */
     public static class IdentityHomeProfile implements QuarkusTestProfile {
 
         static final Path HOME = seed();
@@ -55,7 +73,10 @@ class IdentityResolverTest {
                 Path identities = Files.createDirectories(home.resolve("identities"));
                 Files.writeString(identities.resolve("alice.json"),
                         "{ \"displayName\": \"Alice\", "
-                      + "\"channelAccounts\": { \"telegram\": \"111\", \"web\": \"sess-a\" } }");
+                      + "\"channelAccounts\": { \"telegram\": \"111\", \"web\": \"sess-a\" }, "
+                      + "\"roles\": [\"reader\"] }");
+                Files.writeString(identities.resolve("carol.json"),
+                        "{ \"displayName\": \"Carol\", \"channelAccounts\": { \"telegram\": \"222\" } }");
                 return home;
             } catch (IOException e) {
                 throw new UncheckedIOException(e);

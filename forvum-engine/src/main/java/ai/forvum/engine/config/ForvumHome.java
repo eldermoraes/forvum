@@ -88,6 +88,11 @@ public class ForvumHome {
         return root.resolve("crons");
     }
 
+    /** {@code $FORVUM_HOME/roles} — authorization-role definitions ({@code .json}, P2-11). */
+    public Path roles() {
+        return root.resolve("roles");
+    }
+
     /** {@code $FORVUM_HOME/channels} — per-channel configuration ({@code .json}). */
     public Path channels() {
         return root.resolve("channels");

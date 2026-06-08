@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -35,5 +37,25 @@ public class IdentityResolver {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * The authorization roles {@code identityId} declares in {@code identities/<id>.json} (P2-11). Empty
+     * when the file is absent (e.g. the anonymous session), or it declares no {@code roles} array — the
+     * engine's {@code RoleRegistry} then applies the permissive default role. A single raw read by id (no
+     * scan), consistent with this resolver's raw-{@link JsonNode} style.
+     */
+    public List<String> rolesFor(String identityId) {
+        JsonNode spec = identities.read(identityId).orElse(null);
+        if (spec == null) {
+            return List.of();
+        }
+        JsonNode rolesNode = spec.get("roles");
+        if (rolesNode == null || !rolesNode.isArray()) {
+            return List.of();
+        }
+        List<String> roles = new ArrayList<>();
+        rolesNode.forEach(role -> roles.add(role.asText()));
+        return roles;
     }
 }

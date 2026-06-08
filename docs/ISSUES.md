@@ -897,13 +897,30 @@ OAuth/device-code). **Commit.** `feat(app): add interactive provider onboarding 
 
 ## P2-11 — RBAC on tools
 **Labels:** `phase-2`, `core`, `security`, `native` · **Milestone:** `v0.5 Parity`
-**Context.** Role-based permission sets. **Scope.** Extend `PermissionScope` to role-based sets;
-`identities/<id>.json` declares roles; cron jobs get a distinguished `cron` role. **Files.**
-`forvum-core` (PermissionScope growth, §4.3.4), engine `ToolExecutor`. **Acceptance.** A role-restricted
+**Context.** Role-based permission sets. **Scope.** A role → `Set<PermissionScope>` mapping *above* the
+enum (NOT new `PermissionScope` constants); `identities/<id>.json` declares `roles`; cron jobs get a
+distinguished `cron` role; a second `ToolExecutor` gate denies an in-belt tool whose required scope is
+outside the caller's effective scopes. **Files.** `forvum-core` (`RoleSpec` record + `Identity.roles`,
+§4.3.4), engine `RoleRegistry`/`RoleReader`/`RoleSpecReader` + `CurrentIdentity` ScopedValue + `ToolExecutor`
+gate + binds in `TurnService`/`CronScheduler`, `forvum-app` security tests. **Acceptance.** A role-restricted
 identity is denied an out-of-role tool; the cron role is enforced; parity verified. **[NATIVE]** native
 parity; tied to the security-test layer. **[PLUGIN]** `quarkus/skills`. **Dependencies.** M13. **Absorbs**
 P2-CRON-DELIVERY's cron-role hook. **Commit.** `feat(core): add role-based access control on tool
 permission scopes`
+
+**Status (as-built, P2-11).** DONE. **Diverged from the literal "extend `PermissionScope`":** the enum is
+unchanged (FS_READ/FS_WRITE) — roles *cable* scope-sets above it (ULTRAPLAN §4.3.4 mandates the mapping
+live above the enum, not inside it). Design (maintainer-signed-off): config-driven `roles/<name>.json` +
+hot-reload `RoleRegistry` with code-level built-ins (`default-user` = every scope, permissive default for
+an identity that declares none → backward compatible, no migration; `cron` = read-only, the distinguished
+restricted role), enforcement via a `CurrentIdentity.CURRENT_EFFECTIVE_SCOPES` ScopedValue bound at the
+two turn entries (`TurnService.dispatch` / `CronScheduler.fire`) and read in `ToolExecutor` (belt AND
+scope; unbound ⇒ belt-only, but every production turn entry binds it). No Flyway migration (denial reuses
+`tool_invocations.status='denied'`). OpenClaw v2026.4.19-beta.2 parity = its owner/non-owner + restricted-cron
+model, expressed in Forvum's capability-scope vocabulary. The role-restricted-deny + cron-role-enforced
+security tests are `@QuarkusTest` (in-process, deterministic); native parity = native compile (RoleSpec
+reflection-registered) + boot smoke with no `~/.forvum/` (built-in `cron` enforceable). §9 stays DR-6a's
+(#59) — P2-11 only adds the two acceptance tests, no broader threat-model contract.
 
 ## P2-12 — Per-agent structured output schemas
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`

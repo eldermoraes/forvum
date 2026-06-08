@@ -5,6 +5,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
+import ai.forvum.core.RoleSpec;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.event.FallbackTriggered;
 import ai.forvum.core.budget.CostBudget;
@@ -34,6 +35,7 @@ import ai.forvum.core.id.Identity;
         ChannelMessage.class,
         Persona.class,
         ToolSpec.class,
+        RoleSpec.class,
         ModelRef.class,
         CostBudget.class,
         Spend.class,
