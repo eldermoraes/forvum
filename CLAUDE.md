@@ -800,3 +800,20 @@ Generalizable lessons from completed milestones; append here as milestones land.
   in core. Parity with a simpler upstream (OpenClaw is binary owner/non-owner + tool-name lists, no abstract
   scopes) is semantic — reproduce its behavior (permissive default, restricted cron) in the local vocabulary,
   don't copy its types. [P2-11]
+- **There is NO outbound channel-send API — channels are self-driving consumers, not sinks.** The channel SPI
+  (`ChannelProvider`) is a pure build-time discovery marker (M16 Resolution B); a channel pulls turns via
+  `ChannelTurnDriver.dispatch`, the engine never pushes to one. So "deliver a cron's output to a channel"
+  cannot target a live session — route it to an isolated-agent result sink (`CronDeliverySink`, default logs)
+  keyed by the resolved target, and document the limitation. Validate an `explicit-to` target against the
+  CONFIGURED channels (`channels/<id>.json` stems via `ChannelReader.ids()`), not a live registry. Reject the
+  whole delivery directive at PARSE (grow the typed record's canonical constructor for the mode↔target
+  ambiguity; layer the known-channel cross-check in the reader, which holds the set) so the existing
+  `CronScheduler` catch→`unscheduleJob` disables the bad cron AND `ConfigDoctor` (which reuses the same reader
+  as its oracle) surfaces it for free — give doctor the same known-channel set. In-execution dedupe = a single
+  `deliver()` call site after a successful `fire()`; no table, no migration. The new payload records
+  (`Delivery`/`CronDelivery`) are never JSON-serialized, so they carry no `@RegisterForReflection` (mirror
+  `GraphTurnRequest`). To drive `fire()` end-to-end in a NON-boot unit test, construct `CronScheduler`
+  directly and set its package-private collaborators to stubs — but a stub that `extends` a CDI bean
+  (`AgentRegistry`/`LlmSelector`/`RoleRegistry`/`Agent`) must carry `@Vetoed`: a CDI scope is `@Inherited`,
+  so an un-vetoed subclass becomes a second ambiguous bean and breaks the module's `@QuarkusTest` boot
+  (a sibling `RecordingSink` implementing the plain `CronDeliverySink` interface needs no veto). [P2-CRON-DELIVERY]

@@ -1037,6 +1037,25 @@ mode routes output correctly; per-execution dedupe holds; an ambiguous spec is r
 parity verified. **[NATIVE]** native parity. **[PLUGIN]** `quarkus/skills`. **Dependencies.** M19, P2-11.
 **Commit.** `feat(engine): add cron isolated-agent delivery modes`
 
+**Status (as-built, P2-CRON-DELIVERY).** DONE. `CronSpec` grows a `Delivery(DeliveryMode mode, String
+target)` field; `DeliveryMode` = `none|last|explicit-to` (lower-kebab wire). The `Delivery` canonical
+constructor rejects the mode↔target ambiguity (a target with a non-explicit mode); `CronSpecReader.parse`
+gains a `Set<String> knownChannels` arg and rejects `explicit-to` with a missing/blank/unknown-channel
+target — so an invalid/ambiguous spec throws at PARSE, which makes `CronScheduler` disable the bad cron
+(its existing catch→`unscheduleJob`) and `ConfigDoctor` surface it (doctor passes the configured
+`channels/` ids as the known set). Known channels = the configured `channels/<id>.json` stems (no live
+channel registry exists). Routing is inline in `CronScheduler.fire()` AFTER a successful turn, via a
+new `CronDeliverySink` seam (default `LoggingCronDeliverySink`): `none` drops, `last`/`explicit-to`
+hand the reply to the sink exactly once (in-execution dedupe = the single `deliver()` call site; NO
+table, NO migration); a sink failure is isolated (fire-and-forget). **Limitation:** the channel SPI is a
+pure build-time discovery marker (M16 Resolution B) — channels are self-driving consumers of
+`ChannelTurnDriver`, the engine has no outbound channel-send API. So delivery currently reaches the
+isolated-agent result sink (logged), not a live channel session; a future outbound send surface backs
+the sink without changing the cron contract. Tests (forvum-engine Surefire): `CronSpecReaderTest` (17,
+incl. a `@CsvSource` over the three modes + every reject path), `DeliveryTest` (11, `@EnumSource`
+invariants + `fromWire` round-trip), `CronDeliveryRoutingTest` (5, stub-sink routing + dedupe + isolated
+sink failure); engine suite 225 green, app doctor tests green.
+
 ## P2-OUTPUTGUARD — OutputGuard SPI (§7.2 item 23; CE REQ #2)
 **Labels:** `phase-2`, `sdk`, `security`, `context-engineering`, `native`, `blocked` · **Milestone:** `v0.5 Parity`
 **Context.** The v0.5 realization of the §1.4 outbound-filter promise: an outbound secret/PII filter.

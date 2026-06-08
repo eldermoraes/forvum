@@ -36,7 +36,7 @@ class CronSchedulerFireIT {
         // ledger records the CRON's model proves the override path (LlmSelector.resolve + Agent.respond
         // override) actually used it, not the persona model — the headline M19 decision.
         CronSpec spec = new CronSpec("brief", "0 * * * * ?", new AgentId("faker"),
-                ModelRef.parse("fake:cron-only-model"), "summarize the day");
+                ModelRef.parse("fake:cron-only-model"), "summarize the day", Delivery.NONE);
 
         cronScheduler.fire(spec);
 

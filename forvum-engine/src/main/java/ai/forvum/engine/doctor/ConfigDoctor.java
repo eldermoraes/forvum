@@ -4,6 +4,7 @@ import ai.forvum.core.Persona;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.agent.AgentSpecReader;
 import ai.forvum.engine.config.AgentReader;
+import ai.forvum.engine.config.ChannelReader;
 import ai.forvum.engine.config.ConfigFileReader;
 import ai.forvum.engine.config.ConfigLoader;
 import ai.forvum.engine.config.CronReader;
@@ -127,6 +128,9 @@ public final class ConfigDoctor {
     private void checkCrons(List<Finding> findings, List<String> agentIds) {
         CronReader reader = new CronReader(loader, home);
         CronSpecReader specReader = new CronSpecReader();
+        // The known-channel set for an explicit-to delivery target is the configured channels/ subfolder
+        // (each channels/<id>.json is a channel id) — the same reader the engine validates against.
+        Set<String> knownChannels = Set.copyOf(new ChannelReader(loader, home).ids());
 
         for (String id : reader.ids()) {
             String location = "crons/" + id + ".json";
@@ -141,7 +145,7 @@ public final class ConfigDoctor {
                 continue;
             }
             try {
-                CronSpec cron = specReader.parse(id, node);
+                CronSpec cron = specReader.parse(id, node, knownChannels);
                 checkProvider(findings, location, cron.primaryModel().provider(),
                         "primary '" + cron.primaryModel() + "'");
                 if (!agentIds.contains(cron.agentId().value())) {

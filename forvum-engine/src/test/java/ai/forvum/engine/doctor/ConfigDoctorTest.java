@@ -179,6 +179,42 @@ class ConfigDoctorTest {
     }
 
     @Test
+    void aCronDeliveringToAnUnknownChannelIsAnError() throws IOException {
+        // No channels/slack.json exists, so 'explicit-to slack' names a channel doctor does not know.
+        writeValidMainAgent();
+        write("crons/daily.json",
+                "{\"cron\":\"0 0 * * * ?\",\"agentId\":\"main\",\"primary\":\"ollama:qwen3:1.7b\",\"prompt\":\"hi\","
+              + "\"delivery\":{\"mode\":\"explicit-to\",\"target\":\"slack\"}}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(report.findings().stream().anyMatch(f ->
+                        f.severity() == Severity.ERROR
+                        && f.location().contains("crons/daily.json")
+                        && f.problem().contains("slack")),
+                () -> "a cron delivering to an unknown channel must be an error naming the channel; findings: "
+                        + report.findings());
+    }
+
+    @Test
+    void aCronWithAnAmbiguousDeliveryTargetIsAnError() throws IOException {
+        // mode 'last' WITH a target is ambiguous — the Delivery canonical constructor rejects it, and
+        // doctor surfaces the parse failure as an error on the cron file.
+        writeValidMainAgent();
+        write("crons/daily.json",
+                "{\"cron\":\"0 0 * * * ?\",\"agentId\":\"main\",\"primary\":\"ollama:qwen3:1.7b\",\"prompt\":\"hi\","
+              + "\"delivery\":{\"mode\":\"last\",\"target\":\"web\"}}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(hasError(report, "crons/daily.json"),
+                () -> "an ambiguous delivery (mode last with a target) must be an error; findings: "
+                        + report.findings());
+    }
+
+    @Test
     void aMalformedIdentityIsAnError() throws IOException {
         writeValidMainAgent();
         write("identities/default.json", "{ broken ");
