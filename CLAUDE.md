@@ -924,3 +924,41 @@ Generalizable lessons from completed milestones; append here as milestones land.
   plain-JVM engine unit test (single classloader) CANNOT catch this; only an in-JVM `@QuarkusMainTest` success
   path that actually reaches `RepositorySystemSupplier.get()` does — so the resolve+stream CLI MUST be tested
   end-to-end through the Quarkus runtime, not just at the engine unit level. [P2-6]
+- **A persistent-WebSocket channel (Discord gateway) rides `quarkus-websockets-next` CLIENT mode, not a
+  reactive SDK.** JDA/Discord4J are native-broken/reactive and pull a transport stack that violates the SDK
+  boundary; a hand-rolled minimal Gateway v10 client over `@WebSocketClient` (the CLIENT-mode dual of the web
+  channel's `@WebSocket`) native-compiles + boots (the readiness spike proved the websockets-next-client +
+  rest-client combo). CLIENT-mode API (from the Dev MCP, NOT memory): `@WebSocketClient(path="/")` endpoint
+  with `@OnOpen(WebSocketClientConnection)` / `@OnTextMessage @RunOnVirtualThread void onText(conn, frame)` /
+  `@OnClose`; inject `Instance<WebSocketConnector<Endpoint>>` and `connectors.get().baseUri(URI)
+  .userData(UserData.TypedKey.forString(k), v).connectAndAwait()` to open (connectors are single-use +
+  not-thread-safe → `Instance.get()` per connect); pass per-connection secrets via `userData()` read back in
+  the endpoint, never a field. Keep the protocol layer SOCKET-FREE (a pure `GatewayProtocol.decide(payload,
+  state)→sealed Reaction` + frame parse/encode + an atomic `GatewayState`) so HELLO→IDENTIFY, the
+  heartbeat-carries-last-seq, and MESSAGE_CREATE flows are unit-testable with no live `wss://`. CONCURRENCY:
+  the op-1 heartbeat loop is a dedicated `Thread.ofVirtual()` driven by `heartbeat_interval`; shared
+  seq/session live in `AtomicLong`/`AtomicReference` (NO `synchronized`, §3.8); a `ReentrantLock` guards ONLY
+  the heartbeat-thread reference swap (interrupt the old thread OUTSIDE the lock — no blocking IO under any
+  lock → no carrier pinning). Token never logged: it rides the IDENTIFY frame + the REST `Authorization: Bot
+  <token>` header (a `@HeaderParam`, not a `@Url` path like Telegram), and `redact()` masks any `Bot <token>`
+  echo. Mirror Telegram for the rest (config reader, allowedUserIds, byte-identical `render()`, the
+  no-token→warn+no-op boot, the `ChannelLauncher` token-gated `serves()`). Native-gate caveat: heartbeat-loop
+  concurrency + reconnect/TLS edges only surface at runtime → keep plain JSON (no zlib-stream), gate any live
+  end-to-end behind `*-LiveTest @Tag("live")`. NATIVE-FRAME TRAP: the *outbound* envelope record (`{op,d}`
+  wrapping every IDENTIFY/HEARTBEAT via `writeValueAsString`) ALSO needs `@RegisterForReflection` — without it
+  the native binary emits an empty/malformed frame and the handshake silently fails, and the no-token native
+  smoke can NOT catch it (no token → never serialized). Pin it with a non-live encode test asserting the JSON
+  carries `op`/`d` with the right opcodes (2 IDENTIFY, 1 HEARTBEAT). RECONNECT (must, not optional): a gateway
+  connection is NOT permanent — Discord routinely sends op-7 RECONNECT, so a connect-once design dies on the
+  first routine event. Self-heal from `@OnClose(conn)` (read `conn.closeReason().getCode()`): if still
+  `running` (no ShutdownEvent) and the code is not a fatal 4xxx (`{4004,4010..4014}`), re-open on a VT with
+  exponential backoff (a pure clock-free `Backoff` atomic: 1s→2s→…cap 60s, `reset()` on READY); a deliberate
+  shutdown (`running=false`) never reconnects; a fatal code stops with a WARN (no infinite loop). v0.1 policy =
+  fresh IDENTIFY per reconnect (full op-6 RESUME with `resume_gateway_url`/`session_id`/last-seq is a deferred
+  follow-up; the captured resume context is unused). A failed heartbeat send must CLOSE the connection so the
+  same `@OnClose`→reconnect path fires (else the log claim "the gateway will reconnect" lies). The
+  endpoint(`@Singleton`)→channel(`@ApplicationScoped`) callback is plain `@Inject`; a test subclass of the
+  channel that overrides `connect()` to record must be `@Vetoed` or the module's `@QuarkusTest` sees two
+  `DiscordChannel` beans (AmbiguousResolution). Make the policy unit-testable via a `Sleeper` seam +
+  same-thread executor: assert growing backoff on transient close, no reconnect on shutdown, stop on fatal,
+  backoff reset on READY. [P2-CH/discord]

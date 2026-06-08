@@ -1016,7 +1016,12 @@ export gated by endpoint env var`
 ## P2-CH — Additional first-party channels (§7.2 item 16)
 **Labels:** `phase-2`, `channel`, `native` · **Milestone:** `v0.5 Parity`
 **Context.** OpenClaw ships a broad channel catalog; Forvum replicates the architecture and ships a
-curated set. **Scope.** `forvum-channel-discord`, `-slack`, `-whatsapp`, `-matrix`, `-signal`. The long
+curated set. **Status.** `forvum-channel-discord` SHIPPED as the first P2-CH channel — a hand-rolled
+Discord Gateway v10 client over `quarkus-websockets-next` (CLIENT mode, plain JSON) + a blocking
+`quarkus-rest-client-jackson` reply path (no JDA/Discord4J: both native-broken/reactive and violate the
+SDK boundary); the persistent-WebSocket gateway pattern is the template the remaining socket-based
+channels reuse. The other four (`-slack`, `-whatsapp`, `-matrix`, `-signal`) remain. **Scope.**
+`forvum-channel-discord`, `-slack`, `-whatsapp`, `-matrix`, `-signal`. The long
 tail (iMessage/BlueBubbles, Teams, Google Chat, Mattermost, Feishu, LINE, QQ, Zalo/ZaloUser, IRC, Nostr,
 Tlon, Twitch, Synology Chat, Nextcloud Talk, telephony voice-call) is explicitly OUT of v0.5 scope =
 community-plugin territory (via the §7.2 item 6 marketplace). **Acceptance.** Each shipped channel

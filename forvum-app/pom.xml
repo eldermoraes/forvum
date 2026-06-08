@@ -108,6 +108,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-channel-telegram</artifactId>
         </dependency>
+        <!-- Layer-3 Discord channel (P2-CH): a hand-rolled Gateway v10 client over quarkus-websockets-next
+             (CLIENT mode, plain JSON) driving turns via ChannelTurnDriver, replying over a blocking REST
+             client. Brings quarkus-websockets-next (the app's WebSocket CLIENT) + quarkus-rest-client-jackson. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-discord</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
