@@ -86,4 +86,48 @@ class AgentSpecReaderTest {
                 () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec),
                 "a non-numeric toolBudget must be rejected, not silently coerced to 0");
     }
+
+    @Test
+    void outputSchemaDefaultsToNullWhenAbsent() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\" }");
+
+        Persona persona = new AgentSpecReader().parse(new AgentId("main"), "persona", spec);
+
+        assertNull(persona.outputSchema(), "absent outputSchema = free-text (backward compatible)");
+    }
+
+    @Test
+    void parsesOutputSchemaObjectIntoASerializedString() throws Exception {
+        JsonNode spec = json("""
+            { "primaryModel": "ollama:qwen3:1.7b",
+              "outputSchema": { "type": "object",
+                                "required": ["answer"],
+                                "properties": { "answer": { "type": "string" } } } }
+            """);
+
+        Persona persona = new AgentSpecReader().parse(new AgentId("main"), "persona", spec);
+
+        // The embedded object is re-serialized to compact JSON and must itself re-parse equal to the source.
+        JsonNode roundTripped = new ObjectMapper().readTree(persona.outputSchema());
+        assertEquals(spec.get("outputSchema"), roundTripped);
+    }
+
+    @Test
+    void acceptsOutputSchemaSuppliedAsAString() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", "
+                + "\"outputSchema\": \"{\\\"type\\\":\\\"object\\\"}\" }");
+
+        Persona persona = new AgentSpecReader().parse(new AgentId("main"), "persona", spec);
+
+        assertEquals("{\"type\":\"object\"}", persona.outputSchema());
+    }
+
+    @Test
+    void rejectsOutputSchemaThatIsNeitherObjectNorString() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"outputSchema\": 42 }");
+
+        assertThrows(IllegalStateException.class,
+                () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec),
+                "a numeric outputSchema is malformed config, not a valid schema");
+    }
 }
