@@ -976,3 +976,98 @@ Generalizable lessons from completed milestones; append here as milestones land.
   any turn `RuntimeException` into a terminal `ErrorEvent.from(...)`, so the named message rides into the event —
   no retry, no new event plumbing. A spawned worker child passes `null` (its digest is merged as a tool result,
   never the validated top-level answer). [P2-12]
+- **MEASURE the per-module JaCoCo baseline BEFORE setting the gate, then exclude only structurally-uncoverable
+  code — never lower the global threshold.** Wire `jacoco-maven-plugin` (0.8.15 is the first line reading Java
+  25 / class-file 69 bytecode) ONCE in the parent `<build><plugins>` — `prepare-agent` (Surefire only; its
+  `argLine` is picked up automatically, do NOT also count the native-profile Failsafe `*IT`), `report`,
+  `check` (BUNDLE rule 80% LINE / 75% BRANCH via `${jacoco.line.minimum}`/`${jacoco.branch.minimum}` props) —
+  inherited per module, gating each module's own coverage (stronger than a reactor aggregate a weak module
+  hides inside). Measure first: `verify -Djacoco.line.minimum=0.00 -Djacoco.branch.minimum=0.00`, then read
+  per-module `target/site/jacoco/jacoco.csv` (cols: BRANCH_MISSED=$6 BRANCH_COVERED=$7 LINE_MISSED=$8
+  LINE_COVERED=$9 — NOT 4/5/6/7). A child re-declares the `jacoco-check` execution by the SAME id to add
+  `<excludes>` (JaCoCo class-exclude form `ai/forvum/pkg/Foo*.class`, `/`-separated, `.class` suffix) or a
+  relaxed `<minimum>`; the execution `<configuration>` REPLACES the parent's rules (no deep-merge), so copy the
+  whole `<rules>` block. Justified excludes only: `forvum-sdk` logic-free `Abstract*Provider` sealed-set bridges
+  (→ 0 lines, passes vacuously), `forvum-engine` native-metadata holders + pure Panache `*Entity` classes (→
+  80.31/76.68, clears global). Where there is NO structural class to exclude (a real gap covered only by the
+  excluded Failsafe ITs or the booted app), set a JUSTIFIED per-module override and record the gap in a pom
+  comment, never weaken the global gate: `forvum-channel-telegram` LINE→0.72 (IT-only CDI-lifecycle/`@RestClient`
+  boot lines), `forvum-app` BRANCH→0.70 (picocli command error branches the native ITs cover). `pom`-packaged
+  modules (parent, `forvum-bom`) have no exec file → `check` skips gracefully, no carve-out. The four
+  §10-mandated property tests already existed — confirm before writing. Pitest stays signal-only (documented,
+  not a failing gate). [X3]
+- **A server-only dashboard endpoint must not touch the command-mode cold-start path.** The `/q/dashboard/capr`
+  CAPR endpoint (X6 scenario 10) is a `quarkus-reactive-routes` `@Route` (`CaprDashboardRoute`, `type =
+  BLOCKING` for the Panache read) over the Web channel's already-present `vertx-http` — chosen over
+  `quarkus-rest` so it does not perturb `HttpClientFactorySelector` (the `langchain4j.http.clientBuilderFactory`
+  pin) or the REST-client stack. A `@Route` handler binds only when a server channel is up; one-shot/command
+  mode leaves `vertx-http` unbound (`quarkus.http.host-enabled=false` from `ForvumApplication.main`), so the
+  route never serves there. The discipline: give the endpoint NO `@Startup`/`StartupEvent` observer and do its
+  DB/HTTP work only inside the handler — then it cannot regress the < 200 ms command-mode boot-smoke nor the
+  `ask`/`doctor` one-shot path (the gate measures those). Add the extension via the platform BOM, never pinned;
+  the DTO it serializes is a record carrying the real Quarkus `@RegisterForReflection` (Layer 4 is
+  Quarkus-bearing, so the SDK re-export is unnecessary here). [X6]
+- **Author span-less e2e scenarios against existing machinery + observable DB side-effects.** OTel spans do not
+  exist in v0.1, so an e2e asserts the ledger rows the turn wrote, not a span. The five X6 scenarios reuse the
+  in-process `FakeModelProvider` (no live inference, per the perf-gate convention) and the production seams:
+  spawn → `AgentRegistry.spawn` + a per-child `capr_events` row; cron → seed a `0/1 * * * * ?` `tick.json` and
+  poll for the `cron:<id>` ledger rows (the real `Scheduler` fires in a `@QuarkusTest` because `CommandMode`
+  sees no one-shot arg); hot-reload → fire the same `ConfigurationChangedEvent` the `WatchService` would (the
+  macOS poll latency makes a real watcher non-deterministic) and assert the next turn re-reads the edited spec;
+  Telegram allow/deny → drive the real `UpdateProcessor` over an in-test recording `TelegramBotApi` impl. A
+  package-private production constant (`UpdateProcessor.REFUSAL_MESSAGE`) is asserted by its observable content,
+  not widened to `public` for a test. [X6]
+- **The prompt-injection security test must drive the BELT gate end-to-end, not the executor directly.** The
+  existing `PermissionScopeMismatchTest` already denies an out-of-belt tool by calling `ToolExecutor.execute`
+  with a hard-coded name; the mandated prompt-injection category (CLAUDE.md §11) is the same belt-miss denial
+  but realized through the real channel turn entry — a scripted tool-calling fake model (id `scripted-injection`,
+  app-test scope, mirrors the engine's `ScriptedToolCallModelProvider`) emits an `fs.write` `ToolExecutionRequest`
+  the way an injected instruction would coerce a real model, the agent's `allowedTools` is `[]`, and
+  `TurnService.dispatch → SupervisorGraph.toolLoop → ToolCallBridge → ToolExecutor` denies + audits it
+  (`status='denied'`) while the turn still completes (terminal `Done`, no `ErrorEvent`). Assert BOTH the denied
+  row AND `ok=0` for the same `(session,tool)` — the no-escalation half — scoped to the session this method
+  writes (shared `@TestProfile` DB, §14). Make it gating by red-checking: put the tool back in the belt and the
+  `denied=1` assertion must flip to `0`. The engine `ScriptedToolCallModelProvider`/`FakeToolProvider` live in
+  `forvum-engine/src/test` and are NOT on the app classpath — add an app-test fake; route by `extensionId()`
+  (`LlmSelector` matches the `ModelRef` provider half), and a new `ModelProvider` bean does not perturb the
+  provider-resolve guards (they inject by concrete type). [TEST-SEC]
+- **A "milestone gap" can be a docs-ownership gap, not a missing milestone — fold, don't multiply
+  milestones.** X7's six items (shell tool, `SkillInvokerTool` skills surface, `forvum-tools-mcp-bridge`
+  baseline, §3.6 OTel baseline, `forvum init`, the `/q/dashboard/capr` endpoint) each rode an existing
+  milestone's SPI/surface (skills + shell + mcp-bridge on M13's `ToolProvider.tools()`; OTel + CAPR on
+  M18's turn/graph spans; the `init` command on M20's picocli command-mode + the M4 `~/.forvum/` layout
+  it scaffolds — NOT M1, which is reactor/pom/wrapper bootstrap only), so the fix was to fold them into
+  M4/M13/M18/M20 *acceptance* and delete the "real roadmap gap" framing — no micro-milestones, no code.
+  When a docs item reads "no Phase-1 milestone", check whether the surface already exists before scheduling new work.
+  Unblocks downstream parity issues that depend on the owned baseline (P2-7/#32, P2-13/#38, P2-15/#40). [X7]
+- **`MemoryPolicy` is a flat Layer-0 record driving a Layer-1 retrieval SPI — settled by DR-5
+  (`docs/design-rounds/group-5-memory-policy.md`), §4.3.6.** `MemoryPolicy(RetrievalStrategy strategy,
+  Set<MemoryTier> tiers, int topK, double minScore, int compressThresholdChars)` + four siblings
+  (`RetrievalStrategy`/`MemoryTier` enums, `MemoryQuery`, `MemoryHit`) all in `ai.forvum.core` (no
+  sub-package — unlike budget, no service iface in core). It DRIVES the new SPI method
+  `MemoryProvider.retrieve(MemoryQuery, MemoryPolicy) → List<MemoryHit>` (blocking on a VT, NO reactive;
+  SDK stays Quarkus-free; SDK already deps core so no new dep/enforcer change), which P2-5 #30 implements.
+  `strategy=NONE` keeps the policy non-nullable on the agent spec ("memory off" is a value). One
+  `compressThresholdChars` knob serves both the §5.5 `reduce` merge AND retrieved-memory write-back
+  (chars not tokens = native-clean). Spawn-inherited like CostBudget/Identity but needs NO
+  `SpawnConfigurationException` analogue — unlike a `SessionWindow` budget, the tenant key (`agentId`)
+  is per-call via `MemoryQuery` from the child's `@AgentScoped` context, so a verbatim policy reads the
+  child's own memory. Retrieval framed as `<retrieved_memory>` DATA + pre-memory-write `OutputFilter` are
+  REFERENCED from DR-6a §9, never redefined (read/write split: policy governs read-back, filter governs
+  write). The five core records do NOT carry `@RegisterForReflection` (core bans `io.quarkus*`) — P2-5
+  appends them to the engine `CoreReflectionRegistration` holder (§6.3). Dissolves demo D2's
+  `memoryPolicy` sub-gap; residual `AgentSpec` composition is DR-8's. [DR-5]
+- **A security design round is "confirm what's built + name what's deferred", not "invent new gates".** DR-6a
+  authored §9 (threat model STRIDE-by-surface + the `OutputFilter` contract) by *confirming* the already-merged
+  controls in the threat context (the two `ToolExecutor` gates — belt + the P2-11 RBAC `CURRENT_EFFECTIVE_SCOPES`
+  second gate; `@AgentScoped` memory isolation; spawn-boundary identity inheritance) rather than proposing new
+  runtime machinery. Prompt-injection is **containment-by-structure** (the gates + the `reduce` Isolate boundary +
+  data/instruction framing), explicitly NOT a runtime injection-detector — and tool-execution filters are *output*
+  filters (catch egress leaks), never injection preventers; a user-defined-tool surface would breach the
+  author-authored tool-spec assumption and needs its own future contract. The `OutputFilter` disposition is a
+  3-subtype sealed `FilteringOutcome` (`Allowed`/`Redacted`/`Blocked`) in `forvum-core`; the brief's "FILTERED"
+  label is the `FallbackReasons.FILTERED` *reason token* on the `Blocked` path (mirrors `COST_BUDGET`), not a
+  fourth subtype — and the engine-only `OutputFilteredException` mirrors `BudgetExhaustedException` (unchecked,
+  engine-caught terminal short-circuit) so the SDK/core stay exception-free. Coordinate the `Filtered` spelling
+  with DR-4c's `FailureClass` (filtered = non-retryable). Flag each settled point inline as `[DP-n]` so a
+  maintainer can ratify/amend a draft surgically. [DR-6a]

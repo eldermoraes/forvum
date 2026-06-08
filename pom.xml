@@ -52,6 +52,14 @@
         <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
         <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
         <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
+        <!-- JaCoCo 0.8.15 is the first line to read Java 25 (class file 69) bytecode. -->
+        <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+
+        <!-- Coverage gate (X3 / ULTRAPLAN section 10): 80% LINE + 75% BRANCH, measured from Surefire unit
+             tests (coverage runs in `verify`). Module-local overrides relax these where the code is
+             structurally not coverable (see each module's jacoco-check execution). -->
+        <jacoco.line.minimum>0.80</jacoco.line.minimum>
+        <jacoco.branch.minimum>0.75</jacoco.branch.minimum>
     </properties>
 
     <build>
@@ -82,9 +90,66 @@
                     <artifactId>maven-enforcer-plugin</artifactId>
                     <version>${maven-enforcer-plugin.version}</version>
                 </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco-maven-plugin.version}</version>
+                </plugin>
             </plugins>
         </pluginManagement>
         <plugins>
+            <!-- Coverage (X3 / ULTRAPLAN section 10). prepare-agent instruments the Surefire JVM so the
+                 reactor `verify` measures UNIT-test coverage only; the native-profile Failsafe *IT smoke
+                 (forvum-app) is deliberately NOT counted (no prepare-agent-integration / report-integration
+                 binding). `report` emits per-module HTML/XML at verify; `check` enforces the 80% LINE /
+                 75% BRANCH gate. Inherited by every module; modules whose code is structurally not coverable
+                 (forvum-sdk, native-metadata holders, pure DTO records) override the rule locally with a
+                 justification. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jacoco-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.line.minimum}</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.branch.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Build-sanity rules for the whole reactor. Module-specific layering bans
                  (forvum-core purity, forvum-engine extension-agnostic) live in those modules' poms. -->
             <plugin>
