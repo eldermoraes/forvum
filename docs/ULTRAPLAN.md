@@ -54,7 +54,7 @@ OpenClaw's design has friction points rooted in its TypeScript/Node origins. A J
 - **Small-and-fast models** (for example a local Ollama `qwen3:1.7b`) handle routing, intent classification, and metadata-extraction sub-steps to minimize end-to-end latency.
 - **Strict per-agent state isolation** prevents context clash — every agent runs inside its own `@AgentScoped` context with its own memory, tool subset, and system prompt.
 - **Observability with CAPR** (Cost-Aware Pass Rate) sits alongside token counts and latency as a first-class metric from the MVP onward.
-- **Governance from day one.** Every tool carries a `PermissionScope`, user-approval hooks gate destructive actions, and outbound outputs can be filtered for sensitive data — the outbound filter is realized as the `OutputGuard` SPI in §7.2, so this principle has a concrete owner rather than living only here.
+- **Governance from day one.** Every tool carries a `PermissionScope`, user-approval hooks gate destructive actions, and outbound outputs are filtered for sensitive data — this principle is upgraded from promise to contract in §9: the threat model (§9.1, STRIDE by surface) and the `OutputFilter` contract (§9.2, realized as the `OutputGuard` SPI in §7.2 item 23) give it a named home, a sealed `FilteringOutcome` disposition, and a pre-channel-emit enforcement point rather than living only here.
 
 ---
 
@@ -1402,7 +1402,7 @@ Goal: match OpenClaw's feature set so a user currently on OpenClaw can migrate t
 20. **Session compaction.** When a session approaches the model's context window, compaction caps a reserve-token floor, mutates the oldest turns first to preserve the cached prefix, and strips orphaned reasoning/tool blocks. This is the Context Engineering Compress pillar (§1.4, §2.7) realized on the live session window.
 21. **Detached task runtime registration.** A `TaskExecutor` SPI in `forvum-sdk` plus a SQLite `tasks` ledger that unifies cron entries, sub-agent runs, and background tasks under one queryable record.
 22. **Cron isolated-agent delivery modes.** `delivery.mode: none | last | explicit-to` on cron entries, with per-execution dedupe and ambiguous delivery rejected at add/update time. Folds into the item 11 RBAC `cron` role.
-23. **`OutputGuard` SPI.** An outbound sensitive-data (secret/PII) filter on every channel egress surface — the v0.5 realization of the §1.4 outbound-filter promise. Full contract lands with the §9 Security section (§9.2 `OutputFilter`).
+23. **`OutputGuard` SPI.** An outbound sensitive-data (secret/PII) filter on every channel egress surface — the v0.5 realization of the §1.4 outbound-filter promise. The contract is authored in §9.2 (the `OutputFilter` SPI shape, the sealed `FilteringOutcome` disposition `Allowed`/`Redacted`/`Blocked`, the `FallbackReasons.FILTERED` token, the engine-local `OutputFilteredException`, and the pre-channel-emit hook layer); this item implements it. Delivered as `forvum-sdk/.../OutputGuard.java` + `AbstractOutputGuard` + engine enforcement (P2-OUTPUTGUARD #48).
 
 ### 7.3 Phase 3 — v1.0+ (differentiators)
 
@@ -1497,6 +1497,129 @@ Each item below is either a technical risk to validate early or a decision defer
 
 ---
 
+## 9. Security
+
+> **Status: DESIGN-ROUND DRAFT for maintainer sign-off (DR-6a, #59).** This section authors the threat model and the outbound-filter contract that the rest of EPIC-DR and the security-test layer depend on. The six open Group-6a design points are settled below and flagged inline as **[DP-n]**; they are summarized for ratification in the DR-6a issue (#59). Until the maintainer ratifies them, treat the named SPI shapes, exception types, and outcome subtypes as proposed-and-pending, not as locked contracts. The corresponding source artifacts (`OutputFilter`/`OutputGuard` SPI, `FilteringOutcome`, exception types, the `forvum-app/.../security/` negative-test layer) land milestone-by-milestone in P2-OUTPUTGUARD (#48), TEST-SEC (#65), and the per-milestone security amendments — not in this docs-only design round.
+
+Security in Forvum is **structural, not bolted-on**: the same primitives that make the architecture observable and isolated (`PermissionScope`, `@AgentScoped` isolation, the `turn_id`-correlated ledger, the single egress policy) are the security primitives. This section makes the §1.4 governance bullet — *"every tool carries a `PermissionScope`, user-approval hooks gate destructive actions, and outbound outputs can be filtered for sensitive data"* — concrete: it upgrades that principle from a promise to a named threat model (§9.1) and a named contract (§9.2). It is the architectural home the Context-Engineering **Guardrails** pillar (`CONTEXT-ENGINEERING-MAPPING.md` §"Governance, permissions, and security (Guardrails)"; `CONTEXT-ENGINEERING.md` REQ #2) maps onto.
+
+### 9.1 Threat model (STRIDE by surface)
+
+The threat model is organized **by surface**, one threat-set per attackable surface, rather than as a flat STRIDE table — each surface has a distinct trust boundary and a distinct mitigation owner. The five surfaces below are exactly the attack surfaces that touch the agent runtime; surfaces outside the runtime (plugin trust, MCP-server trust, audit retention, supply chain, privacy) are deliberately carved out to DR-6b (#60, §9.3) and DR-6c (#61, §9.4) and are out of scope here.
+
+For each surface we name the relevant STRIDE categories (**S**poofing, **T**ampering, **R**epudiation, **I**nformation disclosure, **D**enial of service, **E**levation of privilege), the concrete threat, and the mitigation. A mitigation tagged **[built]** already exists in merged code; **[contract]** is specified in §9.2 and implemented by a downstream issue.
+
+#### 9.1.a Tool-spec design — can a malicious or over-broad tool spec escalate?
+
+- **Trust boundary.** Tool specs are **author-authored**, contributed by first-party `ToolProvider` plugins at build time (§5.3); they are never user-derived, never dynamically assembled, and never synthesized from model output. A `ToolSpec(name, description, requiredScope, parametersJsonSchema)` is a `forvum-core` record (§5.3) frozen on the compile classpath of the native binary.
+- **E (Elevation of privilege) — over-broad `requiredScope`.** A tool that declares a *weaker* scope than the capability it actually exercises (e.g. an `fs.write`-capable tool that declares only `FS_READ`) would let an agent whose belt grants `FS_READ` invoke a write. **Mitigation:** scope declaration is a code-review obligation on the owning plugin PR (the scope is a literal in the tool's source, native-frozen), backed by the per-milestone security negative test (§10, TEST-SEC) that a tool's *required* scope is the *strongest* scope it can reach. There is no runtime synthesis path that could widen a spec, so the only injection vector is a reviewer missing an under-declared scope — a code-review control, not a runtime one. **[DP-1: tool specs are a closed, author-authored set; no runtime spec assembly. RATIFY.]**
+- **T (Tampering) — config-edited belt.** `allowedTools` globs live in `agents/<id>.json` under `~/.forvum/`; a user with filesystem access can already widen their own agent's belt. This is **in the trusted zone** (local-first, single-owner default): editing one's own `~/.forvum/` is owner intent, not an attack. The RBAC second gate (§9.1.b) is what bounds a *role-restricted* identity below the belt.
+- **I/D.** A tool spec carries no secrets and no unbounded work; the `tool_loop` round cap and per-agent `toolBudget` (§5.5) bound denial-of-service via tool-call storms.
+
+#### 9.1.b `ToolExecutor` gate enforcement — the two-gate model (RBAC second gate is built)
+
+- **Trust boundary.** Every tool call flows through the engine's `ToolExecutor` (§4.3.4, §5.5), which is the single chokepoint between the LLM's requested call and the tool's side effect. There is **no code path that bypasses the filter to grant "just this one call"** access (§5.3) — ad-hoc elevation is forbidden by design.
+- **E (Elevation of privilege) — belt gate (first gate).** `ToolExecutor` denies any call whose `ToolSpec.requiredScope` is outside the agent's materialized `AgentToolBelt` (the `allowedTools`-filtered subset of the global `ToolRegistry`). A denied call is audited as `tool_invocations.status = 'denied'` (§4.3.4). **[built — M13.]**
+- **E — RBAC role gate (second gate), already built (P2-11, #36).** Beyond the belt, `ToolExecutor` reads the caller's *effective scopes* from `CurrentIdentity.CURRENT_EFFECTIVE_SCOPES` (a `ScopedValue<Set<PermissionScope>>`, bound at every turn entry: `TurnService.dispatch` binds the identity's role-union via `IdentityResolver.rolesFor`; `CronScheduler.fire` binds the distinguished read-only `cron` role). A tool *in the belt* is **additionally denied + audited `denied`** when its required scope is outside the caller's effective scopes (§4.3.4 RBAC note, §7.2 item 11). An identity declaring no roles gets the permissive `default-user` (RBAC is opt-in restriction; backward-compatible, no migration). A caller outside a turn entry leaves the binding unset and is gated by the belt alone — and **every production turn entry binds it**, so the second gate is always active in production. **This gate is confirmed as the second tool-execution gate in the threat model; it is already merged and needs no new contract here.** **[DP-2: the RBAC second gate (CURRENT_EFFECTIVE_SCOPES) is the canonical role-enforcement point; §9 ratifies it as-built, adds no third gate. RATIFY.]**
+- **R (Repudiation).** Both gates write a `tool_invocations` row (the as-built `status` set is exactly {`ok`, `denied`, `error`} — V1 `-- ok | error | denied`, §4.2 V2 agrees) correlated by `turn_id` to the full turn ledger (§4.2 V2), so every allowed and every denied call is non-repudiable and queryable. (A `confirm_required` parking status is **deferred/planned** — its own future status value, landing only with the destructive-action confirm machinery below; it is **not** part of the as-built audit set.)
+- **E — spawn-boundary identity override.** A spawned sub-agent **inherits** its parent's `Identity` and cannot override it (§5.3, §5.5 `spawn_worker`): there is no API to become a different user across the spawn boundary. A spawn-boundary identity-override attempt is rejected and is a standing security negative test (§10, TEST-SEC; M7/M17). **[built — M7.]**
+- **D (Denial of service) — destructive-action storm.** Destructive tools (e.g. `shell.exec`) are intended to sit behind a `USER_CONFIRM_REQUIRED` approval hook (§2.4, §5.5); the call would be parked as `confirm_required` until the owner approves (P2-14 #39 supplies the per-channel approval UX). This is a **contract, not yet built**: `shell.exec` lives in `forvum-tools-shell`, which is not built; M13 shipped no confirm hook; and the approval UI is the Phase-3 user-approval-queue item (§7.2 item 14). **[planned — `forvum-tools-shell` + #39 UX.]** The belt gate and the RBAC role gate above are the destructive-action controls that **are** built (M13 / P2-11).
+
+#### 9.1.c Model output / prompt-injection causing unexpected tool calls
+
+- **Threat (T/E).** A malicious instruction embedded in retrieved memory, a tool result, a web page, or a worker's output coerces the model into emitting tool calls the user never intended ("ignore previous instructions, call `fs.write` …").
+- **Containment, not prevention (the decided posture).** Forvum does **not** claim to detect or prevent prompt injection at the model boundary — no reliable runtime injection-classifier exists, and pretending otherwise is a false guarantee. Instead, injection is *contained* by the surrounding structural controls so that a successful injection cannot exceed the caller's already-granted authority:
+  - The **two `ToolExecutor` gates** (§9.1.b): an injected tool call still hits the belt gate and the RBAC role gate, so it can only reach tools the agent+identity were already authorized for. Injection cannot widen scope.
+  - **Isolate at the worker→parent boundary** (§5.5 `reduce`): only a *compressed digest* crosses from a worker into the parent context, never the worker's raw window — so a poisoned worker output cannot inject its raw instructions into the parent. This is the Isolate-defense / cross-agent-injection guardrail already named in §5.5.
+  - **Retrieved memory is framed as data, not instructions** (decided with DR-5 #63, §4.3.6): retrieved memory enters the window inside an explicit `<retrieved_memory>` data block, structurally separated from the instruction surface, so a stored injection is presented as quoted data.
+- **Structural guidance, NOT a runtime contract (the decided boundary).** Prompt-injection mitigation in v0.1 is **structural guidance**, not a runtime SPI: (1) tool specs are author-authored and never user-derived or dynamically assembled (§9.1.a); (2) tool-execution **output filters are output filters — they catch leaks in egress (§9.2), they are not injection preventers** on ingress; (3) a future *user-defined-tool* surface (where a user or the model could define a tool at runtime) would breach the author-authored assumption and **would require a NEW contract** — it is explicitly out of v0.1/v0.5 scope and flagged for a future design round. **[DP-3: prompt-injection defense is containment-by-structure + the data/instruction framing, NOT a runtime injection-detection contract; a user-defined-tool surface is deferred and needs its own contract. RATIFY.]**
+
+#### 9.1.d Outbound filtering — secrets / PII leaking in channel responses
+
+- **Threat (I — Information disclosure).** A model response, a tool result echoed to the user, or a memory recall surfaces a secret (API key, token) or PII into a channel egress surface (TUI render, web frame, Telegram message) where it should not appear.
+- **Mitigation [contract].** A single **outbound filter** runs at the **pre-channel-emit** hook layer on every channel egress surface — the `OutputGuard` SPI (§7.2 item 23) implementing the `OutputFilter` contract specified in §9.2. Because every channel emits through the same `AgentEvent` → channel-render seam (§5.3, outbound flows as `AgentEvent.TokenDelta`), one filter placement covers all three v0.1 channels and every future channel. The filter can **block**, **redact**, or **mark-filtered** the egress (§9.2 `FilteringOutcome`). **[contract — §9.2; built by P2-OUTPUTGUARD #48.]**
+- **Hook layers (decided).** The `OutputFilter` contract reserves **three** hook layers so the same SPI is reusable beyond channel egress: **pre-channel-emit** (the v0.1 surface, secrets/PII before a user sees them), **pre-memory-write** (so a secret is not *persisted* into `semantic_memory`/`episodic_memory`; the boundary DR-5 #63 §4.3.6 reserves), and **pre-tool-call** (so a secret is not handed *out* to a tool's outbound HTTP, complementing the SSRF egress policy of §1.1/§1.4). v0.1 wires only **pre-channel-emit**; the other two layers are contract-reserved and wired in their owning issues (DR-5 for pre-memory-write). **[DP-4: the OutputFilter contract defines three hook layers (pre-channel-emit, pre-memory-write, pre-tool-call); v0.1 wires only pre-channel-emit. RATIFY.]**
+
+#### 9.1.e Memory isolation — one agent's memory leaking into another
+
+- **Threat (I/E).** Agent A reads or writes agent B's `messages` / `episodic_memory` / `semantic_memory` rows, breaching the per-agent isolation contract.
+- **Mitigation [built].** `AgentMemory` is a SQLite-backed `ChatMemory` that **writes only to this agent's rows** (`agent_id`-scoped), materialized inside the `@AgentScoped` context keyed by `CURRENT_AGENT` (§5.1, §5.3, Isolate pillar). Every memory read/write is `agent_id`-filtered; there is no cross-agent query path in the agent runtime (operator SQL in §7.3 item 2 is an out-of-band debug surface, not an in-turn path). Sub-agent isolation is the same mechanism: each spawned worker runs in its own `@AgentScoped` context with its own memory, and only the compressed digest crosses the `reduce` boundary (§5.5). The two-thread per-agent isolation assertion (M6 Risk #1) and the shared-`@TestProfile` pollution lessons (CLAUDE §14 [M7]) are the standing guards. **[built — M5/M6/M7.]**
+
+### 9.2 `OutputFilter` contract
+
+The `OutputFilter` is the named contract behind the §1.4 outbound-filter promise and the §7.2 item 23 `OutputGuard` SPI. It is specified here (DR-6a) and implemented next wave by **P2-OUTPUTGUARD (#48)**; this section is the contract that issue builds to.
+
+#### 9.2.1 The `FilteringOutcome` sealed hierarchy
+
+The result of running a filter over a candidate egress is a **sealed** `FilteringOutcome` in `forvum-core` (a `forvum-core` type because the `OutputFilter` SPI in `forvum-sdk` returns it, and the SDK may depend only on `forvum-core`). It carries exactly three outcome subtypes:
+
+```java
+// ai.forvum.core.security.FilteringOutcome  (Layer 0; sealed; reflection-registered
+// from the forvum-engine CoreReflectionRegistration holder per §6.3 — NOT @RegisterForReflection here)
+public sealed interface FilteringOutcome
+        permits FilteringOutcome.Allowed,
+                FilteringOutcome.Redacted,
+                FilteringOutcome.Blocked {
+
+    /** Egress passes through unchanged — no sensitive data matched. */
+    record Allowed(String content) implements FilteringOutcome {}
+
+    /** Egress is emitted with matched spans replaced (e.g. "sk-***"); the user still
+     *  gets a response, minus the secret/PII. Carries the redacted text + a redaction count. */
+    record Redacted(String content, int redactions) implements FilteringOutcome {}
+
+    /** Egress is suppressed entirely; the turn surfaces a FallbackTriggered/Error path
+     *  with reason = FallbackReasons.FILTERED instead of leaking. Carries the trip reason. */
+    record Blocked(String reason) implements FilteringOutcome {}
+}
+```
+
+- **`Allowed`** — the common path: nothing matched; the original content flows to the channel unchanged. (Naming note: the *outcome* subtype for "passed clean" is `Allowed`; the *event-level* signal that a filter *acted* is `FallbackReasons.FILTERED`, used only on the `Blocked` / hard-trip path — see §9.2.2. The task brief's "FILTERED" outcome label is realized as the `FallbackReasons.FILTERED` **reason token**, not as a third `FilteringOutcome` subtype; the three subtypes are the disposition — pass / redact / suppress — which is the orthogonal and more useful axis.)
+- **`Redacted`** — the preferred non-fatal trip: the user still gets a useful answer with the secret/PII masked; the redaction count feeds telemetry. Redaction is the default for matched secrets; full block is reserved for policy-configured hard categories.
+- **`Blocked`** — the hard trip: the whole egress is suppressed and the turn ends on the `FallbackReasons.FILTERED` path rather than leak. Used when redaction cannot be done safely (e.g. the entire message is the secret) or when policy declares a category block-only.
+
+**[DP-5: the trip disposition is a 3-subtype sealed `FilteringOutcome` (`Allowed` / `Redacted` / `Blocked`); the brief's "FILTERED" label is the `FallbackReasons.FILTERED` reason token on the `Blocked` path, not a fourth subtype. RATIFY or amend the subtype names.]**
+
+#### 9.2.2 Naming coordination with `FallbackReasons.FILTERED` and DR-4c `FailureClass`
+
+A new `FallbackReasons.FILTERED = "filtered"` constant joins the existing `FallbackReasons` set (§4.3.2: `RATE_LIMIT`, `TIMEOUT`, `SERVER_ERROR`, `COST_BUDGET`). It is the user-facing telemetry token written when a `Blocked` outcome ends a turn, mirroring how `COST_BUDGET` short-circuits (§4.3.2 / Decision 9). This is **additive** to `forvum-core` and carries no migration.
+
+**Coordination with DR-4c (#62).** DR-4c will settle the `FallbackChain` core type (§4.3.5.3, currently `*TBD*`); the `FailureClass` permits (`Retryable`/`NonRetryable`/`Unknown`) already shipped at M8 (sealed, engine-local), and DR-4c owns only whether to add a `Filtered` permit to that existing enum — the `Filtered` permit handed over by this design round (ISSUES.md DR-4c scope: *"the `Filtered` permit handed over by 6a constraint 7"*). **The naming must stay consistent across the two axes** (which §4.3.2 already keeps deliberately separate — `FailureClass` is the engine-local 3-way *retry* axis `Retryable`/`NonRetryable`/`Unknown`; `reason` is the finer user-facing *telemetry* token):
+- `FallbackReasons.FILTERED` (a `String` reason token, **user-facing telemetry**) — added here.
+- A future `FailureClass.Filtered` permit (the **engine-local retry axis**) — owned by DR-4c. A filtered egress is **`NonRetryable`** in retry terms (retrying produces the same secret), so if DR-4c adds a distinct `Filtered` permit it must classify as non-retryable; if DR-4c instead folds it into `NonRetryable`, the `reason` token `FILTERED` still distinguishes it in telemetry. Either way the *spelling* is `Filtered`/`FILTERED`, never `Filter`/`Censored`/`Masked`. **[DP-6: name coordination — `FallbackReasons.FILTERED` (token) here; DR-4c owns whether `FailureClass.Filtered` is a distinct non-retryable permit or folds into `NonRetryable`. RATIFY the spelling + the non-retryable classification.]**
+
+#### 9.2.3 SPI shape (what P2-OUTPUTGUARD #48 implements)
+
+The contract P2-OUTPUTGUARD implements is a sealed-family SPI in `forvum-sdk` (the only plugin-contract layer, §2.2), consistent with the other provider SPIs:
+
+```java
+// ai.forvum.sdk.OutputGuard  (Layer 1; forvum-sdk; depends only on forvum-core)
+public sealed interface OutputGuard permits AbstractOutputGuard {
+
+    /** Inspect a candidate egress at a given hook layer; return its disposition.
+     *  Pure + side-effect-free over the content; runs on the turn's virtual thread,
+     *  pre-channel-emit (v0.1). MUST NOT block on network or perform IO. */
+    FilteringOutcome filter(OutputContext ctx, String candidate);
+}
+
+// non-sealed extension point, mirroring AbstractXProvider (§2.2)
+public abstract non-sealed class AbstractOutputGuard implements OutputGuard {}
+```
+
+- **Hook layer (decided).** v0.1 invokes the guard at the **pre-channel-emit** seam — the single `AgentEvent.TokenDelta` → channel-render boundary (§5.3) — so one placement covers TUI/Web/Telegram. The `OutputContext` carries the hook-layer enum (`PRE_CHANNEL_EMIT` | `PRE_MEMORY_WRITE` | `PRE_TOOL_CALL`), the `AgentId`, and the `turn_id` so a trip is auditable; only `PRE_CHANNEL_EMIT` is wired in v0.1 (§9.1.d, [DP-4]).
+- **Composition.** Multiple configured `OutputGuard`s compose **fail-closed and most-restrictive-wins**: the engine folds the outcomes so any `Blocked` dominates a `Redacted` dominates `Allowed`; redactions union. The composition lives in the engine (an `OutputGuardChain`-style fold), not in the SPI, so a plugin guard stays single-responsibility.
+- **Concurrency.** The guard runs **blocking on the turn's virtual thread** (no reactive types; §3.8) and must be IO-free — a guard that needs a remote classifier is out of v0.1 scope and would force the `PRE_TOOL_CALL`/async question into a later design round.
+
+#### 9.2.4 New exception type(s) (decided)
+
+- **`OutputFilteredException`** (a new `forvum-engine` unchecked exception, **engine-local**, not in `forvum-sdk`/`forvum-core`) — thrown by the engine's egress path when a composed `Blocked` outcome suppresses an egress, carrying the `FallbackReasons.FILTERED` reason and the `turn_id`. Unchecked, because the only legitimate catcher is the engine's turn boundary. It **mirrors the *behavioral* pattern of `BudgetExhaustedException`** (§4.3.5.2 / Decision 9 — an unchecked, engine-caught terminal short-circuit that intermediate layers must not be forced to declare) while **deliberately living in `forvum-engine`, not `forvum-core`** (it is purely the engine's enforcement surface, not a value contract — so it does not add to the Layer-0 native-reflection surface). The engine catches it and emits a terminal `ErrorEvent` (`code = "output_filtered"`) / `FallbackTriggered(reason = FallbackReasons.FILTERED)`. A `Redacted` outcome throws **nothing** — it rewrites the egress in place and continues. **No new exception is added to `forvum-sdk` or `forvum-core`** (the SPI returns `FilteringOutcome`; the exception is purely the engine's enforcement surface), so the plugin contract stays exception-free and the Layer-0/Layer-1 native-reflection surface is unchanged.
+
+#### 9.2.5 Adjacent fs/shell contracts (deferred, named here)
+
+The Group-6a inventory also named the `WorkspaceRoot` path-confinement contract (fs tools) and the `ShellAllowlist` contract (shell tool). M14 already shipped a **minimal self-contained** `WorkspaceRoot` + `WorkspaceEscapeException` (lexical path confinement; §7.1 M14, CLAUDE §14 [tier-d]); the **full** `WorkspaceRoot` contract (symlink resolution, TOCTOU hardening) and the `ShellAllowlist` contract are **deferred** and are *not* re-opened by this design round — they are tracked as their own follow-ups (the deferred-DR-6a output-filter / threat-model items noted in ISSUES.md under M14). §9 confirms the deferral rather than re-specifying it, keeping DR-6a scoped to the threat model + the `OutputFilter` contract.
+
+---
+
 ## 10. Testing Discipline
 
 Forvum's test surface is part of the spec, not relegated to CONTRIBUTING. Each Phase 1 milestone declares its `Verify` script (§7.1); §3.7 commits the build to JaCoCo + a native CI matrix. This section codifies the *process discipline* that makes those Verify scripts trustworthy as gates rather than after-the-fact checks: how tests are written, what layers they live in, what coverage and performance gates apply, and what the project does about flaky live-provider tests.
@@ -1509,7 +1632,7 @@ Forvum's test surface is part of the spec, not relegated to CONTRIBUTING. Each P
 - **Test execution via the Quarkus Agent Dev MCP.** JVM-mode tests are run through the Quarkus Agent Dev MCP (`devui-testing_runTests` / `runTest`) via a subagent (§3.9); the §7.1 Verify command remains the contract the run must satisfy. Native integration tests (`-Pnative`, `@QuarkusIntegrationTest`) remain a Maven/Failsafe step and are the M20 gate.
 - **Performance gates per turn — initial targets, baselined at M5/M6.** Suggested p95 first-token latency excluding model inference: TUI ≤ 200 ms, Web ≤ 300 ms, Telegram ≤ 500 ms. These are *initial targets* to be confirmed by M5 (persistence) and M6 (`@AgentScoped` context) baselines; if measurements show them infeasible, this section is amended before they are enforced. Measurement uses a `FakeProvider` returning deterministic tokens so the gate measures Forvum, not the LLM.
 - **Flaky-test quarantine.** Live-provider tests live in `*-LiveTest` classes tagged `@Tag("live")`. Default-off in CI; a nightly workflow runs them with retry budget 1 and fails fast on the second failure. Live tests catch real regressions but do not gate every PR — with one deliberate exception: the Risk #5 real-provider native turn (`OllamaNativeTurnIT`, also `@Tag("live")` but a Failsafe `*IT`), which the dedicated linux-only `native-turn` job runs per-PR with the same retry budget 1, so a non-conversing native binary cannot reach `main`.
-- **Security-test layer.** Negative integration tests under `forvum-app/src/test/java/ai/forvum/security/` cover: prompt injection in user message → no tool-call escalation; path traversal in fs tool args → denied; spawn-boundary identity override attempt → rejected; `PermissionScope` mismatch (belt) → denied and audited; a role-restricted identity → denied an in-belt tool outside its role scopes and audited (P2-11); the distinguished `cron` role → enforced read-only (P2-11). The directory and tests land milestone by milestone alongside the security amendments to M3 / M13 / M14 / M16 / M17 / P2-11 (see §9 once it lands).
+- **Security-test layer.** Negative integration tests under `forvum-app/src/test/java/ai/forvum/security/` cover: prompt injection in user message → no tool-call escalation; path traversal in fs tool args → denied; spawn-boundary identity override attempt → rejected; `PermissionScope` mismatch (belt) → denied and audited; a role-restricted identity → denied an in-belt tool outside its role scopes and audited (P2-11); the distinguished `cron` role → enforced read-only (P2-11). The directory and tests land milestone by milestone alongside the security amendments to M3 / M13 / M14 / M16 / M17 / P2-11; the contracts under test are the threat model and `OutputFilter` contract authored in §9.
 - **Test fixture conventions.** A `*Fixtures` factory class per package (`AgentSpecFixtures`, `ProviderCallFixtures`, etc.) centralizes valid-instance construction so test code stays small and intent stays visible. A single `FakeProvider` in `forvum-engine`'s test fixtures returns canned `ChatResponse`s for performance, security, and behavioral tests.
 
 ---
