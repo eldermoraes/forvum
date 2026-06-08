@@ -800,3 +800,23 @@ Generalizable lessons from completed milestones; append here as milestones land.
   in core. Parity with a simpler upstream (OpenClaw is binary owner/non-owner + tool-name lists, no abstract
   scopes) is semantic — reproduce its behavior (permissive default, restricted cron) in the local vocabulary,
   don't copy its types. [P2-11]
+- **MEASURE the per-module JaCoCo baseline BEFORE setting the gate, then exclude only structurally-uncoverable
+  code — never lower the global threshold.** Wire `jacoco-maven-plugin` (0.8.15 is the first line reading Java
+  25 / class-file 69 bytecode) ONCE in the parent `<build><plugins>` — `prepare-agent` (Surefire only; its
+  `argLine` is picked up automatically, do NOT also count the native-profile Failsafe `*IT`), `report`,
+  `check` (BUNDLE rule 80% LINE / 75% BRANCH via `${jacoco.line.minimum}`/`${jacoco.branch.minimum}` props) —
+  inherited per module, gating each module's own coverage (stronger than a reactor aggregate a weak module
+  hides inside). Measure first: `verify -Djacoco.line.minimum=0.00 -Djacoco.branch.minimum=0.00`, then read
+  per-module `target/site/jacoco/jacoco.csv` (cols: BRANCH_MISSED=$6 BRANCH_COVERED=$7 LINE_MISSED=$8
+  LINE_COVERED=$9 — NOT 4/5/6/7). A child re-declares the `jacoco-check` execution by the SAME id to add
+  `<excludes>` (JaCoCo class-exclude form `ai/forvum/pkg/Foo*.class`, `/`-separated, `.class` suffix) or a
+  relaxed `<minimum>`; the execution `<configuration>` REPLACES the parent's rules (no deep-merge), so copy the
+  whole `<rules>` block. Justified excludes only: `forvum-sdk` logic-free `Abstract*Provider` sealed-set bridges
+  (→ 0 lines, passes vacuously), `forvum-engine` native-metadata holders + pure Panache `*Entity` classes (→
+  80.31/76.68, clears global). Where there is NO structural class to exclude (a real gap covered only by the
+  excluded Failsafe ITs or the booted app), set a JUSTIFIED per-module override and record the gap in a pom
+  comment, never weaken the global gate: `forvum-channel-telegram` LINE→0.72 (IT-only CDI-lifecycle/`@RestClient`
+  boot lines), `forvum-app` BRANCH→0.70 (picocli command error branches the native ITs cover). `pom`-packaged
+  modules (parent, `forvum-bom`) have no exec file → `check` skips gracefully, no carve-out. The four
+  §10-mandated property tests already existed — confirm before writing. Pitest stays signal-only (documented,
+  not a failing gate). [X3]
