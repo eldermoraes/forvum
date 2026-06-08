@@ -1017,3 +1017,17 @@ Generalizable lessons from completed milestones; append here as milestones land.
   Telegram allow/deny → drive the real `UpdateProcessor` over an in-test recording `TelegramBotApi` impl. A
   package-private production constant (`UpdateProcessor.REFUSAL_MESSAGE`) is asserted by its observable content,
   not widened to `public` for a test. [X6]
+- **The prompt-injection security test must drive the BELT gate end-to-end, not the executor directly.** The
+  existing `PermissionScopeMismatchTest` already denies an out-of-belt tool by calling `ToolExecutor.execute`
+  with a hard-coded name; the mandated prompt-injection category (CLAUDE.md §11) is the same belt-miss denial
+  but realized through the real channel turn entry — a scripted tool-calling fake model (id `scripted-injection`,
+  app-test scope, mirrors the engine's `ScriptedToolCallModelProvider`) emits an `fs.write` `ToolExecutionRequest`
+  the way an injected instruction would coerce a real model, the agent's `allowedTools` is `[]`, and
+  `TurnService.dispatch → SupervisorGraph.toolLoop → ToolCallBridge → ToolExecutor` denies + audits it
+  (`status='denied'`) while the turn still completes (terminal `Done`, no `ErrorEvent`). Assert BOTH the denied
+  row AND `ok=0` for the same `(session,tool)` — the no-escalation half — scoped to the session this method
+  writes (shared `@TestProfile` DB, §14). Make it gating by red-checking: put the tool back in the belt and the
+  `denied=1` assertion must flip to `0`. The engine `ScriptedToolCallModelProvider`/`FakeToolProvider` live in
+  `forvum-engine/src/test` and are NOT on the app classpath — add an app-test fake; route by `extensionId()`
+  (`LlmSelector` matches the `ModelRef` provider half), and a new `ModelProvider` bean does not perturb the
+  provider-resolve guards (they inject by concrete type). [TEST-SEC]
