@@ -800,3 +800,12 @@ Generalizable lessons from completed milestones; append here as milestones land.
   in core. Parity with a simpler upstream (OpenClaw is binary owner/non-owner + tool-name lists, no abstract
   scopes) is semantic — reproduce its behavior (permissive default, restricted cron) in the local vocabulary,
   don't copy its types. [P2-11]
+- **A "milestone gap" can be a docs-ownership gap, not a missing milestone — fold, don't multiply
+  milestones.** X7's six items (shell tool, `SkillInvokerTool` skills surface, `forvum-tools-mcp-bridge`
+  baseline, §3.6 OTel baseline, `forvum init`, the `/q/dashboard/capr` endpoint) each rode an existing
+  milestone's SPI/surface (skills + shell + mcp-bridge on M13's `ToolProvider.tools()`; OTel + CAPR on
+  M18's turn/graph spans; the `init` command on M20's picocli command-mode + the M4 `~/.forvum/` layout
+  it scaffolds — NOT M1, which is reactor/pom/wrapper bootstrap only), so the fix was to fold them into
+  M4/M13/M18/M20 *acceptance* and delete the "real roadmap gap" framing — no micro-milestones, no code.
+  When a docs item reads "no Phase-1 milestone", check whether the surface already exists before scheduling new work.
+  Unblocks downstream parity issues that depend on the owned baseline (P2-7/#32, P2-13/#38, P2-15/#40). [X7]

@@ -62,7 +62,7 @@ Phase 1 (MVP v0.1) — the critical path
    M5 + M7 + M8 + M13 ─→ M18 SupervisorGraph (CRITICAL native; VT fan-out)
    M4 + M5 + M7 + M8 + M18 ─→ M19 cron scheduler
    ALL of M1–M19 ─→ M20 native image + CI matrix (CAPSTONE; X3 parity edit lands here)
-   X7  (shell/skills/OTel/mcp-bridge gap)  resolved as M13/M18 acceptance or micro-milestones
+   X7  (shell/skills/OTel/mcp-bridge/init/CAPR)  FOLDED into M4/M13/M18/M20 acceptance (no micro-milestones)
    X4 X5 X6 X8  land milestone-by-milestone, gated by M20
 
 Phase 2 (v0.5 parity) — gated on a stable MVP (M20)
@@ -567,9 +567,11 @@ manifest. If the Vertex gRPC stack blocks native, switch to the REST `quarkus-la
 **Labels:** `phase-1`, `engine`, `tool`, `security`, `native` · **Milestone:** `v0.1 MVP`
 
 **Context.** Tool capability gating (§5.3, §4.3.4): the Select pillar applied to capability. Tied to the
-security-test layer (§10). The X7 gap (the shell tool, the `SkillInvokerTool` skills surface, the MCP
-bridge baseline, the OTel baseline) is **out of M13 scope** — decided 2026-06-05, deferred to its own
-issue (#73), so M13 stays minimal.
+security-test layer (§10). The M13 *registry/filtering/scope* core stays minimal here; X7 (#73) FOLDS
+the shell tool, the `SkillInvokerTool` skills surface (skills ARE tools), and the `forvum-tools-mcp-bridge`
+baseline (flagged OFF in v0.1 per Risk #9) into M13 *acceptance* (the §3.6 OTel baseline + CAPR endpoint
+fold into M18). These ride the `ToolProvider.tools()` SPI this milestone establishes; they are no longer
+unowned (X7 decision, 2026-06-08).
 
 **Scope / Deliverables.** `ToolRegistry`; `ToolExecutor` (enforces capability via the agent's filtered
 belt); `PermissionDeniedException`; `ToolFilter` (glob matching); the `forvum-sdk` `ToolProvider.tools()`
@@ -811,7 +813,7 @@ Playwright-Java + the langchain4j tool API. **Dependencies.** M13, M14, MVP stab
 **Files.** `forvum-tools-sandbox`. **Acceptance.** Sandboxed run returns output; escape attempt
 contained; `USER_CONFIRM_REQUIRED` honored; parity verified. **[NATIVE]** native binary launches the
 sandbox runtime; verify. **[PLUGIN]** scaffold via the MCP. **Dependencies.** M13, the
-`forvum-tools-shell` pattern (X7 — shell tool has no Phase-1 milestone; resolve via M13).
+`forvum-tools-shell` pattern (owned by M13 acceptance per X7 #73).
 **Commit.** `feat(tools-sandbox): add containerized code-execution sandbox`
 
 ## P2-3 — Voice channel
@@ -855,8 +857,8 @@ via the MCP. **Dependencies.** §6.3 build-time discovery, ServiceLoader fast-ja
 **Context.** `forvum skill install <url>`. **Scope.** Add a `skills/<skill>.md` from a git repo or gist.
 **Files.** `forvum-app/.../cli/SkillInstallCommand.java`. **Acceptance.** Installing a URL adds a skill `.md` invocable by the
 skill tool; parity verified. **[NATIVE]** native parity (pure file write). **[PLUGIN]** scaffold via the
-MCP. **Dependencies.** the skills surface (`SkillInvokerTool`; X7 — no Phase-1 milestone; resolve via
-M13/M18). **Commit.** `feat(app): add skill install command from URL`
+MCP. **Dependencies.** the skills surface (`SkillInvokerTool`; owned by M13 acceptance per X7 #73).
+**Commit.** `feat(app): add skill install command from URL`
 
 ## P2-8 — Session replay
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`
@@ -940,7 +942,7 @@ them; parity verified. **[NATIVE]** Risk #9: stdio MCP servers spawn subprocesse
 after the native smoke passes on all platforms. The MCP client is the Quarkiverse
 `quarkus-langchain4j-mcp` extension (native-ready), NOT the standalone `langchain4j-mcp` beta.
 **[PLUGIN]** `quarkus/skills` for the MCP-client extension. **Dependencies.** M13, the
-`forvum-tools-mcp-bridge` baseline (X7 — no Phase-1 milestone; resolve via M13).
+`forvum-tools-mcp-bridge` baseline (owned by M13 acceptance per X7 #73).
 **Commit.** `feat(tools-mcp): add MCP server registry add/list commands`
 
 ## P2-14 — User-approval queue UI
@@ -959,9 +961,8 @@ off); zero-config for Honeycomb/Grafana Tempo/Datadog; also exports the §3.8 Co
 pin data. **Files.** engine observability config. **Acceptance.** With the env var set, spans/metrics
 export to a local OTLP collector; default-off when unset; parity verified. **[NATIVE]**
 `quarkus-opentelemetry` OTLP native parity (let the Quarkus BOM govern the version). **[PLUGIN]**
-`quarkus/searchDocs` for OTLP config. **Dependencies.** the §3.6 OTel baseline (X7 — wired across
-M-milestones, no single milestone; resolve via M13/M18). **Commit.** `feat(engine): add OTLP telemetry
-export gated by endpoint env var`
+`quarkus/searchDocs` for OTLP config. **Dependencies.** the §3.6 OTel baseline (owned by M18 acceptance
+per X7 #73). **Commit.** `feat(engine): add OTLP telemetry export gated by endpoint env var`
 
 ### Parity additions (§7.2 items 16–23, reconciled to OpenClaw v2026.4.19-beta.2)
 
@@ -1299,11 +1300,11 @@ TEST-SEC for the actual tests). This issue is the umbrella linking the §9 gap t
 **Context.** The 10 E2E scripts under `forvum-app/src/test/java/ai/forvum/e2e/`, landing milestone by
 milestone, gating CI, run on **fast-jar AND native** on `linux-amd64` AND `macos-arm64`. **Scope.**
 Scenario→milestone mapping: (1) cold install < 200 ms → M20; (2) first-run init (`forvum init`
-scaffolds `~/.forvum/`) → M4 + an `init` command (no explicit milestone — fold into M1/M4 acceptance);
+scaffolds `~/.forvum/`) → M4 (on-disk layout) + the `init` command (M20 picocli command-mode, per X7 #73);
 (3) TUI golden path → M15 (+ M5); (4) per-agent LLM selection + fallback → M8 + M9 + M10; (5) sub-agent
 spawn → M7 + M18; (6) web channel → M16; (7) Telegram allowed/denied user → M17; (8) cron run → M19;
 (9) hot reload without restart → M4 + M7; (10) CAPR dashboard (`/q/dashboard/capr`, ≥ 5 capr_events) →
-M18 + the §3.6 CAPR endpoint (no explicit milestone — fold into M18 acceptance). **Acceptance.** All 10
+M18 + the §3.6 CAPR endpoint (folded into M18 acceptance per X7 #73). **Acceptance.** All 10
 scenarios green on fast-jar AND native on both platforms; the suite gates CI. **[NATIVE]** explicitly
 dual-target (aligned with REQ #1). **Dependencies.** M20 (native gating), the per-scenario milestones.
 **Commit.** `test: add end-to-end verification suite (10 scenarios)`
@@ -1312,13 +1313,25 @@ dual-target (aligned with REQ #1). **Dependencies.** M20 (native gating), the pe
 **Labels:** `ci-infra`, `engine` · **Milestone:** `CI/Test Infra`
 **Context.** §2.4 declares `forvum-tools-shell`, `forvum-tools-mcp-bridge`, the `SkillInvokerTool`
 skills surface, and §3.6 OTel wiring, and the E2E mapping references `forvum init` and the
-`/q/dashboard/capr` endpoint — **none has a dedicated M1–M20 milestone.** This is a real roadmap gap.
-**Scope.** DECISION issue: fold the shell tool + skills surface + OTel baseline + mcp-bridge (flagged
-off, Risk #9) + `forvum init` + the CAPR endpoint into M13/M18/M4 acceptance, OR add micro-milestones.
-Recommended: shell tool + skills + OTel baseline + mcp-bridge → M13/M18 acceptance; `forvum init` → M1/M4
-acceptance; the CAPR endpoint → M18 acceptance. **Acceptance.** Each gap item has a documented owning
-milestone (or a micro-milestone issue) and is not lost. **Dependencies.** M13, M18, M4 (placement
-targets). **Commit.** `chore: resolve Phase-1 milestone gaps (shell/skills/mcp-bridge/OTel/init/CAPR)`
+`/q/dashboard/capr` endpoint — each lacked a *dedicated* M1–M20 milestone heading.
+**Resolution (DECISION, 2026-06-08, maintainer-locked).** FOLD the six items into existing milestone
+acceptance — no micro-milestones. Each now has an explicit OWNING milestone, so none is unowned:
+| Gap item | Owning milestone |
+|---|---|
+| `forvum-tools-shell` (`shell.exec` + allow-list + `USER_CONFIRM_REQUIRED`) | **M13** acceptance |
+| skills surface (`SkillInvokerTool`; skills ARE tools) | **M13** acceptance |
+| `forvum-tools-mcp-bridge` (flagged OFF in v0.1 per Risk #9) | **M13** acceptance |
+| §3.6 OTel baseline (four `forvum.*` spans) | **M18** acceptance |
+| `forvum init` first-run command surface | **M20** (picocli command-mode; shipped) |
+| `~/.forvum/` on-disk layout the scaffold writes | **M4** acceptance |
+| `/q/dashboard/capr` CAPR endpoint (§3.6) | **M18** acceptance |
+`forvum-tools-web` is OUT of X7 scope (separate issue). **Acceptance.** Each item is reflected in each
+owning milestone's `Owns (X7)` annotation and the §2.4 / §3.6 references (the milestone Verify lines are
+unchanged), so no reader concludes any is a roadmap gap. This is a DOCS-ONLY decision — no code, no
+migration. **Unblocks the baseline for** P2-13 (#38, MCP registry — needs the mcp-bridge baseline owned),
+P2-15 (#40, telemetry export — needs the §3.6 OTel baseline owned), and P2-7 (#32, skill marketplace —
+needs the `SkillInvokerTool` surface owned). **Dependencies.** M13, M18, M4, M20 (placement targets).
+**Commit.** `docs: fold Phase-1 milestone gaps into M4/M13/M18/M20 acceptance (X7)`
 
 ## X8 — Critical-Files → milestone cross-link guarantee
 **Labels:** `ci-infra` · **Milestone:** `CI/Test Infra`
