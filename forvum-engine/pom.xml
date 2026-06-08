@@ -138,6 +138,15 @@
                                 <exclude>ai/forvum/engine/persistence/CoreReflectionRegistration.class</exclude>
                                 <exclude>ai/forvum/engine/graph/GraphNativeSerializationConfig.class</exclude>
                                 <exclude>ai/forvum/engine/persistence/*Entity.class</exclude>
+                                <!-- IT-covered beans (X3 policy: coverage = Surefire only; these are exercised
+                                     end-to-end by @QuarkusTest *IT with real SQLite, not unit Surefire tests):
+                                     SessionCompactor/DefaultSummarizer by SessionCompactorIT (P2-COMPACT),
+                                     TaskRecorder by CronSchedulerFireIT/AgentRegistrySpawnLedgerIT (P2-TASKLEDGER),
+                                     LoggingCronDeliverySink by CronSchedulerFireIT (P2-CRON-DELIVERY). -->
+                                <exclude>ai/forvum/engine/session/compaction/SessionCompactor.class</exclude>
+                                <exclude>ai/forvum/engine/session/compaction/DefaultSummarizer.class</exclude>
+                                <exclude>ai/forvum/engine/persistence/TaskRecorder.class</exclude>
+                                <exclude>ai/forvum/engine/cron/LoggingCronDeliverySink.class</exclude>
                             </excludes>
                             <rules>
                                 <rule>
