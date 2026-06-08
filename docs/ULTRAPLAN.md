@@ -1060,9 +1060,160 @@ public final class SpawnConfigurationException extends RuntimeException {
 
 *TBD (Group 4c).*
 
-#### 4.3.6 MemoryPolicy
+#### 4.3.6 `MemoryPolicy`
 
-*TBD (Group 5).*
+A `MemoryPolicy` declares one agent's **Select-pillar retrieval scope** and **Compress-pillar compression threshold** over the three memory tiers — `messages` (short-term), `episodic_memory` (procedural), `semantic_memory` (long-term facts), all in the M5 SQLite schema (§4.2). It is a pure data record — strategy, tiers, caps, floor, and threshold are static per-agent configuration — that *drives* the `MemoryProvider` retrieval SPI (§2.2, `forvum-sdk`) without coupling the agent to any one retrieval algorithm. Nothing is persisted on `MemoryPolicy` itself; the SQLite tiers are authoritative, exactly as `provider_calls` is authoritative for `CostBudget` (§4.3.5.2). The full deliberation and decision points are in `docs/design-rounds/group-5-memory-policy.md` (DR-5).
+
+All five types below live directly in the `ai.forvum.core` package of the `forvum-core` module (co-located with `ModelRef`, §4.3.5.1) — unlike the budget surface they need no service interface inside core, so they do not earn their own sub-package. Two records (`MemoryQuery`, `MemoryHit`) and the new SPI method also cross the Layer-1 boundary: `MemoryProvider.retrieve(MemoryQuery, MemoryPolicy) → List<MemoryHit>` (§2.2) is the method P2-5's reference memory-host implements. The SPI stays Quarkus-free and reactive-free — retrieval blocks on a virtual thread (§3.8).
+
+```java
+// Module: forvum-core
+// Package: ai.forvum.core
+// Each top-level type below lives in its own .java file.
+
+package ai.forvum.core;
+
+import java.util.EnumSet;
+import java.util.Set;
+
+// -- Shape: the per-agent retrieval + compression policy --
+
+public record MemoryPolicy(
+        RetrievalStrategy strategy,     // vector | graph | metadata | hybrid | none
+        Set<MemoryTier> tiers,          // which tiers to read back from
+        int topK,                       // max hits returned across selected tiers
+        double minScore,                // similarity floor in [0.0, 1.0]; 0.0 = no floor
+        int compressThresholdChars) {   // serialized size above which reduce summarizes (§5.5)
+
+    public MemoryPolicy {
+        if (strategy == null) {
+            throw new IllegalStateException(
+                "MemoryPolicy strategy must be non-null. Use "
+              + "RetrievalStrategy.NONE to disable retrieval. Check the "
+              + "\"memoryPolicy\" block in agents/<id>.json.");
+        }
+        if (tiers == null) {
+            throw new IllegalStateException(
+                "MemoryPolicy tiers must be non-null (empty is allowed only "
+              + "when strategy == NONE). Check agents/<id>.json.");
+        }
+        tiers = (tiers.isEmpty())
+                ? EnumSet.noneOf(MemoryTier.class)
+                : EnumSet.copyOf(tiers);   // defensive, unmodifiable copy
+        if (strategy != RetrievalStrategy.NONE && tiers.isEmpty()) {
+            throw new IllegalStateException(
+                "MemoryPolicy with strategy=" + strategy + " selects no "
+              + "tiers, so it would retrieve nothing. Either select at least "
+              + "one MemoryTier or set strategy=NONE. Check agents/<id>.json.");
+        }
+        if (topK < 0) {
+            throw new IllegalStateException(
+                "MemoryPolicy topK must be non-negative. Got: " + topK
+              + ". 0 means retrieve nothing this turn. Check agents/<id>.json.");
+        }
+        if (minScore < 0.0 || minScore > 1.0) {
+            throw new IllegalStateException(
+                "MemoryPolicy minScore must be in [0.0, 1.0]. Got: " + minScore
+              + ". Providers normalize their native distance metric into this "
+              + "range. Check agents/<id>.json.");
+        }
+        if (compressThresholdChars < 0) {
+            throw new IllegalStateException(
+                "MemoryPolicy compressThresholdChars must be non-negative. "
+              + "Got: " + compressThresholdChars + ". 0 means always compress. "
+              + "Check agents/<id>.json.");
+        }
+    }
+
+    /**
+     * The config-absent default, the single source consumed by the M5 config
+     * loader and the DR-8 {@code AgentSpec} parse: hybrid retrieval across all
+     * three tiers, topK=8, no similarity floor, an 8000-char compression
+     * threshold. Numeric values are starting points to be baselined against
+     * the §10 per-turn performance gates, not load-bearing constants.
+     */
+    public static MemoryPolicy defaults() {
+        return new MemoryPolicy(
+                RetrievalStrategy.HYBRID,
+                EnumSet.allOf(MemoryTier.class),
+                8, 0.0, 8000);
+    }
+}
+
+// -- Select: the retrieval algorithm the provider applies --
+
+public enum RetrievalStrategy { VECTOR, GRAPH, METADATA, HYBRID, NONE }
+
+// -- The three M5 memory tiers (§4.2) --
+
+public enum MemoryTier { MESSAGES, EPISODIC, SEMANTIC }
+
+// -- The per-turn retrieval request --
+
+public record MemoryQuery(
+        String agentId,      // tenant key — retrieval never crosses agents (Isolate)
+        String sessionId,    // nullable: session-scoped tiers narrow to it; null = cross-session
+        String text) {       // the retrieval cue (current user turn / sub-question)
+
+    public MemoryQuery {
+        if (agentId == null || agentId.isBlank()) {
+            throw new IllegalStateException(
+                "MemoryQuery agentId must be non-null and non-blank — it is "
+              + "the tenant key that confines retrieval to one agent (Isolate). "
+              + "A null here indicates the @AgentScoped context was not "
+              + "propagated at construction time.");
+        }
+        if (text == null) {
+            throw new IllegalStateException(
+                "MemoryQuery text must be non-null (may be blank for a "
+              + "tier-scan with no cue). A null indicates a wiring bug.");
+        }
+    }
+}
+
+// -- A single retrieved memory, framed downstream as <retrieved_memory> DATA (§9, DR-6a) --
+
+public record MemoryHit(
+        MemoryTier tier,     // which tier this hit came from
+        String content,      // the retrieved text — DATA, not instructions
+        double score,        // relevance in [0.0, 1.0]; 1.0 for non-scored (metadata) hits
+        String source) {     // free-form provenance (semantic_memory.source, or tier+id)
+
+    public MemoryHit {
+        if (tier == null) {
+            throw new IllegalStateException(
+                "MemoryHit tier must be non-null. A null indicates a "
+              + "MemoryProvider construction bug.");
+        }
+        if (content == null) {
+            throw new IllegalStateException(
+                "MemoryHit content must be non-null. A null indicates a "
+              + "MemoryProvider construction bug.");
+        }
+        if (score < 0.0 || score > 1.0) {
+            throw new IllegalStateException(
+                "MemoryHit score must be in [0.0, 1.0]. Got: " + score
+              + ". Providers normalize their native metric into this range; "
+              + "use 1.0 for non-scored (metadata) hits.");
+        }
+    }
+}
+```
+
+**Type conventions and cross-references:**
+
+- **Flat record with an enum strategy field, not a sealed per-strategy hierarchy.** The four retrieval strategies (`VECTOR`/`GRAPH`/`METADATA`/`HYBRID`) differ only in the algorithm the *provider* runs, not in the policy's schema — every strategy needs the same `tiers`/`topK`/`minScore`/`threshold` knobs. A `VectorPolicy`/`GraphPolicy` hierarchy would import form without the justifying condition, the same reasoning that kept `CostBudget` flat (§4.3.5.2 Decision 1/4). (DR-5 DP-1)
+- **`RetrievalStrategy.NONE` is a first-class "memory off" value.** An agent that writes but never reads back (or a deterministic test agent) sets `NONE`; the engine short-circuits and never calls `retrieve(...)`. This keeps `MemoryPolicy` on the agent spec non-nullable — every agent has a policy; "no retrieval" is a value, not absence. (DR-5 DP-4)
+- **Validation via `IllegalStateException` with origin-naming messages.** The canonical constructors throw `IllegalStateException` (not `IllegalArgumentException`) with triage-oriented text naming the likely origin — config file `agents/<id>.json`, or a programmatic / wiring bug — matching `ModelRef` (§4.3.5.1) and `CostBudget` (§4.3.5.2). Empty `tiers` is legal only with `strategy == NONE`; a non-`NONE` strategy selecting no tiers is a config mistake and throws. (DR-5 DP-5)
+- **`minScore` is a normalized `double` in `[0.0, 1.0]`.** Providers normalize their native distance metric (cosine, L2, BM25, graph-walk depth) into a provider-independent relevance so the policy's floor means the same thing everywhere; `minScore = 0.0` is "no floor". `MemoryHit.score` rides the same scale, with `1.0` for non-scored metadata hits. (DR-5 DP-2)
+- **`compressThresholdChars` is a character count, not tokens.** Character length is computable without a tokenizer (native-clean, no model round-trip merely to decide *whether* to compress) and `reduce` (§5.5) already speaks in serialized size. It is the single Compress knob: it governs both the `reduce` worker-output merge and write-time summarization of oversized retrieved memory. (DR-5 DP-3, DP-12)
+- **`MemoryPolicy.defaults()` is the single config-absent source.** The M5 config loader and the DR-8 `AgentSpec` parse both read it, so the absent-config policy has one definition. Its numeric values are baseline starting points to be tuned against the §10 per-turn performance gates, not load-bearing constants. (DR-5 DP-6)
+- **The SPI method `MemoryProvider.retrieve(MemoryQuery, MemoryPolicy) → List<MemoryHit>` (§2.2).** Query carries *what to retrieve about* (cue text + the agent/session tenant keys); policy carries *how/where/how-much* (strategy, tiers, caps, floor). The split keeps the policy reusable across turns (agent config) while the query changes every turn. It returns at most `topK` hits, each at or above `minScore`, drawn only from `tiers`. Blocking, run on a virtual thread (§3.8 — no reactive types); `forvum-sdk` stays Quarkus-free. Implementations confine retrieval to `query.agentId()` (Isolate). The default linear-scan provider (the `sqlite-vec`-free MVP path of §4.2) lands in **P2-5**. (DR-5 DP-8, DP-9)
+- **Retrieval output is framed as `<retrieved_memory>` DATA blocks.** Every `MemoryHit.content` is wrapped in a `<retrieved_memory>…</retrieved_memory>` block (with provenance from `MemoryHit.source`) before it enters the prompt window, never spliced into the system/instruction region. Retrieved `semantic_memory`/`episodic_memory` rows can contain model-authored text from a prior, possibly-poisoned turn, so retrieved memory is an untrusted-content surface. The framing mechanism and threat model are owned by the §9 Security section (DR-6a point 5); §4.3.6 only declares that retrieval output flows through it. (DR-5 DP-13)
+- **The pre-memory-write `OutputFilter` boundary.** The write path that persists into `episodic_memory`/`semantic_memory` passes candidate content through the pre-memory-write `OutputFilter` hook (the §9 Security section, DR-6a point 2c) *before* the row is inserted — so a secret/PII value cannot be durably stored and later re-retrieved into a prompt. `MemoryPolicy` does **not** configure the filter; it governs *read-back*, the filter governs *write*. The interaction is: filter on write (§9) → store → retrieve under policy (§4.3.6) → frame as `<retrieved_memory>` (§9). (DR-5 DP-14, DP-15)
+- **Spawn inheritance mirrors `CostBudget`/`Identity`.** A spawned sub-agent inherits its parent's `MemoryPolicy` verbatim unless the spawn request overrides it (§5.5); the override is all-or-nothing (absent ⇒ inherit, present ⇒ replace, no partial merge — §4.3.5.2 Decision 10). Unlike `CostBudget`'s `SessionWindow`, `MemoryPolicy` carries **no parent-bound scope** — the tenant key (`agentId`) is supplied per-call via `MemoryQuery` from the child's `@AgentScoped` context — so a verbatim-inherited policy reads the *child's* own memory automatically, and **no `SpawnConfigurationException` analogue is needed**. (DR-5 DP-10, DP-11)
+- **Native registration.** All five types are JSON-serialized (they ride in `agents/<id>.json` and cross the SPI). Per §6.3, Layer-0 records do **not** carry `@RegisterForReflection` (core bans `io.quarkus*`); `MemoryPolicy`, `RetrievalStrategy`, `MemoryTier`, `MemoryQuery`, and `MemoryHit` are appended to the single engine holder `forvum-engine/.../persistence/CoreReflectionRegistration.java` by the milestone that lands them (P2-5). (DR-5 §3.3)
+- **Cross-references.** Memory tiers + schema: §4.2 (V1 schema; the `MemoryPolicy` forward-reference at §4.2 now resolves). `reduce` compression node consuming `compressThresholdChars`: §5.5. Spawn mechanism and override parameter: §5.5 (`spawn_worker`), §5.1. `MemoryProvider` SPI and the Select pillar: §2.2, §2.7. `<retrieved_memory>` framing + pre-memory-write `OutputFilter`: §9 (DR-6a). `ModelRef` (co-located in the same `ai.forvum.core` package): §4.3.5.1. Demo deferral D2's `memoryPolicy` sub-gap is dissolved here; the residual `AgentSpec` composition is DR-8.
 
 #### 4.3.7 Identity, message, persona, and tool-spec records
 
@@ -1103,7 +1254,7 @@ public record ToolSpec(String name, String description,
   immutable collections in the canonical constructor; a null collection is rejected (use an empty one).
 - **`Persona` omits the LLM fallback chain and the memory policy by design.** It carries only
   `primaryModel` today; the chain field arrives with `FallbackChain` (§4.3.5.3, DR-4c) and the retrieval
-  field with `MemoryPolicy` (§4.3.6, DR-5). `Persona` must not reference either TBD type at M2. `parent`
+  field with `MemoryPolicy` (§4.3.6, settled by DR-5). `Persona` must not reference either deferred type at M2. `parent`
   null means a top-level agent; null `costBudget`/`toolBudget` mean uncapped; a non-null `toolBudget` must
   be non-negative.
 - **`ToolSpec` is a Forvum-native record, not a wrapper over LangChain4j's `ToolSpecification`.** The
