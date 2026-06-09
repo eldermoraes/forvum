@@ -1072,3 +1072,26 @@ Generalizable lessons from completed milestones; append here as milestones land.
   engine-caught terminal short-circuit) so the SDK/core stay exception-free. Coordinate the `Filtered` spelling
   with DR-4c's `FailureClass` (filtered = non-retryable). Flag each settled point inline as `[DP-n]` so a
   maintainer can ratify/amend a draft surgically. [DR-6a]
+- **A feature-complete binary still failed the "stranger installs it" test — silent exits and bare wrapper
+  errors made working machinery look broken.** A fresh-machine install hit three pure-UX walls: (1) the
+  default run with no `~/.forvum` printed the banner and exited 0 with no hint (and the README's JVM section
+  omitted `init` entirely), reading as "the terminal doesn't work"; (2) the REPL had no prompt/help line, so
+  an interactive session looked frozen while the model worked; (3) every turn failure rendered as the
+  wrapper's "Supervisor graph failed for session ..." with the actionable root cause (ConnectException →
+  Ollama not running) swallowed. Fixes: TTY-gated interactive affordances — `System.console() != null &&
+  console.isTerminal()` is the JDK 25 seam (works in the native image), threaded as a
+  `repl(..., boolean interactive)` parameter. TTY-only: the `forvum> ` prompt, the ready line, the
+  block-letter banner, and `/exit`-`/quit` interception (demo parity; a piped `/exit` line is NEVER
+  swallowed — piped framing stays identical to the M15 contract and a piped session ends at EOF).
+  Unconditional by design: the no-channel `forvum init` hint (the whole point is "never exit silently",
+  including CI/piped runs) and the error rendering. `TurnService.describeFailure` walks to the deepest
+  cause (hop-capped — a multi-node cause cycle is constructible and would spin the catch block forever)
+  and, on a connection-level root, appends "Is the model provider running? (model: <ref>)" — fetched via
+  a never-throwing persona lookup since the lookup itself can be the failure; NOTE the native image
+  surfaces connection-refused as `ClosedChannelException` while the JVM throws `ConnectException` (only a
+  live native error-path run caught that), so the predicate covers both (+`UnknownHostException`,
+  +`HttpConnectTimeoutException`); the TUI renders
+  `ErrorEvent` behind an `[error] ` marker. README install builds get `-DskipTests` (installers were running
+  the dev suite and reading its noise as a broken build; contributors run `./mvnw verify`). Test the
+  install path as a user would — `init`/`doctor`/piped turn/no-config run on a clean `FORVUM_HOME` — not
+  just the milestone Verify scripts. [UX-INSTALL]

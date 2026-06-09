@@ -49,27 +49,37 @@ ollama pull qwen3:1.7b    # the model the default agent is pinned to
 **Native single binary** (the primary target — one executable, no JVM, &lt;200 ms cold start):
 
 ```bash
-./mvnw -Pnative -pl forvum-app -am package   # -am pulls in the reactor deps — builds from a fresh clone
-BIN=forvum-app/target/forvum-app-0.1.0-SNAPSHOT-runner
+# -am pulls in the reactor deps — builds from a fresh clone; -DskipTests skips the
+# development test suite (installing doesn't need it — contributors run ./mvnw verify)
+./mvnw -Pnative -pl forvum-app -am package -DskipTests
+BIN=$(ls forvum-app/target/forvum-app-*-runner)
 "$BIN" init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
 "$BIN" doctor                   # validate ~/.forvum config (exits non-zero on problems)
-echo "who are you?" | "$BIN"    # one turn, then exit — or run "$BIN" for an interactive session
+"$BIN"                          # interactive session: banner + `forvum> ` prompt; /exit or Ctrl+D quits
+"$BIN" ask "who are you?"       # one non-interactive turn (stdout is just the reply)
+echo "who are you?" | "$BIN"    # the piped REPL also works (banner line + reply)
 "$BIN" --help                   # also --version
 ```
 
-**JVM fast-jar** (no GraalVM needed — development / drop-in plugins):
+**JVM fast-jar** (no GraalVM needed — development / drop-in plugins). Same steps, same `init`:
 
 ```bash
 ./mvnw package -pl forvum-app -am -DskipTests
-java -jar forvum-app/target/quarkus-app/quarkus-run.jar
+JAR=forvum-app/target/quarkus-app/quarkus-run.jar
+java -jar "$JAR" init           # first run only — without it there are no agents/channels yet
+java -jar "$JAR"                # interactive session (the same `forvum> ` REPL as the native binary)
 ```
 
-Cloud providers (Anthropic, OpenAI, Google) need an API key (env var / `~/.forvum`); point an agent at one
-by editing its model in `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`).
+Configuration lives in `~/.forvum` (override with the `FORVUM_HOME` env var). Cloud providers
+(Anthropic, OpenAI, Google) need an API key (env var / `~/.forvum`); point an agent at one by editing
+its model in `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`). If a turn fails with
+`Is the model provider running?`, start Ollama (`ollama serve`) and pull the model named in the error.
+The first turn can take several seconds while Ollama loads the model; the reply prints when complete
+(v0.1 has no token streaming or spinner yet).
 
 ## Quick demo
 
-The demo lives on the `demo/conference-mvp` branch and runs a single agent against an Ollama model via an interactive CLI.
+The demo lives on the `demo/conference-mvp` branch and runs a single agent against an Ollama model via an interactive CLI. It predates v0.1 — for everyday use, the install path above on `main` now provides the same interactive experience (banner, `forvum>` prompt, `/exit`) with the full v0.1 feature set; this branch remains as the frozen conference snapshot.
 
 ![FORVUM CLI session — boot banner, agent ready prompt, and a two-turn interaction](docs/images/cli-demo.png)
 

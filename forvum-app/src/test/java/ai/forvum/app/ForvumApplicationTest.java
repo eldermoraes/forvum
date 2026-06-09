@@ -34,6 +34,15 @@ class ForvumApplicationTest {
                 () -> "Expected the Forvum banner in output, got: " + result.getOutput());
     }
 
+    @Test
+    @Launch({})
+    void printsInitGuidanceInsteadOfExitingSilentlyWhenNoChannelIsConfigured(LaunchResult result) {
+        Assertions.assertEquals(0, result.exitCode());
+        Assertions.assertTrue(result.getOutput().contains("forvum init"),
+                () -> "Expected the no-channel guidance pointing at `forvum init`, got: "
+                        + result.getOutput());
+    }
+
     /** Pins an empty {@code $FORVUM_HOME} so the command-mode smoke is hermetic. */
     public static class EmptyHomeProfile implements QuarkusTestProfile {
 

@@ -42,6 +42,12 @@ public class TuiChannel {
     /** Channel id stamped on every inbound {@link ChannelMessage}; matches the plugin extension id. */
     static final String CHANNEL_ID = "tui";
 
+    /** Prompt printed before each read on an interactive terminal; never printed in piped mode. */
+    static final String PROMPT = "forvum> ";
+
+    /** Help line printed once at interactive REPL start; never printed in piped mode. */
+    static final String READY = "Type your message and press Enter. Use /exit or Ctrl+D to quit.";
+
     @Inject
     ChannelTurnDriver turns;
 
@@ -62,25 +68,55 @@ public class TuiChannel {
      */
     public int run() {
         TuiView view = noAnsi ? TuiView.plain() : TuiView.ansi();
-        return repl(System.in, System.out, view);
+        return repl(System.in, System.out, view, interactiveTerminal());
+    }
+
+    /** True when the process is attached to an interactive terminal — the prompt/help-line mode. */
+    static boolean interactiveTerminal() {
+        java.io.Console console = System.console();
+        return console != null && console.isTerminal();
     }
 
     /**
      * Run the REPL: read one line per turn from {@code in}, drive it through the {@link ChannelTurnDriver},
      * and stream each rendered {@link AgentEvent} to {@code out} via {@code view} ({@link TuiView#plain()}
      * for the pipeable no-ANSI path, {@link TuiView#ansi()} for the styled interactive path). Blank
-     * lines are skipped. Returns {@code 0} at end of input. Streams and the view are parameters so the loop
-     * is exercised in tests with piped input/output (and by {@code run()} with
-     * {@code System.in}/{@code System.out}).
+     * lines are skipped. When {@code interactive} (a real terminal), the {@link #READY} help line is
+     * printed once, the {@link #PROMPT} before each read, and a {@code /exit} or {@code /quit} line
+     * (trimmed) ends the session; in piped (non-TTY) mode none of those apply — no prompt is printed and
+     * no line is intercepted, so piped behavior stays identical to the M15 contract (a piped session ends
+     * at end-of-input). Returns {@code 0} at end of input. Streams, view, and interactivity are parameters so the
+     * loop is exercised in tests with piped input/output (and by {@code run()} with
+     * {@code System.in}/{@code System.out}/{@link #interactiveTerminal()}).
      */
-    int repl(InputStream in, PrintStream out, TuiView view) {
+    int repl(InputStream in, PrintStream out, TuiView view, boolean interactive) {
         BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
         String user = nativeUserId();
+        if (interactive) {
+            out.println(READY);
+            out.println();
+        }
         try {
-            String line;
-            while ((line = reader.readLine()) != null) {
+            while (true) {
+                if (interactive) {
+                    out.print(PROMPT);
+                    out.flush();
+                }
+                String line = reader.readLine();
+                if (line == null) {
+                    if (interactive) {
+                        out.println();
+                    }
+                    break;
+                }
                 if (line.isBlank()) {
                     continue;
+                }
+                if (interactive) {
+                    String trimmed = line.trim();
+                    if ("/exit".equals(trimmed) || "/quit".equals(trimmed)) {
+                        break;
+                    }
                 }
                 ChannelMessage message = new ChannelMessage(CHANNEL_ID, user, line, Instant.now());
                 turns.dispatch(message, event -> {
@@ -109,13 +145,14 @@ public class TuiChannel {
      * nothing. Exhaustive over the sealed event type (no {@code default} branch), mirroring the web
      * channel: v0.1 (streaming Option B) emits only {@link TokenDelta} (the reply) then a terminal
      * {@link Done} (whose reply is already carried by the {@code TokenDelta}, so it is skipped); an
-     * {@link ErrorEvent} surfaces its message so a failed turn is visible; the tool-lifecycle events are
-     * not surfaced yet. Package-private so {@code TuiRenderTest} can cover every arm.
+     * {@link ErrorEvent} surfaces its message behind an {@code [error]} marker so a failed turn is
+     * visibly an error, not a reply; the tool-lifecycle events are not surfaced yet. Package-private so
+     * {@code TuiRenderTest} can cover every arm.
      */
     static String render(AgentEvent event) {
         return switch (event) {
             case TokenDelta delta -> delta.text();
-            case ErrorEvent error -> error.message();
+            case ErrorEvent error -> "[error] " + error.message();
             case Done ignored -> "";
             case ToolInvoked ignored -> "";
             case ToolResult ignored -> "";
