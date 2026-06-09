@@ -21,6 +21,10 @@ import jakarta.inject.Inject;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.net.ConnectException;
+import java.net.UnknownHostException;
+import java.net.http.HttpConnectTimeoutException;
+import java.nio.channels.ClosedChannelException;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
@@ -141,7 +145,59 @@ public class TurnService implements ChannelTurnDriver {
             // escape a self-driving channel's callback. Surface it as a terminal ErrorEvent; the failed
             // attempt is already ledgered in provider_calls by the model decorator's own transaction
             // (M7), so no conversational rows are orphaned.
-            sink.accept(ErrorEvent.from(Instant.now(), turnId, "turn_failed", e.getMessage(), e));
+            sink.accept(ErrorEvent.from(Instant.now(), turnId, "turn_failed",
+                    describeFailure(agentId, e), e));
+        }
+    }
+
+    /**
+     * Compose the user-facing failure message: the exception's own message plus the deepest cause (the
+     * original network/provider failure an intermediate wrapper like the supervisor-graph exception
+     * hides), and — for a connection-level failure — a hint naming the agent's configured model, since
+     * an unreachable provider (model server down, wrong base URL) is the most common fresh-install
+     * failure and the wrapper message alone is unactionable.
+     */
+    private String describeFailure(AgentId agentId, RuntimeException e) {
+        String message = (e.getMessage() == null || e.getMessage().isBlank())
+                ? e.getClass().getSimpleName()
+                : e.getMessage();
+        Throwable root = e;
+        // hop cap: initCause only rejects a DIRECT self-cause, so a multi-node cause cycle is
+        // constructible and would otherwise spin this walk forever inside the dispatch catch block
+        for (int hops = 0; hops < 50 && root.getCause() != null && root.getCause() != root; hops++) {
+            root = root.getCause();
+        }
+        if (root != e) {
+            String rootText = (root.getMessage() == null || root.getMessage().isBlank())
+                    ? ""
+                    : ": " + root.getMessage();
+            message += " (cause: " + root.getClass().getSimpleName() + rootText + ")";
+        }
+        if (isConnectionFailure(root)) {
+            message += ". Is the model provider running? (model: " + primaryModelOrUnknown(agentId) + ")";
+        }
+        return message;
+    }
+
+    /**
+     * True for the root causes an unreachable provider produces: {@link ConnectException} (JVM HTTP
+     * client), {@link ClosedChannelException} (the same refusal as surfaced by the JDK client inside a
+     * native image), {@link UnknownHostException} (wrong base URL host), and
+     * {@link HttpConnectTimeoutException} (unroutable host). Package-private for the unit test.
+     */
+    static boolean isConnectionFailure(Throwable root) {
+        return root instanceof ConnectException
+                || root instanceof ClosedChannelException
+                || root instanceof UnknownHostException
+                || root instanceof HttpConnectTimeoutException;
+    }
+
+    /** The agent's configured primary model for the failure hint; never throws from the catch path. */
+    private String primaryModelOrUnknown(AgentId agentId) {
+        try {
+            return registry.persona(agentId).primaryModel().toString();
+        } catch (RuntimeException ignored) {
+            return "unknown";
         }
     }
 }

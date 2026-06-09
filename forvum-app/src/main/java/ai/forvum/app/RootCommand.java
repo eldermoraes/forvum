@@ -37,6 +37,21 @@ public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";
 
+    /** Block-letter boot banner shown on an interactive terminal (parity with the conference demo). */
+    private static final String BIG_BANNER = """
+            ███████╗ ██████╗ ██████╗ ██╗   ██╗██╗   ██╗███╗   ███╗
+            ██╔════╝██╔═══██╗██╔══██╗██║   ██║██║   ██║████╗ ████║
+            █████╗  ██║   ██║██████╔╝██║   ██║██║   ██║██╔████╔██║
+            ██╔══╝  ██║   ██║██╔══██╗╚██╗ ██╔╝██║   ██║██║╚██╔╝██║
+            ██║     ╚██████╔╝██║  ██║ ╚████╔╝ ╚██████╔╝██║ ╚═╝ ██║
+            ╚═╝      ╚═════╝ ╚═╝  ╚═╝  ╚═══╝   ╚═════╝ ╚═╝     ╚═╝
+            """;
+
+    /** Printed when no channel is configured, so a fresh install never exits silently. */
+    static final String NO_CHANNEL_HINT =
+            "No channels are configured. Run `forvum init` to scaffold ~/.forvum with a starter"
+                    + " agent and TUI channel, then run `forvum` again.";
+
     @Inject
     ChannelLauncher channels;
 
@@ -45,24 +60,39 @@ public class RootCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        printBanner();
+        System.out.println(banner(interactiveTerminal()));
         if (channels.shouldRunInteractive()) {
             return tui.run();
         }
         if (channels.shouldRunAsServer()) {
             System.out.println("Server channel(s) ready - press Ctrl+C to stop.");
             Quarkus.waitForExit();
+            return 0;
         }
+        System.out.println(NO_CHANNEL_HINT);
         return 0;
     }
 
-    private static void printBanner() {
+    /**
+     * The boot banner: the block-letter FORVUM banner plus tagline on a real terminal; piped or
+     * redirected runs keep the single-line tagline (TamboUI-rendered) so piped stdout stays clean.
+     */
+    static String banner(boolean interactive) {
+        if (interactive) {
+            return BIG_BANNER + BANNER;
+        }
         Rect area = new Rect(0, 0, BANNER.length(), 1);
         Buffer buffer = Buffer.empty(area);
         Paragraph banner = Paragraph.builder()
                 .text(Text.from(BANNER))
                 .build();
         banner.render(area, buffer);
-        System.out.println(buffer.toAnsiStringTrimmed());
+        return buffer.toAnsiStringTrimmed();
+    }
+
+    /** True when the process is attached to an interactive terminal (mirrors the TUI channel's check). */
+    private static boolean interactiveTerminal() {
+        java.io.Console console = System.console();
+        return console != null && console.isTerminal();
     }
 }

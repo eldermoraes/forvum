@@ -2,6 +2,7 @@ package ai.forvum.channel.tui;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.ChannelMessage;
@@ -60,7 +61,7 @@ class TuiChannelReplTest {
         channel.turns = new EchoDriver();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-        int code = channel.repl(in("hi\nyo\n"), out(out), TuiView.plain());
+        int code = channel.repl(in("hi\nyo\n"), out(out), TuiView.plain(), false);
 
         String printed = out.toString(UTF_8);
         assertTrue(printed.contains("echo:hi"), printed);
@@ -74,7 +75,7 @@ class TuiChannelReplTest {
         channel.turns = new EchoDriver();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
-        channel.repl(in("hi\n"), out(out), TuiView.ansi());
+        channel.repl(in("hi\n"), out(out), TuiView.ansi(), false);
 
         assertTrue(out.toString(UTF_8).contains("echo:hi"), out.toString(UTF_8));
     }
@@ -85,9 +86,71 @@ class TuiChannelReplTest {
         EchoDriver driver = new EchoDriver();
         channel.turns = driver;
 
-        channel.repl(in("\n   \nhi\n\nyo\n"), out(new ByteArrayOutputStream()), TuiView.plain());
+        channel.repl(in("\n   \nhi\n\nyo\n"), out(new ByteArrayOutputStream()), TuiView.plain(), false);
 
         assertEquals(List.of("hi", "yo"), driver.dispatched);
+    }
+
+    @Test
+    void pipedReplPrintsNoPromptAndNoReadyLine() {
+        TuiChannel channel = new TuiChannel();
+        channel.turns = new EchoDriver();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        channel.repl(in("hi\n"), out(out), TuiView.plain(), false);
+
+        String printed = out.toString(UTF_8);
+        assertFalse(printed.contains(TuiChannel.PROMPT), printed);
+        assertFalse(printed.contains(TuiChannel.READY), printed);
+    }
+
+    @Test
+    void interactiveReplPrintsTheReadyLineAndAPromptBeforeEachRead() {
+        TuiChannel channel = new TuiChannel();
+        channel.turns = new EchoDriver();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        channel.repl(in("hi\n"), out(out), TuiView.plain(), true);
+
+        String printed = out.toString(UTF_8);
+        assertTrue(printed.contains(TuiChannel.READY), printed);
+        // one prompt before "hi", one before the read that hits end-of-input
+        assertEquals(2, printed.split(TuiChannel.PROMPT, -1).length - 1, printed);
+    }
+
+    @Test
+    void slashExitEndsTheReplWithoutDispatchingItOrLaterLines() {
+        TuiChannel channel = new TuiChannel();
+        EchoDriver driver = new EchoDriver();
+        channel.turns = driver;
+
+        int code = channel.repl(in("hi\n/exit\nyo\n"), out(new ByteArrayOutputStream()),
+                TuiView.plain(), true);
+
+        assertEquals(List.of("hi"), driver.dispatched);
+        assertEquals(0, code);
+    }
+
+    @Test
+    void slashQuitAlsoEndsAnInteractiveSessionEvenUntrimmed() {
+        TuiChannel channel = new TuiChannel();
+        EchoDriver driver = new EchoDriver();
+        channel.turns = driver;
+
+        channel.repl(in(" /quit \nyo\n"), out(new ByteArrayOutputStream()), TuiView.plain(), true);
+
+        assertEquals(List.of(), driver.dispatched);
+    }
+
+    @Test
+    void pipedSlashLinesAreDispatchedAsTurnsNeverIntercepted() {
+        TuiChannel channel = new TuiChannel();
+        EchoDriver driver = new EchoDriver();
+        channel.turns = driver;
+
+        channel.repl(in("/exit\nyo\n"), out(new ByteArrayOutputStream()), TuiView.plain(), false);
+
+        assertEquals(List.of("/exit", "yo"), driver.dispatched);
     }
 
     @Test

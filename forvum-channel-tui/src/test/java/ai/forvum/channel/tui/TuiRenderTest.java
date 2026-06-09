@@ -33,10 +33,10 @@ class TuiRenderTest {
     }
 
     @Test
-    void errorEventRendersItsMessage() {
+    void errorEventRendersItsMessageWithAnErrorPrefix() {
         ErrorEvent error =
                 ErrorEvent.from(T, UUID.randomUUID(), "turn_failed", "boom", new RuntimeException("boom"));
-        assertEquals("boom", TuiChannel.render(error));
+        assertEquals("[error] boom", TuiChannel.render(error));
     }
 
     @Test

@@ -45,4 +45,21 @@ class ChannelLauncherTest {
     void explicitFalseIsDisabled() {
         assertFalse(ChannelLauncher.isEnabled(json("{ \"enabled\": false }")));
     }
+
+    @Test
+    void aDisabledChannelNeverServes() {
+        assertFalse(ChannelLauncher.serves("web", json("{ \"enabled\": false }")));
+    }
+
+    @Test
+    void anEnabledNonTokenGatedChannelServes() {
+        assertTrue(ChannelLauncher.serves("web", json("{}")));
+    }
+
+    @Test
+    void anEnabledTokenGatedChannelServesOnlyWithANonBlankToken() {
+        assertFalse(ChannelLauncher.serves("telegram", json("{}")));
+        assertFalse(ChannelLauncher.serves("telegram", json("{ \"botToken\": \"   \" }")));
+        assertTrue(ChannelLauncher.serves("telegram", json("{ \"botToken\": \"123:abc\" }")));
+    }
 }
