@@ -18,8 +18,8 @@
 
     <properties>
         <!-- Single bump point for extension/library versions (CLAUDE.md section 2, ULTRAPLAN section 3.9). -->
-        <!-- quarkus-langchain4j 1.11.0.CR1 is a PRE-RELEASE; the stable fallback is 1.10.0. -->
-        <quarkus-langchain4j.version>1.11.0.CR1</quarkus-langchain4j.version>
+        <!-- quarkus-langchain4j 1.11.0.CR2 is a PRE-RELEASE; the stable fallback is 1.10.0. -->
+        <quarkus-langchain4j.version>1.11.0.CR2</quarkus-langchain4j.version>
         <langgraph4j.version>1.8.17</langgraph4j.version>
         <tamboui.version>0.3.0</tamboui.version>
         <sqlite-jdbc.version>3.53.1.0</sqlite-jdbc.version>
