@@ -41,15 +41,15 @@ trade-off for a reflection-free native binary.
 
 ## 2. Tech stack (versions governed by `forvum-bom`)
 
-Java 25 (LTS) · Maven `./mvnw` (3.9+) · Quarkus **3.33.x LTS** (3.33.1) · Quarkiverse
-`quarkus-langchain4j-*` **1.11.0.CR1** (PRE-RELEASE; stable fallback **1.10.0**) · LangChain4j core
-**1.15.1** (transitive via the Quarkiverse extension — do NOT pin independently; **1.14.1** on the
+Java 25 (LTS) · Maven `./mvnw` (3.9+) · Quarkus **3.33.x LTS** (3.33.2) · Quarkiverse
+`quarkus-langchain4j-*` **1.11.0.CR2** (PRE-RELEASE; stable fallback **1.10.0**) · LangChain4j core
+**1.16.1** (transitive via the Quarkiverse extension — do NOT pin independently; **1.14.1** on the
 stable-1.10.0 fallback) · LangGraph4j **1.8.17** · Xerial SQLite JDBC (≥ 3.40.1.0, use latest
 ~3.53.x) · Hibernate ORM + Panache + Flyway · TamboUI 0.3.0 (Toolkit + JLine 3 backend) · WebSockets
 Next · Quarkus Scheduler · OpenTelemetry · **GraalVM CE 25 / Mandrel 25.0.x-Final** (native builder;
 pin the exact patch in CI) · JaCoCo · GitHub Actions.
 
-`forvum-bom` is the single bump point: `quarkus-langchain4j-bom:1.11.0.CR1`, `langgraph4j-core:1.8.17`,
+`forvum-bom` is the single bump point: `quarkus-langchain4j-bom:1.11.0.CR2`, `langgraph4j-core:1.8.17`,
 `tamboui-bom:0.3.0`, `sqlite-jdbc` (latest), test libs (JLine 3 comes transitively via `tamboui-bom`).
 Quarkus-managed deps (Flyway, OpenTelemetry) inherit the platform BOM version — never pin them
 independently.

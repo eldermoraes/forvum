@@ -32,7 +32,7 @@ single-author / no-trailer rule).
 
 ## Version baseline (from `forvum-bom`, §2.1)
 
-Quarkus 3.33.x LTS (3.33.1) · `quarkus-langchain4j-bom` 1.11.0.CR1 (PRE-RELEASE; brings LangChain4j core 1.15.1; stable fallback 1.10.0 → 1.14.1) ·
+Quarkus 3.33.x LTS (3.33.2) · `quarkus-langchain4j-bom` 1.11.0.CR2 (PRE-RELEASE; brings LangChain4j core 1.16.1; stable fallback 1.10.0 → 1.14.1) ·
 `langgraph4j-core` 1.8.17 · `tamboui-bom` 0.3.0 (TUI) · Java 25 · GraalVM CE 25 / Mandrel 25.0.x-Final · Xerial SQLite JDBC
 ≥ 3.40.1.0 (use ~3.53.x). All version-bearing issues pin through `forvum-bom`, the single bump point.
 
