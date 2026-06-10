@@ -73,12 +73,36 @@ class ChannelLauncherTest {
 
     @Test
     void everyRequiredKeyMustBeNonBlankForACredentialGatedChannelToServe() {
-        // The map's entries are single-key today; the gate is allMatch over the declared set, so a
-        // channel declaring several keys (Slack: botToken+appToken) serves only with ALL present —
-        // pinned per entry here, and exercised at n>1 by each new channel module's own launcher test.
+        // The gate is allMatch over the declared set, so a channel declaring several keys serves only
+        // with ALL present — pinned per entry here, and exercised at n>1 by the Matrix case below.
         for (var entry : ChannelLauncher.REQUIRED_SERVE_KEYS.entrySet()) {
             assertFalse(ChannelLauncher.serves(entry.getKey(), json("{}")),
                     entry.getKey() + " must not serve with no credentials");
         }
+    }
+
+    @Test
+    void matrixServesOnlyWithHomeserverAccessTokenAndUserId() {
+        // The first multi-key entry: the allMatch gate must require EVERY declared key, so one
+        // credential present without the others is NOT serving (an enabled but half-configured
+        // matrix.json would otherwise hang the binary in server mode serving nothing — the M17 trap).
+        // userId is serve-required too: MatrixChannel.onStart no-ops without it (the self-echo gate),
+        // so a creds-but-no-userId config must not count as serving either.
+        assertFalse(ChannelLauncher.serves("matrix", json("{}")));
+        assertFalse(ChannelLauncher.serves("matrix",
+                json("{ \"homeserver\": \"https://m.example.org\" }")));
+        assertFalse(ChannelLauncher.serves("matrix", json("{ \"accessToken\": \"syt_abc\" }")));
+        assertFalse(ChannelLauncher.serves("matrix",
+                json("{ \"homeserver\": \"  \", \"accessToken\": \"syt_abc\", "
+                        + "\"userId\": \"@bot:example.org\" }")));
+        assertFalse(ChannelLauncher.serves("matrix",
+                json("{ \"homeserver\": \"https://m.example.org\", \"accessToken\": \"syt_abc\" }")),
+                "creds without the bot's own userId must not serve — onStart would warn + no-op");
+        assertFalse(ChannelLauncher.serves("matrix",
+                json("{ \"enabled\": false, \"homeserver\": \"https://m.example.org\", "
+                        + "\"accessToken\": \"syt_abc\", \"userId\": \"@bot:example.org\" }")));
+        assertTrue(ChannelLauncher.serves("matrix",
+                json("{ \"homeserver\": \"https://m.example.org\", \"accessToken\": \"syt_abc\", "
+                        + "\"userId\": \"@bot:example.org\" }")));
     }
 }

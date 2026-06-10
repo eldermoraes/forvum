@@ -36,6 +36,7 @@
         <module>forvum-channel-tui</module>
         <module>forvum-channel-telegram</module>
         <module>forvum-channel-discord</module>
+        <module>forvum-channel-matrix</module>
         <module>forvum-app</module>
     </modules>
 
