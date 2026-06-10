@@ -78,10 +78,12 @@ The first turn can take several seconds while Ollama loads the model; the reply 
 (v0.1 has no token streaming or spinner yet).
 
 Chat channels are enabled the same way, one JSON file each under `~/.forvum/channels/` — e.g.
-`matrix.json` (`homeserver`, `accessToken`, `userId`, `allowedUserIds`) connects the assistant to a
-Matrix homeserver. **The Matrix channel supports unencrypted rooms only**: end-to-end encryption (E2EE)
-is not yet supported ([#125](https://github.com/eldermoraes/forvum/issues/125)) — the bot stays silent
-in encrypted rooms.
+`matrix.json` (`homeserver`, `accessToken`, and `userId` — all three required — plus an optional
+`allowedUserIds`) connects the assistant to a Matrix homeserver. `userId` is the bot's own Matrix id
+(e.g. `@bot:example.org`): Matrix `/sync` echoes the bot's own messages, so without it the bot cannot
+filter itself and the channel refuses to start. **The Matrix channel supports unencrypted rooms only**:
+end-to-end encryption (E2EE) is not yet supported
+([#125](https://github.com/eldermoraes/forvum/issues/125)) — the bot stays silent in encrypted rooms.
 
 ## Quick demo
 

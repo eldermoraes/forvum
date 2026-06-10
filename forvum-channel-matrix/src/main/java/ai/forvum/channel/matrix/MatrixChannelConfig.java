@@ -128,6 +128,8 @@ public class MatrixChannelConfig {
      *                       unset (channel must warn + no-op, never crash).
      * @param userId         the bot's own Matrix user id (e.g. {@code @bot:example.org}), used to filter
      *                       the bot's own message echoes out of the sync timeline; absent when unset.
+     *                       REQUIRED to serve: {@code /sync} echoes the bot's own sends, so without it
+     *                       the channel warns + no-ops (it would otherwise reply to itself in a loop).
      * @param allowedUserIds the Matrix user ids (e.g. {@code @alice:example.org}) permitted to use the
      *                       bot; an EMPTY set means "allow any user" (single-user convenience), a
      *                       non-empty set RESTRICTS to exactly those ids.

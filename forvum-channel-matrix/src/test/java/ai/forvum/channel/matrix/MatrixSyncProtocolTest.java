@@ -81,10 +81,27 @@ class MatrixSyncProtocolTest {
     }
 
     @Test
-    void aNullOwnUserIdDisablesTheSelfFilter() {
-        List<InboundMessage> messages = MatrixSyncProtocol.messages(fixture(MESSAGE_FIXTURE), null);
+    void aNullOwnUserIdYieldsNoMessagesFailSafe() {
+        // Without the bot's own id NO event can be proven not-self, and Matrix /sync echoes the bot's
+        // own sends — so a null ownUserId (a mid-run config edit removed userId; boot is gated) must
+        // process NOTHING rather than disable the self-filter and open an unbounded self-echo loop.
+        assertTrue(MatrixSyncProtocol.messages(fixture(MESSAGE_FIXTURE), null).isEmpty(),
+                "a null ownUserId must fail safe: no message may drive a turn");
+    }
 
-        assertEquals(1, messages.size());
+    @Test
+    void aBlankSenderIsSkipped() {
+        // A whitespace-only sender would pass a null-only check and then blow up ChannelMessage's
+        // non-blank nativeUserId invariant INSIDE the sync loop — skip it at the protocol layer.
+        SyncResponse response = fixture("""
+                { "next_batch": "s104",
+                  "rooms": { "join": { "!room:example.org": { "timeline": { "events": [
+                    { "type": "m.room.message", "sender": "   ",
+                      "content": { "msgtype": "m.text", "body": "poison" } }
+                  ] } } } } }""");
+
+        assertTrue(MatrixSyncProtocol.messages(response, BOT).isEmpty(),
+                "a blank sender must be skipped like a missing one");
     }
 
     @Test
@@ -149,6 +166,48 @@ class MatrixSyncProtocolTest {
 
         assertEquals(1, invites.size());
         assertNull(invites.get(0).inviter());
+    }
+
+    @Test
+    void aForgedMemberEventAlongsideTheRealOneYieldsNoInviter() {
+        // Stripped invite_state events are UNAUTHENTICATED (composed from the inviting server's
+        // invite_room_state, which a malicious federated homeserver fully controls). The concrete
+        // spoof shape: a forged member event naming an allowlisted inviter is injected FIRST, the
+        // real invite event follows. A legitimate invite carries exactly ONE member event for the
+        // bot's state_key, so ANY multiplicity is never trusted — inviter must be null.
+        SyncResponse response = fixture("""
+                { "rooms": { "invite": { "!lure:example.org": { "invite_state": { "events": [
+                  { "type": "m.room.member", "sender": "@alice:example.org",
+                    "state_key": "@bot:example.org", "content": { "membership": "invite" } },
+                  { "type": "m.room.member", "sender": "@mallory:evil.org",
+                    "state_key": "@bot:example.org", "content": { "membership": "invite" } }
+                ] } } } } }""");
+
+        assertNull(MatrixSyncProtocol.invites(response, BOT).get(0).inviter(),
+                "conflicting invite member events (the forged+real shape) must never name an inviter");
+    }
+
+    @Test
+    void duplicateInviteMemberEventsAreNeverTrustedEvenWithOneSender() {
+        // Current state is keyed by (type, state_key): a legitimate stripped set holds exactly one
+        // member event for the bot. Two matches — even agreeing ones — are an anomaly, never trusted.
+        SyncResponse response = fixture("""
+                { "rooms": { "invite": { "!odd:example.org": { "invite_state": { "events": [
+                  { "type": "m.room.member", "sender": "@alice:example.org",
+                    "state_key": "@bot:example.org", "content": { "membership": "invite" } },
+                  { "type": "m.room.member", "sender": "@alice:example.org",
+                    "state_key": "@bot:example.org", "content": { "membership": "invite" } }
+                ] } } } } }""");
+
+        assertNull(MatrixSyncProtocol.invites(response, BOT).get(0).inviter());
+    }
+
+    @Test
+    void aNullOwnUserIdYieldsNoInviterFailSafe() {
+        // Without the bot's own id the member event targeting it cannot be identified — never trust
+        // any inviter (shouldJoin then refuses the auto-join), mirroring the message fail-safe.
+        assertNull(MatrixSyncProtocol.invites(fixture(INVITE_FIXTURE), null).get(0).inviter(),
+                "a null ownUserId must fail safe: no inviter is ever trusted");
     }
 
     @Test

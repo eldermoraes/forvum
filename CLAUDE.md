@@ -78,7 +78,7 @@ forvum-parent (pom)
 ├── Layer 1  forvum-sdk   the ONLY extension contract (sealed provider interfaces)
 ├── Layer 2  forvum-engine Quarkus app code, extension-agnostic (deps: core + sdk only)
 ├── Layer 3  first-party extensions (depend ONLY on forvum-sdk)
-│   ├── channels: forvum-channel-tui | -web | -telegram
+│   ├── channels: forvum-channel-tui | -web | -telegram | -discord | -slack | -matrix
 │   ├── providers: forvum-provider-anthropic | -openai | -ollama | -google
 │   └── tools:    forvum-tools-filesystem | -web | -shell | -mcp-bridge
 └── Layer 4  forvum-app   the only runnable artifact (deps: engine + every first-party extension)

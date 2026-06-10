@@ -35,10 +35,13 @@ import java.util.concurrent.Executors;
  * appears only here (a still-pending invite is not repeated by later incremental syncs), and a join is
  * idempotent, not a replay.
  *
- * <p><strong>Absent credentials → warn + no-op.</strong> If {@code channels/matrix.json} is absent, the
- * channel is disabled, or {@code homeserver}/{@code accessToken} is unset, the loop is NOT started and
- * the bean logs and returns — it never throws and never blocks. This keeps the CI native no-config boot
- * (no {@code ~/.forvum/}) graceful, the same contract the M4 watcher and the other channels honor.
+ * <p><strong>Absent credentials or identity → warn + no-op.</strong> If {@code channels/matrix.json} is
+ * absent, the channel is disabled, or {@code homeserver}/{@code accessToken}/{@code userId} is unset,
+ * the loop is NOT started and the bean logs and returns — it never throws and never blocks. This keeps
+ * the CI native no-config boot (no {@code ~/.forvum/}) graceful, the same contract the M4 watcher and
+ * the other channels honor. {@code userId} is serve-required because Matrix {@code /sync} echoes the
+ * bot's OWN sends (unlike Telegram's {@code getUpdates} or Discord's bot-author filter): without its
+ * own id the bot cannot self-filter, and an enabled channel would loop on its own replies.
  *
  * <p><strong>Unencrypted rooms only (no E2EE).</strong> End-to-end encryption is NOT supported in v0.x:
  * there is no native-clean Olm/Megolm path on GraalVM (vodozemac is Rust; the Java bindings are
@@ -89,9 +92,12 @@ public class MatrixChannel {
             return;
         }
         if (spec.userId().isEmpty()) {
-            LOG.warn("Matrix: no \"userId\" in channels/matrix.json — the bot cannot filter its own "
-                    + "message echoes and may reply to itself. Set it to the bot's user id "
-                    + "(e.g. @bot:example.org).");
+            LOG.warn("Matrix channel enabled but \"userId\" missing in channels/matrix.json; not "
+                    + "starting the sync loop. Matrix /sync echoes the bot's OWN sends, so without its "
+                    + "own user id the bot cannot self-filter and would reply to itself in an unbounded "
+                    + "loop (one model call per cycle). Set userId to the bot's user id "
+                    + "(e.g. @bot:example.org) to activate the channel.");
+            return;
         }
         String baseUrl = stripTrailingSlashes(spec.homeserver().get());
         String authorization = "Bearer " + spec.accessToken().get();
@@ -125,9 +131,10 @@ public class MatrixChannel {
      * (no {@code since}) is the initial snapshot: {@code next_batch} is taken, invites are handled, and
      * timeline messages are DISCARDED (see the class javadoc). A sync/parse failure is logged (redacted)
      * and the loop continues after an exponential back-off, reset on the next success, so a transient
-     * homeserver error (incl. {@code M_UNKNOWN_TOKEN} responses) never kills the channel. Re-reads the
-     * {@link Spec} each iteration so an operator's {@code allowedUserIds} edit takes effect on the next
-     * cycle without a restart.
+     * homeserver error (incl. {@code M_UNKNOWN_TOKEN} responses) never kills the channel; a failure
+     * processing ONE message/invite is caught per event, so a poison event never blocks the cursor
+     * advance or re-dispatches its batch siblings. Re-reads the {@link Spec} each iteration so an
+     * operator's {@code allowedUserIds} edit takes effect on the next cycle without a restart.
      *
      * <p>The {@link MatrixClientApi} is a parameter (not the injected field) so a test can drive cycles
      * with a recording client; production passes the injected {@code @RestClient} bean.
@@ -140,12 +147,34 @@ public class MatrixChannel {
                 SyncResponse response = api.sync(baseUrl, authorization, since, syncTimeoutMillis);
                 backoff.reset();
                 String ownUserId = spec.userId().orElse(null);
+                if (ownUserId == null) {
+                    // onStart gates the loop on userId, so null here means a mid-run config edit
+                    // removed it. Fail safe: the protocol layer yields no messages and no trusted
+                    // inviter without the bot's own id, so this cycle processes nothing (its batch
+                    // is dropped, like the initial snapshot) until the operator restores userId.
+                    LOG.warn("Matrix: \"userId\" disappeared from channels/matrix.json; without the "
+                            + "bot's own id no event can be proven not-self, so nothing is processed "
+                            + "until it is restored.");
+                }
+                // Each message/invite is isolated in its own try/catch (the M4 observer lesson): one
+                // poison event must never abort its batch siblings or block the cursor advance below —
+                // an escaping throw would re-fetch (and re-dispatch) the same batch forever.
                 for (Invite invite : MatrixSyncProtocol.invites(response, ownUserId)) {
-                    processor.processInvite(invite, spec, api, baseUrl, authorization);
+                    try {
+                        processor.processInvite(invite, spec, api, baseUrl, authorization);
+                    } catch (RuntimeException e) {
+                        LOG.warnf("Matrix: failed to process an invite to room %s (%s); skipping it.",
+                                invite.roomId(), redact(e.getMessage()));
+                    }
                 }
                 if (since != null) { // not the initial snapshot — its timeline is history, discarded
                     for (InboundMessage message : MatrixSyncProtocol.messages(response, ownUserId)) {
-                        processor.process(message, spec, api, baseUrl, authorization);
+                        try {
+                            processor.process(message, spec, api, baseUrl, authorization);
+                        } catch (RuntimeException e) {
+                            LOG.warnf("Matrix: failed to process a message in room %s (%s); "
+                                    + "skipping it.", message.roomId(), redact(e.getMessage()));
+                        }
                     }
                 }
                 String nextBatch = MatrixSyncProtocol.nextBatch(response);
