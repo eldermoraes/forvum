@@ -77,6 +77,29 @@ its model in `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`)
 The first turn can take several seconds while Ollama loads the model; the reply prints when complete
 (v0.1 has no token streaming or spinner yet).
 
+### Optional: the Signal channel (connect-only)
+
+The Signal channel connects to an **operator-run [signal-cli](https://github.com/AsamK/signal-cli)
+HTTP daemon** — Forvum does not spawn, install, or manage signal-cli (daemon spawn/install is a
+documented follow-up). With your Signal account already registered (or linked) in signal-cli, start
+the daemon yourself:
+
+```bash
+signal-cli -a +15550001111 daemon --http localhost:8080
+```
+
+then enable the channel in `~/.forvum/channels/signal.json`:
+
+```json
+{ "baseUrl": "http://localhost:8080", "account": "+15550001111", "allowedUserIds": ["+15557772222"] }
+```
+
+Forvum receives messages over the daemon's SSE event stream (`GET /api/v1/events`) and replies via
+its JSON-RPC endpoint (`POST /api/v1/rpc`). Direct text messages only in this release — receipts,
+typing notifications, sync messages, and group messages are ignored (group support is a documented
+limitation). An empty `allowedUserIds` allows any sender; a non-empty list restricts to those phone
+numbers/UUIDs.
+
 ## Quick demo
 
 The demo lives on the `demo/conference-mvp` branch and runs a single agent against an Ollama model via an interactive CLI. It predates v0.1 — for everyday use, the install path above on `main` now provides the same interactive experience (banner, `forvum>` prompt, `/exit`) with the full v0.1 feature set; this branch remains as the frozen conference snapshot.

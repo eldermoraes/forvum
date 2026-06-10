@@ -35,20 +35,25 @@ public class ChannelLauncher {
     /** Channel id of the Discord channel, which (like Telegram) additionally requires a {@code botToken}. */
     static final String DISCORD_ID = "discord";
 
+    /** Channel id of the Signal channel, which requires the daemon {@code baseUrl} AND {@code account}. */
+    static final String SIGNAL_ID = "signal";
+
     /**
      * Per-channel config keys that must ALL be present and non-blank for the channel to count as
      * serving. Generalizes the original single {@code botToken} gate: each credential-gated channel
      * declares its own key set (Slack needs {@code botToken}+{@code appToken}, Matrix
-     * {@code homeserver}+{@code accessToken}, Signal {@code baseUrl} — each entry lands WITH its
-     * channel module, never before, or an enabled config for an absent module would hang the binary
-     * in server mode serving nothing, the M17 trap). A channel with no entry has no key requirement.
+     * {@code homeserver}+{@code accessToken}, Signal {@code baseUrl}+{@code account} — each entry lands
+     * WITH its channel module, never before, or an enabled config for an absent module would hang the
+     * binary in server mode serving nothing, the M17 trap). A channel with no entry has no key
+     * requirement.
      */
     static final Map<String, Set<String>> REQUIRED_SERVE_KEYS = Map.of(
             TELEGRAM_ID, Set.of("botToken"),
-            DISCORD_ID, Set.of("botToken"));
+            DISCORD_ID, Set.of("botToken"),
+            SIGNAL_ID, Set.of("baseUrl", "account"));
 
     /** Channel ids whose enablement keeps the process alive to serve. */
-    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID, DISCORD_ID);
+    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID, DISCORD_ID, SIGNAL_ID);
 
     /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.
