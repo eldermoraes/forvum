@@ -41,8 +41,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@code RESUMED}. Otherwise (a first connect, or after a non-resumable INVALID_SESSION reset the state)
  * the reconnect dials the base gateway URL and sends a fresh IDENTIFY. A failed RESUME surfaces as op 9
  * {@code d=false} (the state resets, the connection closes) so the NEXT reconnect falls back to a fresh
- * IDENTIFY automatically. The backoff {@linkplain Backoff#reset() resets} on a successful READY or
- * RESUMED ({@link #onReady()}). A FATAL gateway close code (the 4xxx set Discord documents as
+ * IDENTIFY automatically; a failed DIAL of the resume host (retired/unreachable — gateway hosts rotate)
+ * and a {@linkplain #NON_RESUMABLE_CLOSE_CODES non-resumable close code} (4007/4009) likewise drop the
+ * resume context so the next attempt IDENTIFYs on the base URL. The backoff
+ * {@linkplain Backoff#reset() resets} on a successful READY or RESUMED ({@link #onReady()}). A FATAL gateway close code (the 4xxx set Discord documents as
  * non-recoverable, e.g. {@code 4004} authentication failed / {@code 4013}-{@code 4014} invalid or
  * disallowed intents) STOPS the loop with a WARN — reconnecting would loop forever on a misconfiguration.
  * A deliberate {@link ShutdownEvent} ({@code running == false}) never reconnects.
@@ -71,6 +73,14 @@ public class DiscordChannel {
      * {@code 4013} invalid intent(s), {@code 4014} disallowed (privileged) intent(s).
      */
     static final Set<Integer> FATAL_CLOSE_CODES = Set.of(4004, 4010, 4011, 4012, 4013, 4014);
+
+    /**
+     * Close codes Discord documents as "reconnect and start a NEW session": {@code 4007} invalid
+     * sequence (the documented answer to a bad resume seq) and {@code 4009} session timed out.
+     * Reconnecting is right, but RESUMEing the same session/seq would just be closed again — a
+     * permanent resume→close loop — so the resume context is reset before the backoff reconnect.
+     */
+    static final Set<Integer> NON_RESUMABLE_CLOSE_CODES = Set.of(4007, 4009);
 
     @Inject
     DiscordChannelConfig config;
@@ -142,18 +152,35 @@ public class DiscordChannel {
         if (!running.get()) {
             return;
         }
+        String target = connectTarget();
         try {
-            WebSocketClientConnection conn = connectors.get()
-                    .baseUri(URI.create(connectTarget()))
-                    .userData(TypedKey.forString(DiscordGatewayEndpoint.TOKEN_KEY), botToken)
-                    .connectAndAwait();
-            connection.set(conn);
+            connection.set(dial(target));
             LOG.info("Discord gateway: connected.");
         } catch (RuntimeException e) {
-            LOG.warnf("Discord: failed to connect to the gateway (%s); scheduling a reconnect.",
-                    redact(e.getMessage()));
+            if (!gatewayUrl.equals(target)) {
+                // The READY-captured resume host failed to dial (retired/unreachable — gateway hosts
+                // rotate). Drop the resume context so the NEXT attempt IDENTIFYs on the base gateway
+                // URL instead of retrying the dead resume host at the backoff cap forever.
+                state.reset();
+                LOG.warnf("Discord: failed to dial the resume URL (%s); the next reconnect will send a "
+                        + "fresh IDENTIFY on the base gateway URL.", redact(e.getMessage()));
+            } else {
+                LOG.warnf("Discord: failed to connect to the gateway (%s); scheduling a reconnect.",
+                        redact(e.getMessage()));
+            }
             scheduleReconnect();
         }
+    }
+
+    /**
+     * Dial one gateway target (the blocking WebSocket handshake on the connect virtual thread).
+     * Package-private so a reconnect test can fail the dial without a live gateway.
+     */
+    WebSocketClientConnection dial(String target) {
+        return connectors.get()
+                .baseUri(URI.create(target))
+                .userData(TypedKey.forString(DiscordGatewayEndpoint.TOKEN_KEY), botToken)
+                .connectAndAwait();
     }
 
     /**
@@ -182,6 +209,8 @@ public class DiscordChannel {
      *   <li>{@code running == false} (deliberate {@link ShutdownEvent}) → do nothing.</li>
      *   <li>a {@linkplain #FATAL_CLOSE_CODES fatal} 4xxx close code → WARN and STOP (do not loop forever
      *       on a misconfiguration).</li>
+     *   <li>a {@linkplain #NON_RESUMABLE_CLOSE_CODES non-resumable} close code (4007/4009) → drop the
+     *       resume context, then schedule a backoff reconnect with a fresh IDENTIFY.</li>
      *   <li>otherwise (op 7 reconnect, op 9 invalid session, a transient network close) → schedule a
      *       backoff reconnect: RESUME on the resume URL when the session is still resumable, else a
      *       fresh IDENTIFY on the base URL ({@link #connectTarget()}).</li>
@@ -198,6 +227,11 @@ public class DiscordChannel {
                     + "disallowed intents); NOT reconnecting. Fix channels/discord.json and restart.",
                     closeCode);
             return;
+        }
+        if (state != null && NON_RESUMABLE_CLOSE_CODES.contains(closeCode)) {
+            state.reset();
+            LOG.warnf("Discord gateway closed with code %d (the session cannot be resumed); "
+                    + "reconnecting with a fresh IDENTIFY on the base gateway URL.", closeCode);
         }
         scheduleReconnect();
     }

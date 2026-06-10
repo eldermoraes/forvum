@@ -963,7 +963,14 @@ Generalizable lessons from completed milestones; append here as milestones land.
   close the reconnect dials `resume_gateway_url` (+ the same `?v=10&encoding=json` params; Discord sends it
   bare) and HELLO yields `SendResume` (`{token, session_id, seq}`, a `@RegisterForReflection` outbound frame +
   encode test) when `GatewayState.canResume()` (session + resume URL + a seen seq), falling back to IDENTIFY
-  on the base URL after op-9 `d=false` resets the state; RESUMED resets the backoff like READY. A failed
+  on the base URL after op-9 `d=false` resets the state; RESUMED resets the backoff like READY. CLOSE-CODE
+  TRAP: Discord invalidates the session when the CLIENT closes with 1000/1001, so every close made with
+  intent to resume — op-7, resumable op-9, heartbeat failure — must send a non-1000 application code
+  (`closeAndAwait(new CloseReason(4000, reason))`) or the RESUME is defeated on its primary trigger (op-7)
+  by our own NORMAL close; deliberate shutdown and non-resumable op-9 keep 1000. Pin the close code at the
+  ENDPOINT with a fake `WebSocketClientConnection` — decide()-level tests alone pin intent the transport can
+  silently defeat. And `state.reset()` on BOTH a failed dial of the resume host (hosts rotate; else every
+  backoff retry re-dials the dead host forever) AND close codes 4007/4009 ("start a new session"). A failed
   heartbeat send must CLOSE the connection so the
   same `@OnClose`→reconnect path fires (else the log claim "the gateway will reconnect" lies). The
   endpoint(`@Singleton`)→channel(`@ApplicationScoped`) callback is plain `@Inject`; a test subclass of the
