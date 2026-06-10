@@ -14,6 +14,8 @@ import jakarta.enterprise.inject.Vetoed;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -81,14 +83,24 @@ class SlackChannelConnectTest {
         return channel;
     }
 
-    @Test
-    void aFatalConnectionsOpenErrorStopsTheChannel() {
+    /**
+     * Every member of {@link SlackChannel#FATAL_CONNECT_ERRORS} stops the channel — parameterized over
+     * the WHOLE expected set so an accidental edit (dropping a member) goes red, not unnoticed.
+     * {@code missing_scope} is included: an app-level token WITHOUT {@code connections:write} is a
+     * permanent misconfiguration ({@code apps.connections.open} requires that scope), so retrying it
+     * forever at the backoff cap would contradict the set's own contract.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"invalid_auth", "not_authed", "account_inactive", "token_revoked",
+            "token_expired", "not_allowed_token_type", "forbidden_team", "missing_scope"})
+    void everyFatalConnectionsOpenErrorStopsTheChannel(String error) {
         CountingReconnectChannel channel = runningChannel(
-                new CannedRestClient(new ConnectionsOpenResponse(false, null, "invalid_auth")));
+                new CannedRestClient(new ConnectionsOpenResponse(false, null, error)));
 
         channel.connect();
 
-        assertFalse(channel.running.get(), "a bad/revoked appToken stops the channel");
+        assertFalse(channel.running.get(),
+                "a permanent credential/scope misconfiguration must stop the channel: " + error);
         assertEquals(0, channel.reconnects, "no reconnect is scheduled on a fatal error");
     }
 

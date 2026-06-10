@@ -68,12 +68,14 @@ public class SlackChannel {
     /**
      * {@code apps.connections.open} error strings that are NON-recoverable credential/configuration
      * failures: reconnecting on these would loop forever on a misconfiguration, so the channel stops
-     * with a WARN. Anything else (e.g. {@code ratelimited}, a transient 5xx surfaced as an exception)
-     * retries with backoff.
+     * with a WARN. {@code missing_scope} belongs here: {@code apps.connections.open} requires the
+     * app-level token to carry {@code connections:write}, so a scope-less {@code xapp-} token is as
+     * permanent as a revoked one. Anything else (e.g. {@code ratelimited}, a transient 5xx surfaced as
+     * an exception) retries with backoff.
      */
     static final Set<String> FATAL_CONNECT_ERRORS = Set.of(
             "invalid_auth", "not_authed", "account_inactive", "token_revoked", "token_expired",
-            "not_allowed_token_type", "forbidden_team");
+            "not_allowed_token_type", "forbidden_team", "missing_scope");
 
     @Inject
     SlackChannelConfig config;
@@ -259,15 +261,20 @@ public class SlackChannel {
     }
 
     /**
-     * Redact Slack tokens from a log-bound string. Both token families share the {@code x...-} prefix
+     * Redact Slack secrets from a log-bound string. Both token families share the {@code x...-} prefix
      * shape ({@code xoxb-} bot, {@code xapp-} app-level, {@code xoxp-} user, ...); they travel in
      * {@code Authorization: Bearer <token>} headers and the connect bootstrap, so an exception message
-     * echoing a header or request must be masked before logging. Null-safe.
+     * echoing a header or request must be masked before logging. The minted Socket Mode URL's
+     * {@code ?ticket=...} query is a single-use credential too — a failed WebSocket connect can echo
+     * the dial URI into the exception message, so the ticket parameter is masked as well (the M17
+     * lesson: never log a secret-bearing URL). Null-safe.
      */
     static String redact(String message) {
         if (message == null) {
             return null;
         }
-        return message.replaceAll("\\bx(?:ox[a-z]|app)-[A-Za-z0-9-]+", "<redacted>");
+        return message
+                .replaceAll("\\bx(?:ox[a-z]|app)-[A-Za-z0-9-]+", "<redacted>")
+                .replaceAll("ticket=[^&\\s]+", "ticket=<redacted>");
     }
 }

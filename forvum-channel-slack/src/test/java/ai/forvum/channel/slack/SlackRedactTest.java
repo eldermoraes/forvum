@@ -47,6 +47,20 @@ class SlackRedactTest {
     }
 
     @Test
+    void redactsTheTicketQueryOfAMintedSocketUrl() {
+        // A failed WebSocket connect can echo the dial URI — the apps.connections.open-minted wss URL
+        // carrying the single-use ?ticket=... credential — into the exception message (the M17 lesson:
+        // never log a secret-bearing URL). The ticket parameter must not survive redaction.
+        String message = "Connect failed: wss://wss-primary.slack.com/link/?ticket=8f1a-secret-2c&app_id=A1"
+                + " (handshake 401)";
+        String redacted = SlackChannel.redact(message);
+
+        assertFalse(redacted.contains("8f1a-secret-2c"), "the ticket credential must not survive");
+        assertEquals("Connect failed: wss://wss-primary.slack.com/link/?ticket=<redacted>&app_id=A1"
+                + " (handshake 401)", redacted);
+    }
+
+    @Test
     void leavesTokenFreeMessagesUnchanged() {
         assertEquals("connection reset", SlackChannel.redact("connection reset"));
     }

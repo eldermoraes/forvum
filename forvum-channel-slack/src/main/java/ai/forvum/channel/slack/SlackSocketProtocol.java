@@ -56,8 +56,11 @@ public final class SlackSocketProtocol {
     }
 
     /**
-     * An {@code events_api} frame Forvum does not consume (a non-message event, or no event at all):
-     * it must STILL be acknowledged or Slack redelivers it and eventually disables the connection.
+     * An envelope Forvum does not consume but Slack still tracks: a non-message {@code events_api}
+     * event, a REDELIVERED ({@code retry_attempt > 0}) delivery, or any other envelope type
+     * ({@code slash_commands}, {@code interactive}, ...) carrying an {@code envelope_id}. Socket Mode
+     * requires acknowledging EVERY envelope that carries an {@code envelope_id} regardless of type —
+     * unacked envelopes are redelivered and the app's delivery is eventually penalized.
      */
     public record AckOnly(String envelopeId) implements Reaction {
     }
@@ -70,7 +73,7 @@ public final class SlackSocketProtocol {
     public record Reconnect(String reason) implements Reaction {
     }
 
-    /** A frame Forvum does not act on (an unknown type, or an unackable malformed events_api frame). */
+    /** A frame Forvum does not act on: it carries no {@code envelope_id}, so it cannot be acked. */
     public record Ignored() implements Reaction {
     }
 
@@ -97,18 +100,29 @@ public final class SlackSocketProtocol {
             case TYPE_DISCONNECT ->
                     new Reconnect(envelope.reason() == null ? "unspecified" : envelope.reason());
             case TYPE_EVENTS_API -> eventsApi(mapper, envelope);
-            default -> new Ignored();
+            // Any other envelope type (slash_commands, interactive, ...): Forvum does not consume it,
+            // but an envelope_id-bearing envelope must STILL be acknowledged (see AckOnly) or Slack
+            // redelivers it repeatedly and eventually penalizes the app's delivery.
+            default -> envelope.envelopeId() == null || envelope.envelopeId().isBlank()
+                    ? new Ignored()
+                    : new AckOnly(envelope.envelopeId());
         };
     }
 
     /**
-     * Classify an {@code events_api} frame: a {@code payload.event} of type {@code message} is decoded
-     * and dispatched (the processor then filters subtype/bot/allow-list); anything else is ack-only.
-     * A frame with no {@code envelope_id} cannot be acknowledged at all — dropped (out-of-contract).
+     * Classify an {@code events_api} frame: a first-delivery {@code payload.event} of type
+     * {@code message} is decoded and dispatched (the processor then filters subtype/bot/allow-list); a
+     * redelivery ({@code retry_attempt > 0}) or any other event is ack-only. A frame with no
+     * {@code envelope_id} cannot be acknowledged at all — dropped (out-of-contract).
      */
     private static Reaction eventsApi(ObjectMapper mapper, SocketEnvelope envelope) {
         if (envelope.envelopeId() == null || envelope.envelopeId().isBlank()) {
             return new Ignored();
+        }
+        if (envelope.retryAttempt() != null && envelope.retryAttempt() > 0) {
+            // A redelivery: the first delivery already drove (or is still driving) the turn, so
+            // dispatching again would answer the user twice. Ack it to stop further redelivery.
+            return new AckOnly(envelope.envelopeId());
         }
         JsonNode event = envelope.payload() == null ? null : envelope.payload().get("event");
         if (event == null || event.isNull() || !EVENT_MESSAGE.equals(event.path("type").asText())) {

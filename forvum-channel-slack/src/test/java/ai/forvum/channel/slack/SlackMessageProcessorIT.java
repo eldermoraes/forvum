@@ -153,6 +153,19 @@ class SlackMessageProcessorIT {
     }
 
     @Test
+    void aWhitespaceOnlyMessageStillDrivesATurn() {
+        // Boundary pin, deliberately stated: the empty-text gate is isEmpty(), NOT isBlank() —
+        // byte-identical to the Discord/Telegram processors (the three share the same filtering by
+        // design). A whitespace-only message therefore DOES drive a turn today; tightening this to
+        // isBlank() is a cross-channel parity decision, not a single-channel drive-by.
+        processor.process(userMessage("U42", "C777", "   "), anyUserSpec(), rest, AUTH);
+
+        assertEquals(1, driver.dispatched().size(),
+                "whitespace-only text passes the isEmpty gate (parity with Discord/Telegram)");
+        assertEquals("   ", driver.dispatched().get(0).content());
+    }
+
+    @Test
     void aMessageWithoutAChannelIsIgnored() {
         processor.process(userMessage("U42", null, "hello"), anyUserSpec(), rest, AUTH);
 

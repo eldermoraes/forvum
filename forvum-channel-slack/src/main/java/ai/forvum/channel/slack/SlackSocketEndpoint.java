@@ -34,7 +34,10 @@ import org.jboss.logging.Logger;
  *       WebSocket ping/pong, handled by the transport (unlike Discord's op-1 loop).</li>
  *   <li><strong>events_api</strong> → acknowledge the envelope FIRST ({@code { "envelope_id": ... }},
  *       Slack's ~3 s deadline — a turn can take far longer), then hand a message event to
- *       {@link SlackMessageProcessor}, which drives the turn and posts the reply via
+ *       {@link SlackMessageProcessor} on a dedicated virtual thread — inbound frames are SERIAL
+ *       (the {@code @WebSocketClient} default), so a turn running inside the frame handler would
+ *       block every queued envelope past its ack deadline and Slack would redeliver them as
+ *       duplicates. The processor drives the turn and posts the reply via
  *       {@code chat.postMessage}.</li>
  *   <li><strong>disconnect</strong> → close the connection; {@code @OnClose} then hands off to
  *       {@link SlackChannel#onConnectionClosed(int)}, which reconnects with exponential backoff through
@@ -42,9 +45,10 @@ import org.jboss.logging.Logger;
  *       shutting down.</li>
  * </ol>
  *
- * <p><strong>Concurrency (CLAUDE.md §3.8).</strong> Inbound frames run {@code @RunOnVirtualThread} so
- * handling (the turn, the blocking REST reply) blocks on a virtual thread, never the event loop. The
- * endpoint holds no mutable state at all — no lock anywhere (Socket Mode needs no heartbeat thread).
+ * <p><strong>Concurrency (CLAUDE.md §3.8).</strong> Inbound frames run {@code @RunOnVirtualThread}
+ * (never the event loop), and each dispatched turn (with its blocking REST reply) runs on its own
+ * virtual thread so the SERIAL frame handler is never blocked by inference. The endpoint holds no
+ * mutable state at all — no lock anywhere (Socket Mode needs no heartbeat thread).
  *
  * <p>{@code @WebSocketClient} endpoints are CDI beans; this one is the default {@code @Singleton} (one
  * Socket Mode connection per process), so its collaborators are injected. The bot token rides each
@@ -111,8 +115,14 @@ public class SlackSocketEndpoint {
                 LOG.info("Slack Socket Mode: hello received; connection established.");
             }
             case Dispatch dispatch -> {
+                // Ack synchronously (inbound frames are SERIAL — the ~3 s deadline must never wait on
+                // anything), then run the turn on its OWN virtual thread so this handler returns
+                // immediately and the next queued frame (another delivery, a disconnect) is handled
+                // while the turn runs. A turn blocking the handler would make every queued envelope
+                // miss its ack deadline and be redelivered as a duplicate — the same offload the
+                // Telegram long-poll worker uses for its turns.
                 ack(connection, dispatch.envelopeId());
-                process(connection, dispatch);
+                Thread.ofVirtual().name("slack-turn").start(() -> process(connection, dispatch));
             }
             case AckOnly ackOnly -> ack(connection, ackOnly.envelopeId());
             case Reconnect reconnect -> closeQuietly(connection,

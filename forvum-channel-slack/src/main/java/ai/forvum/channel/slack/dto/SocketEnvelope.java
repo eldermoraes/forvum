@@ -20,16 +20,21 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  *       {@link MessageEvent} only when it is a message event.</li>
  *   <li>{@code reason} — present on {@code disconnect} frames (e.g. {@code refresh_requested},
  *       {@code link_disabled}). Nullable.</li>
+ *   <li>{@code retry_attempt} — {@code 0} on a first delivery, {@code > 0} on a REDELIVERY (the prior
+ *       ack was late or lost). A retried {@code events_api} delivery is acked but never dispatched
+ *       again, so a slow turn cannot answer the user twice. Nullable (absent on non-delivery
+ *       frames).</li>
  * </ul>
  *
  * A real {@code RegisterForReflection} (Quarkus-bearing Layer-3 module) plus
  * {@code @JsonIgnoreProperties(ignoreUnknown = true)} (frames also carry {@code debug_info},
- * {@code retry_attempt}, {@code accepts_response_payload}, etc., none of which Forvum consumes).
+ * {@code accepts_response_payload}, etc., none of which Forvum consumes).
  */
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record SocketEnvelope(String type,
                              @JsonProperty("envelope_id") String envelopeId,
                              JsonNode payload,
-                             String reason) {
+                             String reason,
+                             @JsonProperty("retry_attempt") Integer retryAttempt) {
 }

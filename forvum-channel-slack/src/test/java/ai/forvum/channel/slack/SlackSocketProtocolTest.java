@@ -139,9 +139,35 @@ class SlackSocketProtocolTest {
     }
 
     @Test
-    void anUnknownFrameTypeIsIgnored() {
-        assertInstanceOf(Ignored.class, decide("{\"type\":\"slash_commands\",\"envelope_id\":\"e-9\"}"));
+    void anUnknownEnvelopeTypeCarryingAnEnvelopeIdIsAckOnly() {
+        // Socket Mode requires acknowledging EVERY envelope that carries an envelope_id, regardless of
+        // type: an operator routing slash commands / interactivity over Socket Mode would otherwise see
+        // them redelivered repeatedly until Slack penalizes the app's delivery.
+        assertEquals("e-9", assertInstanceOf(AckOnly.class,
+                        decide("{\"type\":\"slash_commands\",\"envelope_id\":\"e-9\"}")).envelopeId(),
+                "an envelope_id-bearing frame of any type must be acknowledged");
+    }
+
+    @Test
+    void anUnknownFrameWithoutAnEnvelopeIdIsIgnored() {
+        assertInstanceOf(Ignored.class, decide("{\"type\":\"some_future_type\"}"));
         assertInstanceOf(Ignored.class, decide("{\"no_type_at_all\":true}"));
+    }
+
+    @Test
+    void aRetriedEventsApiDeliveryIsAckedButNeverDispatchedAgain() {
+        // retry_attempt > 0 marks a REDELIVERY (the first ack was late or lost): the original delivery
+        // already drove the turn, so dispatching again would answer the user twice. The redelivery is
+        // acknowledged (stopping further retries) and dropped.
+        Reaction reaction = decide(
+                "{\"envelope_id\":\"e-7\",\"type\":\"events_api\",\"retry_attempt\":1,"
+                        + "\"retry_reason\":\"timeout\",\"payload\":{\"event\":{"
+                        + "\"type\":\"message\",\"channel\":\"C123\",\"user\":\"U42\","
+                        + "\"text\":\"hello again\",\"ts\":\"1717.0001\"}}}");
+
+        AckOnly ackOnly = assertInstanceOf(AckOnly.class, reaction,
+                "a redelivered events_api envelope must be acked, never dispatched as a duplicate turn");
+        assertEquals("e-7", ackOnly.envelopeId());
     }
 
     @Test
