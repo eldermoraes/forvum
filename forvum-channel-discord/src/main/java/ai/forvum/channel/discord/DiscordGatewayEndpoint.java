@@ -7,6 +7,7 @@ import ai.forvum.channel.discord.GatewayProtocol.Reaction;
 import ai.forvum.channel.discord.GatewayProtocol.Reconnect;
 import ai.forvum.channel.discord.GatewayProtocol.ReIdentify;
 import ai.forvum.channel.discord.GatewayProtocol.SendIdentify;
+import ai.forvum.channel.discord.GatewayProtocol.SendResume;
 import ai.forvum.channel.discord.dto.GatewayPayload;
 import ai.forvum.channel.discord.dto.Ready;
 
@@ -32,8 +33,11 @@ import java.util.concurrent.locks.ReentrantLock;
  * to {@code wss://gateway.discord.gg/?v=10&encoding=json}, it implements the opcode flow:
  *
  * <ol>
- *   <li><strong>HELLO (op 10)</strong> → send IDENTIFY (op 2; token + Forvum intents) and arm the
- *       heartbeat loop with the server-supplied {@code heartbeat_interval}.</li>
+ *   <li><strong>HELLO (op 10)</strong> → send IDENTIFY (op 2; token + Forvum intents) for a fresh
+ *       session, or RESUME (op 6; token + captured {@code session_id} + last seq) when the
+ *       {@link GatewayState} holds a resumable session — the gateway then replays missed events and
+ *       dispatches {@code RESUMED}. Either way the heartbeat loop is armed with the server-supplied
+ *       {@code heartbeat_interval}.</li>
  *   <li><strong>HEARTBEAT loop (op 1)</strong> on a dedicated <em>virtual thread</em> (never the event
  *       loop): every {@code heartbeat_interval} ms it sends {@code { "op": 1, "d": <last seq> }},
  *       reading the last sequence from {@link GatewayState} (an atomic).</li>
@@ -41,9 +45,10 @@ import java.util.concurrent.locks.ReentrantLock;
  *       {@code MESSAGE_CREATE} drives a turn via {@link MessageProcessor}.</li>
  *   <li><strong>RECONNECT (op 7)</strong> / <strong>INVALID_SESSION (op 9)</strong> close the connection;
  *       {@code @OnClose} then hands the close code to {@link DiscordChannel#onConnectionClosed(int)}, which
- *       re-opens the gateway with exponential backoff and a <em>fresh IDENTIFY</em> (v0.1 reconnect policy —
- *       full RESUME is a deferred follow-up) unless the channel is shutting down or the close code is a
- *       fatal 4xxx.</li>
+ *       re-opens the gateway with exponential backoff — dialing the resume URL for an op-6 RESUME when the
+ *       session is still resumable (op 7, a transient drop), or the base URL for a fresh IDENTIFY (op 9
+ *       {@code d=false} resets the state first) — unless the channel is shutting down or the close code is
+ *       a fatal 4xxx.</li>
  * </ol>
  *
  * <p><strong>Concurrency (CLAUDE.md §3.8).</strong> Inbound frames run {@code @RunOnVirtualThread} so
@@ -118,6 +123,13 @@ public class DiscordGatewayEndpoint {
             channel.onReady(); // a healthy session restarts the reconnect-backoff schedule
             LOG.info("Discord gateway READY; session established.");
         }
+        // RESUMED closes an op-6 resume: the gateway finished replaying missed events on the continued
+        // session, so the reconnect-backoff schedule restarts exactly as on READY.
+        if (payload.op() == GatewayProtocol.OP_DISPATCH
+                && GatewayProtocol.EVENT_RESUMED.equals(payload.t())) {
+            channel.onReady();
+            LOG.info("Discord gateway RESUMED; session continued, missed events replayed.");
+        }
         act(connection, reaction);
     }
 
@@ -127,6 +139,10 @@ public class DiscordGatewayEndpoint {
             case SendIdentify identify -> {
                 sendIdentify(connection);
                 startHeartbeat(connection, identify.heartbeatIntervalMillis());
+            }
+            case SendResume resume -> {
+                sendResume(connection);
+                startHeartbeat(connection, resume.heartbeatIntervalMillis());
             }
             case MessageReceived received ->
                     processor.process(received.message(), config.read(), rest, authorization(connection));
@@ -143,6 +159,24 @@ public class DiscordGatewayEndpoint {
     private void sendIdentify(WebSocketClientConnection connection) {
         connection.sendTextAndAwait(GatewayProtocol.encodeIdentify(mapper, tokenOf(connection)));
         LOG.info("Discord gateway: sent IDENTIFY.");
+    }
+
+    /**
+     * Send the RESUME (op 6) continuing the captured session. {@code decide()} returns
+     * {@code SendResume} only when {@link GatewayState#canResume()}, but the state lives in atomics —
+     * if it was reset in between (an op 9 {@code d=false} racing this frame), fall back to a fresh
+     * IDENTIFY rather than sending a malformed RESUME.
+     */
+    private void sendResume(WebSocketClientConnection connection) {
+        var sessionId = state.sessionId();
+        var lastSequence = state.lastSequence();
+        if (sessionId.isEmpty() || lastSequence.isEmpty()) {
+            sendIdentify(connection);
+            return;
+        }
+        connection.sendTextAndAwait(GatewayProtocol.encodeResume(
+                mapper, tokenOf(connection), sessionId.get(), lastSequence.get()));
+        LOG.info("Discord gateway: sent RESUME.");
     }
 
     /**

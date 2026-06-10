@@ -61,6 +61,17 @@ public class GatewayState {
         return Optional.ofNullable(resumeGatewayUrl.get());
     }
 
+    /**
+     * Whether a dropped session can be RESUMED (op 6): READY captured a session id + resume URL AND at
+     * least one DISPATCH sequence has been seen ({@code seq} is mandatory in the RESUME payload). False
+     * after {@link #reset()} (a non-resumable INVALID_SESSION), so the next connect re-IDENTIFYs on the
+     * base gateway URL.
+     */
+    public boolean canResume() {
+        return sessionId.get() != null && resumeGatewayUrl.get() != null
+                && lastSequence.get() != NO_SEQUENCE;
+    }
+
     /** Clear the session (INVALID_SESSION non-resumable): drop the seq + session so the next connect re-IDENTIFYs. */
     public void reset() {
         lastSequence.set(NO_SEQUENCE);

@@ -29,18 +29,22 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link DiscordGatewayEndpoint}) on a virtual thread; on shutdown it closes the connection. Mirrors the
  * Telegram channel's {@code onStart}/{@code onStop} contract.
  *
- * <p><strong>Self-healing reconnect (v0.1: fresh IDENTIFY).</strong> A Discord gateway connection is not
+ * <p><strong>Self-healing reconnect (RESUME-first).</strong> A Discord gateway connection is not
  * permanent — Discord routinely sends RECONNECT (op 7), can INVALIDATE the session (op 9), and a transient
  * network blip closes the socket. When the connection closes and the channel is still {@code running} (no
  * {@link ShutdownEvent} has fired), {@link #onConnectionClosed(int)} re-opens the gateway on a virtual
  * thread with exponential backoff ({@link Backoff}: 1s, 2s, 4s … capped at 60s) so the channel self-heals
- * without a reconnect storm. Each reconnect performs a <em>fresh IDENTIFY</em> (a brand-new session); the
- * {@link GatewayState} is not replayed. Full RESUME (op 6 with {@code resume_gateway_url} + {@code
- * session_id} + last seq to replay missed events) is a DEFERRED follow-up — the captured resume context in
- * {@link GatewayState} is unused by the reconnect path in v0.1. The backoff {@linkplain Backoff#reset()
- * resets} on a successful READY ({@link #onReady()}). A FATAL gateway close code (the 4xxx set Discord
- * documents as non-recoverable, e.g. {@code 4004} authentication failed / {@code 4013}-{@code 4014} invalid
- * or disallowed intents) STOPS the loop with a WARN — reconnecting would loop forever on a misconfiguration.
+ * without a reconnect storm. When {@link GatewayState} holds a {@linkplain GatewayState#canResume()
+ * resumable session} (READY captured {@code session_id} + {@code resume_gateway_url}, and a sequence has
+ * been seen), the reconnect dials the <em>resume gateway URL</em> ({@link #connectTarget()}) and the
+ * endpoint sends RESUME (op 6) on HELLO — the gateway replays missed events then dispatches
+ * {@code RESUMED}. Otherwise (a first connect, or after a non-resumable INVALID_SESSION reset the state)
+ * the reconnect dials the base gateway URL and sends a fresh IDENTIFY. A failed RESUME surfaces as op 9
+ * {@code d=false} (the state resets, the connection closes) so the NEXT reconnect falls back to a fresh
+ * IDENTIFY automatically. The backoff {@linkplain Backoff#reset() resets} on a successful READY or
+ * RESUMED ({@link #onReady()}). A FATAL gateway close code (the 4xxx set Discord documents as
+ * non-recoverable, e.g. {@code 4004} authentication failed / {@code 4013}-{@code 4014} invalid or
+ * disallowed intents) STOPS the loop with a WARN — reconnecting would loop forever on a misconfiguration.
  * A deliberate {@link ShutdownEvent} ({@code running == false}) never reconnects.
  *
  * <p><strong>Absent token → warn + no-op.</strong> If {@code channels/discord.json} is absent, the channel
@@ -70,6 +74,10 @@ public class DiscordChannel {
 
     @Inject
     DiscordChannelConfig config;
+
+    /** The shared gateway state: the resume context (session id + resume URL + last seq) lives here. */
+    @Inject
+    GatewayState state;
 
     /**
      * Connector factory for the {@link DiscordGatewayEndpoint} client endpoint. A fresh connector per
@@ -125,9 +133,10 @@ public class DiscordChannel {
     }
 
     /**
-     * Open the gateway connection, carrying the bot token on the connection's user data. On a failed
-     * connect (and while still {@code running}) the channel schedules a backoff reconnect, so a gateway
-     * outage at startup self-heals rather than leaving the channel permanently inactive.
+     * Open the gateway connection — to the {@linkplain #connectTarget() resume URL when a session is
+     * resumable, else the base gateway URL} — carrying the bot token on the connection's user data. On
+     * a failed connect (and while still {@code running}) the channel schedules a backoff reconnect, so
+     * a gateway outage at startup self-heals rather than leaving the channel permanently inactive.
      */
     void connect() {
         if (!running.get()) {
@@ -135,7 +144,7 @@ public class DiscordChannel {
         }
         try {
             WebSocketClientConnection conn = connectors.get()
-                    .baseUri(URI.create(gatewayUrl))
+                    .baseUri(URI.create(connectTarget()))
                     .userData(TypedKey.forString(DiscordGatewayEndpoint.TOKEN_KEY), botToken)
                     .connectAndAwait();
             connection.set(conn);
@@ -148,14 +157,34 @@ public class DiscordChannel {
     }
 
     /**
+     * The URL the next connect dials: the READY-captured {@code resume_gateway_url} (with the same
+     * {@code ?v=10&encoding=json} parameters the base URL carries — Discord sends the resume URL bare)
+     * when the session is {@linkplain GatewayState#canResume() resumable}, else the base
+     * {@link #gatewayUrl}. Package-private so the resume-target policy is unit-testable without a
+     * live gateway.
+     */
+    String connectTarget() {
+        if (state != null && state.canResume() && state.resumeGatewayUrl().isPresent()) {
+            return withGatewayParams(state.resumeGatewayUrl().get());
+        }
+        return gatewayUrl;
+    }
+
+    /** Append the gateway query parameters to a bare resume URL; a URL already carrying a query is kept. */
+    static String withGatewayParams(String url) {
+        return url.contains("?") ? url : url + "/?v=10&encoding=json";
+    }
+
+    /**
      * The gateway connection closed. Called by {@link DiscordGatewayEndpoint}'s {@code @OnClose} with the
-     * close code. Reconnect policy (v0.1, fresh IDENTIFY):
+     * close code. Reconnect policy:
      * <ul>
      *   <li>{@code running == false} (deliberate {@link ShutdownEvent}) → do nothing.</li>
      *   <li>a {@linkplain #FATAL_CLOSE_CODES fatal} 4xxx close code → WARN and STOP (do not loop forever
      *       on a misconfiguration).</li>
      *   <li>otherwise (op 7 reconnect, op 9 invalid session, a transient network close) → schedule a
-     *       backoff reconnect with a fresh IDENTIFY.</li>
+     *       backoff reconnect: RESUME on the resume URL when the session is still resumable, else a
+     *       fresh IDENTIFY on the base URL ({@link #connectTarget()}).</li>
      * </ul>
      */
     void onConnectionClosed(int closeCode) {
@@ -173,7 +202,7 @@ public class DiscordChannel {
         scheduleReconnect();
     }
 
-    /** A successful READY established a fresh session — reset the backoff so the schedule starts over. */
+    /** A successful READY or RESUMED established a healthy session — reset the backoff schedule. */
     void onReady() {
         backoff.reset();
     }
@@ -188,7 +217,8 @@ public class DiscordChannel {
             return;
         }
         long delay = backoff.nextDelayMillis();
-        LOG.infof("Discord gateway: reconnecting in %d ms (fresh IDENTIFY).", delay);
+        LOG.infof("Discord gateway: reconnecting in %d ms (%s).", delay,
+                state != null && state.canResume() ? "RESUME" : "fresh IDENTIFY");
         connectExecutor.submit(() -> {
             try {
                 sleeper.sleep(delay);

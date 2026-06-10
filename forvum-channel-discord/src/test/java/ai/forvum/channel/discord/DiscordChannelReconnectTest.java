@@ -113,6 +113,51 @@ class DiscordChannelReconnectTest {
     }
 
     @Test
+    void connectTargetIsTheBaseGatewayUrlWithoutAResumableSession() {
+        RecordingChannel channel = runningChannel(new RecordingSleeper());
+        channel.gatewayUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
+        channel.state = new GatewayState(); // nothing captured — fresh IDENTIFY on the base URL
+
+        assertEquals("wss://gateway.discord.gg/?v=10&encoding=json", channel.connectTarget());
+    }
+
+    @Test
+    void connectTargetIsTheResumeUrlWithGatewayParamsWhenTheSessionIsResumable() {
+        RecordingChannel channel = runningChannel(new RecordingSleeper());
+        channel.gatewayUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
+        GatewayState state = new GatewayState();
+        state.onReady("sess-1", "wss://gateway-us-east1-b.discord.gg"); // Discord sends the URL bare
+        state.setLastSequence(42);
+        channel.state = state;
+
+        assertEquals("wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json",
+                channel.connectTarget(),
+                "a resumable session dials the resume URL with the same gateway parameters");
+    }
+
+    @Test
+    void connectTargetFallsBackToTheBaseUrlAfterTheStateResets() {
+        RecordingChannel channel = runningChannel(new RecordingSleeper());
+        channel.gatewayUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
+        GatewayState state = new GatewayState();
+        state.onReady("sess-1", "wss://gateway-us-east1-b.discord.gg");
+        state.setLastSequence(42);
+        state.reset(); // op 9 d=false — the resume context is gone
+        channel.state = state;
+
+        assertEquals("wss://gateway.discord.gg/?v=10&encoding=json", channel.connectTarget(),
+                "after a non-resumable INVALID_SESSION the reconnect re-IDENTIFYs on the base URL");
+    }
+
+    @Test
+    void withGatewayParamsLeavesAUrlAlreadyCarryingAQueryUntouched() {
+        assertEquals("wss://x.example/?v=10&encoding=json",
+                DiscordChannel.withGatewayParams("wss://x.example"));
+        assertEquals("wss://x.example/?v=9",
+                DiscordChannel.withGatewayParams("wss://x.example/?v=9"));
+    }
+
+    @Test
     void aSuccessfulReadyResetsTheBackoffSchedule() {
         RecordingSleeper sleeper = new RecordingSleeper();
         RecordingChannel channel = runningChannel(sleeper);

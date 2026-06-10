@@ -958,9 +958,13 @@ Generalizable lessons from completed milestones; append here as milestones land.
   first routine event. Self-heal from `@OnClose(conn)` (read `conn.closeReason().getCode()`): if still
   `running` (no ShutdownEvent) and the code is not a fatal 4xxx (`{4004,4010..4014}`), re-open on a VT with
   exponential backoff (a pure clock-free `Backoff` atomic: 1s→2s→…cap 60s, `reset()` on READY); a deliberate
-  shutdown (`running=false`) never reconnects; a fatal code stops with a WARN (no infinite loop). v0.1 policy =
-  fresh IDENTIFY per reconnect (full op-6 RESUME with `resume_gateway_url`/`session_id`/last-seq is a deferred
-  follow-up; the captured resume context is unused). A failed heartbeat send must CLOSE the connection so the
+  shutdown (`running=false`) never reconnects; a fatal code stops with a WARN (no infinite loop). The initial
+  v0.1 policy was fresh IDENTIFY per reconnect; the op-6 RESUME follow-up has since LANDED — on a resumable
+  close the reconnect dials `resume_gateway_url` (+ the same `?v=10&encoding=json` params; Discord sends it
+  bare) and HELLO yields `SendResume` (`{token, session_id, seq}`, a `@RegisterForReflection` outbound frame +
+  encode test) when `GatewayState.canResume()` (session + resume URL + a seen seq), falling back to IDENTIFY
+  on the base URL after op-9 `d=false` resets the state; RESUMED resets the backoff like READY. A failed
+  heartbeat send must CLOSE the connection so the
   same `@OnClose`→reconnect path fires (else the log claim "the gateway will reconnect" lies). The
   endpoint(`@Singleton`)→channel(`@ApplicationScoped`) callback is plain `@Inject`; a test subclass of the
   channel that overrides `connect()` to record must be `@Vetoed` or the module's `@QuarkusTest` sees two
