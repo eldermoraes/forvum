@@ -176,6 +176,11 @@
                 <artifactId>forvum-channel-slack</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-channel-matrix</artifactId>
+                <version>${project.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 </project>

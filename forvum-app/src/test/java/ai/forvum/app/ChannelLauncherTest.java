@@ -74,7 +74,8 @@ class ChannelLauncherTest {
     @Test
     void everyRequiredKeyMustBeNonBlankForACredentialGatedChannelToServe() {
         // The gate is allMatch over each channel's declared key set; pinned per entry here, and
-        // exercised at n>1 by the slack entry (botToken+appToken) below.
+        // exercised at n>1 by both the Slack (botToken+appToken) and Matrix (homeserver+accessToken)
+        // cases below.
         for (var entry : ChannelLauncher.REQUIRED_SERVE_KEYS.entrySet()) {
             assertFalse(ChannelLauncher.serves(entry.getKey(), json("{}")),
                     entry.getKey() + " must not serve with no credentials");
@@ -103,5 +104,23 @@ class ChannelLauncherTest {
         assertFalse(ChannelLauncher.serves("slack",
                         json("{ \"enabled\": false, \"botToken\": \"xoxb-1\", \"appToken\": \"xapp-1\" }")),
                 "a disabled channel never serves even fully credentialed");
+    }
+
+    @Test
+    void matrixServesOnlyWithBothHomeserverAndAccessToken() {
+        // The first multi-key entry: the allMatch gate must require EVERY declared key, so one
+        // credential present without the other is NOT serving (an enabled but half-configured
+        // matrix.json would otherwise hang the binary in server mode serving nothing — the M17 trap).
+        assertFalse(ChannelLauncher.serves("matrix", json("{}")));
+        assertFalse(ChannelLauncher.serves("matrix",
+                json("{ \"homeserver\": \"https://m.example.org\" }")));
+        assertFalse(ChannelLauncher.serves("matrix", json("{ \"accessToken\": \"syt_abc\" }")));
+        assertFalse(ChannelLauncher.serves("matrix",
+                json("{ \"homeserver\": \"  \", \"accessToken\": \"syt_abc\" }")));
+        assertFalse(ChannelLauncher.serves("matrix",
+                json("{ \"enabled\": false, \"homeserver\": \"https://m.example.org\", "
+                        + "\"accessToken\": \"syt_abc\" }")));
+        assertTrue(ChannelLauncher.serves("matrix",
+                json("{ \"homeserver\": \"https://m.example.org\", \"accessToken\": \"syt_abc\" }")));
     }
 }

@@ -1,0 +1,7 @@
+{
+  "extension_id": "matrix",
+  "module_name": "forvum-channel-matrix",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.matrix.MatrixChannelProvider" }
+  ]
+}
