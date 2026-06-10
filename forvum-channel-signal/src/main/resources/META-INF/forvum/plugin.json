@@ -1,0 +1,7 @@
+{
+  "extension_id": "signal",
+  "module_name": "forvum-channel-signal",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.signal.SignalChannelProvider" }
+  ]
+}

@@ -74,8 +74,8 @@ class ChannelLauncherTest {
     @Test
     void everyRequiredKeyMustBeNonBlankForACredentialGatedChannelToServe() {
         // The gate is allMatch over each channel's declared key set; pinned per entry here, and
-        // exercised at n>1 by both the Slack (botToken+appToken) and Matrix (homeserver+accessToken)
-        // cases below.
+        // exercised at n>1 by the Slack (botToken+appToken), Matrix (homeserver+accessToken+userId),
+        // and Signal (baseUrl+account) cases below.
         for (var entry : ChannelLauncher.REQUIRED_SERVE_KEYS.entrySet()) {
             assertFalse(ChannelLauncher.serves(entry.getKey(), json("{}")),
                     entry.getKey() + " must not serve with no credentials");
@@ -129,5 +129,26 @@ class ChannelLauncherTest {
         assertTrue(ChannelLauncher.serves("matrix",
                 json("{ \"homeserver\": \"https://m.example.org\", \"accessToken\": \"syt_abc\", "
                         + "\"userId\": \"@bot:example.org\" }")));
+    }
+
+    @Test
+    void signalServesOnlyWithBothBaseUrlAndAccount() {
+        // Signal declares TWO required keys (baseUrl + account): the allMatch gate must refuse a
+        // config carrying only one of them (or a blank one), else an enabled-but-half-configured
+        // signal.json would hang the binary in server mode serving nothing (the M17 trap at n>1).
+        assertFalse(ChannelLauncher.serves("signal", json("{}")));
+        assertFalse(ChannelLauncher.serves("signal",
+                json("{ \"baseUrl\": \"http://localhost:8080\" }")), "account missing");
+        assertFalse(ChannelLauncher.serves("signal",
+                json("{ \"account\": \"+15559990000\" }")), "baseUrl missing");
+        assertFalse(ChannelLauncher.serves("signal",
+                json("{ \"baseUrl\": \"http://localhost:8080\", \"account\": \"   \" }")),
+                "a blank account is not a credential");
+        assertTrue(ChannelLauncher.serves("signal",
+                json("{ \"baseUrl\": \"http://localhost:8080\", \"account\": \"+15559990000\" }")));
+        assertFalse(ChannelLauncher.serves("signal",
+                json("{ \"enabled\": false, \"baseUrl\": \"http://localhost:8080\","
+                        + " \"account\": \"+15559990000\" }")),
+                "a disabled channel never serves, even fully configured");
     }
 }

@@ -130,6 +130,14 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-channel-matrix</artifactId>
         </dependency>
+        <!-- Layer-3 Signal channel (P2-CH, connect-only): a hand-rolled blocking SSE reader over the JDK
+             HttpClient on a virtual thread driving turns via ChannelTurnDriver, replying as JSON-RPC 2.0
+             over a blocking REST client to an operator-run signal-cli daemon. Brings
+             quarkus-rest-client-jackson (already present via telegram/discord). -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-signal</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
