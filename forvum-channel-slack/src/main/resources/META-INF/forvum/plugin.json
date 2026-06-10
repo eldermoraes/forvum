@@ -1,0 +1,7 @@
+{
+  "extension_id": "slack",
+  "module_name": "forvum-channel-slack",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.slack.SlackChannelProvider" }
+  ]
+}

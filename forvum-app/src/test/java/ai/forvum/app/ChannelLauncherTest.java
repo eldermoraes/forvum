@@ -73,12 +73,35 @@ class ChannelLauncherTest {
 
     @Test
     void everyRequiredKeyMustBeNonBlankForACredentialGatedChannelToServe() {
-        // The map's entries are single-key today; the gate is allMatch over the declared set, so a
-        // channel declaring several keys (Slack: botToken+appToken) serves only with ALL present —
-        // pinned per entry here, and exercised at n>1 by each new channel module's own launcher test.
+        // The gate is allMatch over each channel's declared key set; pinned per entry here, and
+        // exercised at n>1 by the slack entry (botToken+appToken) below.
         for (var entry : ChannelLauncher.REQUIRED_SERVE_KEYS.entrySet()) {
             assertFalse(ChannelLauncher.serves(entry.getKey(), json("{}")),
                     entry.getKey() + " must not serve with no credentials");
         }
+    }
+
+    @Test
+    void aMultiKeyChannelServesOnlyWithEveryRequiredKeyNonBlank() {
+        // The real n>1 allMatch case: Slack requires BOTH botToken (xoxb-, replies) and appToken
+        // (xapp-, opens the socket). Any missing or blank key — in either position — must keep the
+        // binary in command mode (an enabled config missing one credential would otherwise hang in
+        // server mode serving nothing, the M17 trap).
+        assertFalse(ChannelLauncher.serves("slack", json("{}")));
+        assertFalse(ChannelLauncher.serves("slack", json("{ \"botToken\": \"xoxb-1\" }")),
+                "botToken alone (appToken missing) must not serve");
+        assertFalse(ChannelLauncher.serves("slack", json("{ \"appToken\": \"xapp-1\" }")),
+                "appToken alone (botToken missing) must not serve");
+        assertFalse(ChannelLauncher.serves("slack",
+                        json("{ \"botToken\": \"xoxb-1\", \"appToken\": \"   \" }")),
+                "a blank appToken counts as missing");
+        assertFalse(ChannelLauncher.serves("slack",
+                        json("{ \"botToken\": \"\", \"appToken\": \"xapp-1\" }")),
+                "a blank botToken counts as missing");
+        assertTrue(ChannelLauncher.serves("slack",
+                json("{ \"botToken\": \"xoxb-1\", \"appToken\": \"xapp-1\" }")));
+        assertFalse(ChannelLauncher.serves("slack",
+                        json("{ \"enabled\": false, \"botToken\": \"xoxb-1\", \"appToken\": \"xapp-1\" }")),
+                "a disabled channel never serves even fully credentialed");
     }
 }
