@@ -107,20 +107,27 @@ class ChannelLauncherTest {
     }
 
     @Test
-    void matrixServesOnlyWithBothHomeserverAndAccessToken() {
+    void matrixServesOnlyWithHomeserverAccessTokenAndUserId() {
         // The first multi-key entry: the allMatch gate must require EVERY declared key, so one
-        // credential present without the other is NOT serving (an enabled but half-configured
+        // credential present without the others is NOT serving (an enabled but half-configured
         // matrix.json would otherwise hang the binary in server mode serving nothing — the M17 trap).
+        // userId is serve-required too: MatrixChannel.onStart no-ops without it (the self-echo gate),
+        // so a creds-but-no-userId config must not count as serving either.
         assertFalse(ChannelLauncher.serves("matrix", json("{}")));
         assertFalse(ChannelLauncher.serves("matrix",
                 json("{ \"homeserver\": \"https://m.example.org\" }")));
         assertFalse(ChannelLauncher.serves("matrix", json("{ \"accessToken\": \"syt_abc\" }")));
         assertFalse(ChannelLauncher.serves("matrix",
-                json("{ \"homeserver\": \"  \", \"accessToken\": \"syt_abc\" }")));
+                json("{ \"homeserver\": \"  \", \"accessToken\": \"syt_abc\", "
+                        + "\"userId\": \"@bot:example.org\" }")));
+        assertFalse(ChannelLauncher.serves("matrix",
+                json("{ \"homeserver\": \"https://m.example.org\", \"accessToken\": \"syt_abc\" }")),
+                "creds without the bot's own userId must not serve — onStart would warn + no-op");
         assertFalse(ChannelLauncher.serves("matrix",
                 json("{ \"enabled\": false, \"homeserver\": \"https://m.example.org\", "
-                        + "\"accessToken\": \"syt_abc\" }")));
+                        + "\"accessToken\": \"syt_abc\", \"userId\": \"@bot:example.org\" }")));
         assertTrue(ChannelLauncher.serves("matrix",
-                json("{ \"homeserver\": \"https://m.example.org\", \"accessToken\": \"syt_abc\" }")));
+                json("{ \"homeserver\": \"https://m.example.org\", \"accessToken\": \"syt_abc\", "
+                        + "\"userId\": \"@bot:example.org\" }")));
     }
 }

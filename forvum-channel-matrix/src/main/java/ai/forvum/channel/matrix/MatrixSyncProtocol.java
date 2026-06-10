@@ -53,15 +53,19 @@ final class MatrixSyncProtocol {
 
     /**
      * The inbound text messages of {@code response}: every {@code rooms.join.<roomId>.timeline} event
-     * with {@code type == m.room.message}, {@code content.msgtype == m.text}, a non-null
-     * {@code sender}/{@code body}, and a sender that is NOT {@code ownUserId} (the self-filter — the
+     * with {@code type == m.room.message}, {@code content.msgtype == m.text}, a non-blank
+     * {@code sender} (a blank one would violate {@code ChannelMessage}'s invariant inside the sync
+     * loop), a non-null {@code body}, and a sender that is NOT {@code ownUserId} (the self-filter — the
      * bot's own replies come back in subsequent syncs and must never drive a turn, or the bot converses
-     * with itself). A {@code null} {@code ownUserId} (operator left {@code userId} unset) disables the
-     * self-filter.
+     * with itself). A {@code null} {@code ownUserId} FAILS SAFE to no messages at all: without the
+     * bot's own id no event can be proven not-self, and processing anyway would open an unbounded
+     * self-echo loop ({@code MatrixChannel.onStart} gates the loop on {@code userId}, so null here
+     * means a mid-run config edit removed it).
      */
     static List<InboundMessage> messages(SyncResponse response, String ownUserId) {
         List<InboundMessage> messages = new ArrayList<>();
-        if (response == null || response.rooms() == null || response.rooms().join() == null) {
+        if (response == null || ownUserId == null
+                || response.rooms() == null || response.rooms().join() == null) {
             return messages;
         }
         for (Map.Entry<String, SyncJoinedRoom> room : response.rooms().join().entrySet()) {
@@ -73,6 +77,7 @@ final class MatrixSyncProtocol {
                 if (event == null
                         || !MESSAGE_EVENT_TYPE.equals(event.type())
                         || event.sender() == null
+                        || event.sender().isBlank()
                         || event.sender().equals(ownUserId)
                         || event.content() == null
                         || !TEXT_MSGTYPE.equals(event.content().msgtype())
@@ -87,9 +92,10 @@ final class MatrixSyncProtocol {
 
     /**
      * The pending invites of {@code response}: one {@link Invite} per {@code rooms.invite} entry, the
-     * inviter taken from the stripped {@code m.room.member} event with {@code content.membership ==
-     * invite} targeting {@code ownUserId} (any target when {@code ownUserId} is {@code null}). An invite
-     * whose member event is missing yields {@code inviter == null} — which {@link #shouldJoin} ignores.
+     * inviter taken from the SINGLE stripped {@code m.room.member} event with {@code content.membership
+     * == invite} targeting {@code ownUserId}. An invite whose member event is missing, ambiguous
+     * (stripped state is unauthenticated — see {@link #inviterOf}), or untargetable ({@code ownUserId}
+     * null) yields {@code inviter == null} — which {@link #shouldJoin} ignores.
      */
     static List<Invite> invites(SyncResponse response, String ownUserId) {
         List<Invite> invites = new ArrayList<>();
@@ -111,22 +117,36 @@ final class MatrixSyncProtocol {
         return invite.inviter() != null && spec.isUserAllowed(invite.inviter());
     }
 
-    /** The sender of the pending-invite member event of {@code room}, or {@code null}. */
+    /**
+     * The sender of the pending-invite member event of {@code room}, or {@code null} when it cannot be
+     * trusted. Stripped {@code invite_state} events are UNAUTHENTICATED per the Matrix spec — over
+     * federation they come from the inviting server's {@code invite_room_state}, which a malicious
+     * homeserver fully controls — so the invite gate is best-effort, defense-in-depth, never proof.
+     * Concretely: current state is keyed by {@code (type, state_key)}, so a legitimate stripped set
+     * carries exactly ONE {@code m.room.member}/{@code invite} event targeting the bot; ANY
+     * multiplicity (the forged-allowlisted-event-plus-real-event spoof shape) yields {@code null} —
+     * never trusted, so {@link #shouldJoin} refuses the auto-join. A {@code null} {@code ownUserId}
+     * also yields {@code null}: without the bot's own id the member event targeting it cannot be
+     * identified (fail safe, mirroring {@link #messages}).
+     */
     private static String inviterOf(SyncInvitedRoom room, String ownUserId) {
-        if (room == null || room.inviteState() == null || room.inviteState().events() == null) {
+        if (room == null || ownUserId == null
+                || room.inviteState() == null || room.inviteState().events() == null) {
             return null;
         }
+        String inviter = null;
+        int matches = 0;
         for (RoomEvent event : room.inviteState().events()) {
             if (event == null
                     || !MEMBER_EVENT_TYPE.equals(event.type())
                     || event.content() == null
-                    || !INVITE_MEMBERSHIP.equals(event.content().membership())) {
+                    || !INVITE_MEMBERSHIP.equals(event.content().membership())
+                    || !ownUserId.equals(event.stateKey())) {
                 continue;
             }
-            if (ownUserId == null || ownUserId.equals(event.stateKey())) {
-                return event.sender();
-            }
+            matches++;
+            inviter = event.sender();
         }
-        return null;
+        return matches == 1 ? inviter : null;
     }
 }

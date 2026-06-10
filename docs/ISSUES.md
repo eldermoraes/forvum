@@ -1035,7 +1035,11 @@ curated set. **Status.** `forvum-channel-discord` SHIPPED as the first P2-CH cha
 Discord Gateway v10 client over `quarkus-websockets-next` (CLIENT mode, plain JSON) + a blocking
 `quarkus-rest-client-jackson` reply path (no JDA/Discord4J: both native-broken/reactive and violate the
 SDK boundary); the persistent-WebSocket gateway pattern is the template the remaining socket-based
-channels reuse. The other four (`-slack`, `-whatsapp`, `-matrix`, `-signal`) remain. **Scope.**
+channels reuse. `forvum-channel-matrix` SHIPPED — a `/sync` long-poll worker over the blocking REST
+client (the Telegram recipe; unencrypted rooms only, E2EE tracked in #125; `homeserver`, `accessToken`,
+and `userId` all serve-required — Matrix echoes the bot's own sends, so the self-identity gates the
+loop). `forvum-channel-slack` SHIPPED (Socket Mode, in its own PR). The other two (`-whatsapp`,
+`-signal`) remain. **Scope.**
 `forvum-channel-discord`, `-slack`, `-whatsapp`, `-matrix`, `-signal`. The long
 tail (iMessage/BlueBubbles, Teams, Google Chat, Mattermost, Feishu, LINE, QQ, Zalo/ZaloUser, IRC, Nostr,
 Tlon, Twitch, Synology Chat, Nextcloud Talk, telephony voice-call) is explicitly OUT of v0.5 scope =

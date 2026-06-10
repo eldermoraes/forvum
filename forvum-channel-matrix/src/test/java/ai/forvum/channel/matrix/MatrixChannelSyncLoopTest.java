@@ -80,10 +80,17 @@ class MatrixChannelSyncLoopTest {
         };
     }
 
+    /** A {@code channels/matrix.json} carrying the serve-required keys incl. the bot's own user id. */
+    private static Path credentialedConfig(Path home) throws IOException {
+        return configFile(home, "{ \"homeserver\": \"https://m.example.org\", "
+                + "\"accessToken\": \"syt_tok\", \"userId\": \"" + BOT + "\" }");
+    }
+
     @Test
-    void discardsTheInitialSnapshotThenDrivesATurnAndAdvancesTheCursor() {
+    void discardsTheInitialSnapshotThenDrivesATurnAndAdvancesTheCursor(@TempDir Path home)
+            throws IOException {
         FakeTurnDriver driver = new FakeTurnDriver();
-        MatrixChannel channel = wiredChannel(driver, Path.of("/nonexistent/matrix.json"));
+        MatrixChannel channel = wiredChannel(driver, credentialedConfig(home));
         RecordingMatrixClientApi api = stoppingApi(channel);
         // The FIRST sync (since == null) is the initial snapshot — its timeline is history and must
         // NOT drive a turn; only its next_batch cursor is taken.
@@ -112,9 +119,9 @@ class MatrixChannelSyncLoopTest {
     }
 
     @Test
-    void aTransientSyncFailureBacksOffAndTheLoopSurvives() {
+    void aTransientSyncFailureBacksOffAndTheLoopSurvives(@TempDir Path home) throws IOException {
         FakeTurnDriver driver = new FakeTurnDriver();
-        MatrixChannel channel = wiredChannel(driver, Path.of("/nonexistent/matrix.json"));
+        MatrixChannel channel = wiredChannel(driver, credentialedConfig(home));
         RecordingMatrixClientApi api = new RecordingMatrixClientApi() {
             private boolean failed;
 
@@ -226,6 +233,153 @@ class MatrixChannelSyncLoopTest {
             assertTrue(driver.dispatched().isEmpty());
             channel.onStop(null);
         }
+    }
+
+    @Test
+    void enabledButUserIdLessChannelLeavesTheLoopUnstartedWithoutThrowing(@TempDir Path home)
+            throws IOException {
+        // Matrix /sync ECHOES the bot's own sends (unlike Telegram getUpdates / Discord's bot-author
+        // filter), so without its own user id the bot cannot self-filter: an empty allow-list opens an
+        // unbounded self-conversation (one real LLM call per cycle), a non-empty one an unbounded
+        // refusal loop. A missing userId must therefore fail safe — WARN + no-op, like a missing
+        // credential — never start the loop.
+        Path configFile = configFile(home, "{ \"enabled\": true, "
+                + "\"homeserver\": \"https://m.org\", \"accessToken\": \"syt_tok\" }");
+        FakeTurnDriver driver = new FakeTurnDriver();
+        MatrixChannel channel = wiredChannel(driver, configFile);
+
+        channel.onStart(null);
+
+        assertFalse(channel.running,
+                "an enabled channel without the bot's own userId must never start the sync loop");
+        assertTrue(driver.dispatched().isEmpty());
+        channel.onStop(null);
+    }
+
+    @Test
+    void aPoisonMessageNeverWedgesTheCursorAndItsSiblingsAreDispatchedExactlyOnce(@TempDir Path home)
+            throws IOException {
+        // One throwing message must not abort its batch: the siblings before AND after it are
+        // dispatched exactly once, the cursor still advances past the batch (no eternal refetch +
+        // duplicate turns), and the loop survives — per-message isolation, the M4 observer lesson.
+        FakeTurnDriver driver = new FakeTurnDriver();
+        MatrixChannel channel = wiredChannel(driver, credentialedConfig(home));
+        channel.processor = new PoisonOnBody(driver);
+        RecordingMatrixClientApi api = stoppingApi(channel);
+        api.scriptedResponses.add(new SyncResponse("s1", null)); // initial snapshot
+        RoomEvent good1 = textEvent("@alice:example.org", "first");
+        RoomEvent poison = textEvent("@alice:example.org", "poison");
+        RoomEvent good2 = textEvent("@alice:example.org", "second");
+        api.scriptedResponses.add(new SyncResponse("s2", new SyncRooms(
+                Map.of("!room:example.org",
+                        new SyncJoinedRoom(new SyncTimeline(List.of(good1, poison, good2)))),
+                null)));
+
+        channel.running = true;
+        channel.syncLoop(api, "https://m.example.org", "Bearer syt_tok");
+
+        assertEquals(List.of("first", "second"),
+                driver.dispatched().stream().map(m -> m.content()).toList(),
+                "the poison message's siblings are dispatched exactly once — no drop, no redispatch");
+        assertEquals("s2", api.syncCalls.get(2).since(),
+                "the cursor advances past the poisoned batch — it is never refetched");
+    }
+
+    /** A {@code SyncProcessor} whose {@code process} throws on body {@code "poison"}. {@code @Vetoed}
+     * so this subclass of an {@code @ApplicationScoped} bean never becomes a second ambiguous bean in
+     * the module's {@code @QuarkusTest} boot (CDI scopes are {@code @Inherited}). */
+    @jakarta.enterprise.inject.Vetoed
+    static final class PoisonOnBody extends SyncProcessor {
+        PoisonOnBody(ai.forvum.sdk.ChannelTurnDriver driver) {
+            this.turns = driver;
+        }
+
+        @Override
+        public void process(MatrixSyncProtocol.InboundMessage message, MatrixChannelConfig.Spec spec,
+                            MatrixClientApi api, String baseUrl, String authorization) {
+            if ("poison".equals(message.body())) {
+                throw new IllegalStateException("poisoned event for Authorization: Bearer syt_tok");
+            }
+            super.process(message, spec, api, baseUrl, authorization);
+        }
+    }
+
+    private static RoomEvent textEvent(String sender, String body) {
+        return new RoomEvent("m.room.message", sender, null, new EventContent("m.text", body, null));
+    }
+
+    @Test
+    void aNullOrBlankNextBatchRetainsThePreviousCursor(@TempDir Path home) throws IOException {
+        // The defensive next_batch guard: a malformed response without a cursor must not reset since
+        // to null (which would re-trigger the initial-snapshot discard and lose the position).
+        FakeTurnDriver driver = new FakeTurnDriver();
+        MatrixChannel channel = wiredChannel(driver, credentialedConfig(home));
+        RecordingMatrixClientApi api = stoppingApi(channel);
+        api.scriptedResponses.add(new SyncResponse("s1", null)); // initial snapshot: cursor taken
+        api.scriptedResponses.add(new SyncResponse(null, null)); // no cursor — retain s1
+        api.scriptedResponses.add(new SyncResponse("   ", null)); // blank cursor — retain s1
+
+        channel.running = true;
+        channel.syncLoop(api, "https://m.example.org", "Bearer syt_tok");
+
+        List<SyncCall> calls = api.syncCalls;
+        assertEquals(4, calls.size());
+        assertEquals("s1", calls.get(1).since());
+        assertEquals("s1", calls.get(2).since(), "a null next_batch retains the previous cursor");
+        assertEquals("s1", calls.get(3).since(), "a blank next_batch retains the previous cursor");
+    }
+
+    @Test
+    void aFailedSyncConsumesTheBackoffSchedule(@TempDir Path home) throws IOException {
+        // Pins the WIRING (BackoffTest covers the class): a failed sync must consume
+        // backoff.nextDelayMillis(), advancing the schedule — delete the backOff() call and this fails.
+        FakeTurnDriver driver = new FakeTurnDriver();
+        MatrixChannel channel = wiredChannel(driver, credentialedConfig(home));
+        channel.backoff = new Backoff(1, 64);
+        RecordingMatrixClientApi api = new RecordingMatrixClientApi() {
+            @Override
+            public SyncResponse sync(String baseUrl, String authorization, String since, int timeout) {
+                boolean first = syncCalls.isEmpty();
+                super.sync(baseUrl, authorization, since, timeout);
+                if (!first) {
+                    channel.running = false; // second failure exits the loop BEFORE backing off again
+                }
+                throw new RuntimeException("transient sync failure");
+            }
+        };
+
+        channel.running = true;
+        channel.syncLoop(api, "https://m.example.org", "Bearer syt_tok");
+
+        assertEquals(2, channel.backoff.nextDelayMillis(),
+                "exactly one back-off was consumed for the one retried failure (1 → next is 2)");
+    }
+
+    @Test
+    void aSuccessfulSyncResetsTheBackoffSchedule(@TempDir Path home) throws IOException {
+        // Pins the reset-on-success wiring: after two consumed failures (1, 2 → next would be 4) a
+        // successful sync must return the schedule to its initial delay.
+        FakeTurnDriver driver = new FakeTurnDriver();
+        MatrixChannel channel = wiredChannel(driver, credentialedConfig(home));
+        channel.backoff = new Backoff(1, 64);
+        RecordingMatrixClientApi api = new RecordingMatrixClientApi() {
+            @Override
+            public SyncResponse sync(String baseUrl, String authorization, String since, int timeout) {
+                if (syncCalls.size() < 2) {
+                    super.sync(baseUrl, authorization, since, timeout);
+                    throw new RuntimeException("transient sync failure");
+                }
+                channel.running = false; // the successful sync is the last cycle
+                return super.sync(baseUrl, authorization, since, timeout);
+            }
+        };
+        api.scriptedResponses.add(new SyncResponse("s1", null));
+
+        channel.running = true;
+        channel.syncLoop(api, "https://m.example.org", "Bearer syt_tok");
+
+        assertEquals(1, channel.backoff.nextDelayMillis(),
+                "the successful sync resets the back-off schedule to its initial delay");
     }
 
     @Test
