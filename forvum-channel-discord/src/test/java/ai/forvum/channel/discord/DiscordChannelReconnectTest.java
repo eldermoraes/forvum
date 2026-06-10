@@ -4,9 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.quarkus.websockets.next.WebSocketClientConnection;
+
 import jakarta.enterprise.inject.Vetoed;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
@@ -110,6 +114,137 @@ class DiscordChannelReconnectTest {
         assertEquals(0, channel.connectCount, "a fatal 4xxx close code does not reconnect");
         assertTrue(sleeper.sleeps.isEmpty(), "no backoff is scheduled on a fatal close");
         assertFalse(channel.running.get(), "the channel stops running after a fatal close");
+    }
+
+    @Test
+    void connectTargetIsTheBaseGatewayUrlWithoutAResumableSession() {
+        RecordingChannel channel = runningChannel(new RecordingSleeper());
+        channel.gatewayUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
+        channel.state = new GatewayState(); // nothing captured — fresh IDENTIFY on the base URL
+
+        assertEquals("wss://gateway.discord.gg/?v=10&encoding=json", channel.connectTarget());
+    }
+
+    @Test
+    void connectTargetIsTheResumeUrlWithGatewayParamsWhenTheSessionIsResumable() {
+        RecordingChannel channel = runningChannel(new RecordingSleeper());
+        channel.gatewayUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
+        GatewayState state = new GatewayState();
+        state.onReady("sess-1", "wss://gateway-us-east1-b.discord.gg"); // Discord sends the URL bare
+        state.setLastSequence(42);
+        channel.state = state;
+
+        assertEquals("wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json",
+                channel.connectTarget(),
+                "a resumable session dials the resume URL with the same gateway parameters");
+    }
+
+    @Test
+    void connectTargetFallsBackToTheBaseUrlAfterTheStateResets() {
+        RecordingChannel channel = runningChannel(new RecordingSleeper());
+        channel.gatewayUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
+        GatewayState state = new GatewayState();
+        state.onReady("sess-1", "wss://gateway-us-east1-b.discord.gg");
+        state.setLastSequence(42);
+        state.reset(); // op 9 d=false — the resume context is gone
+        channel.state = state;
+
+        assertEquals("wss://gateway.discord.gg/?v=10&encoding=json", channel.connectTarget(),
+                "after a non-resumable INVALID_SESSION the reconnect re-IDENTIFYs on the base URL");
+    }
+
+    @Test
+    void withGatewayParamsLeavesAUrlAlreadyCarryingAQueryUntouched() {
+        assertEquals("wss://x.example/?v=10&encoding=json",
+                DiscordChannel.withGatewayParams("wss://x.example"));
+        assertEquals("wss://x.example/?v=9",
+                DiscordChannel.withGatewayParams("wss://x.example/?v=9"));
+    }
+
+    /** A channel whose dial always fails and whose reconnect is counted instead of scheduled. */
+    @Vetoed
+    private static final class FailingDialChannel extends DiscordChannel {
+        final List<String> dialed = new CopyOnWriteArrayList<>();
+        int reconnects;
+
+        @Override
+        WebSocketClientConnection dial(String target) {
+            dialed.add(target);
+            throw new IllegalStateException("connection refused");
+        }
+
+        @Override
+        void scheduleReconnect() {
+            reconnects++;
+        }
+    }
+
+    private static final String BASE_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
+
+    private static GatewayState resumableState() {
+        GatewayState state = new GatewayState();
+        state.onReady("sess-1", "wss://gateway-us-east1-b.discord.gg"); // gateway hosts rotate
+        state.setLastSequence(42);
+        return state;
+    }
+
+    @Test
+    void aFailedDialOfTheResumeUrlFallsBackToTheBaseGatewayUrl() {
+        // A READY-captured resume host can be retired/unreachable (DNS failure, connection refused).
+        // Without resetting the resume context on the failed dial, every backoff retry re-dials the
+        // SAME dead host at the 60 s cap forever while the base gateway URL would work.
+        FailingDialChannel channel = new FailingDialChannel();
+        channel.gatewayUrl = BASE_URL;
+        channel.state = resumableState();
+        channel.running.set(true);
+
+        channel.connect();
+
+        assertEquals("wss://gateway-us-east1-b.discord.gg/?v=10&encoding=json", channel.dialed.get(0),
+                "the first attempt dials the resume target");
+        assertEquals(1, channel.reconnects, "the failed dial still schedules a backoff reconnect");
+        assertFalse(channel.state.canResume(),
+                "a failed dial of the resume host must drop the resume context");
+        assertEquals(BASE_URL, channel.connectTarget(),
+                "the NEXT attempt must fall back to the base gateway URL (fresh IDENTIFY)");
+
+        channel.connect();
+
+        assertEquals(BASE_URL, channel.dialed.get(1), "the second attempt actually dials the base URL");
+    }
+
+    @Test
+    void aFailedDialOfTheBaseUrlJustRetriesWithBackoff() {
+        FailingDialChannel channel = new FailingDialChannel();
+        channel.gatewayUrl = BASE_URL;
+        channel.state = new GatewayState(); // nothing to reset
+        channel.running.set(true);
+
+        channel.connect();
+
+        assertEquals(List.of(BASE_URL), channel.dialed);
+        assertEquals(1, channel.reconnects);
+        assertEquals(BASE_URL, channel.connectTarget(), "the base URL stays the target");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {4007, 4009})
+    void aNonResumableCloseCodeResetsTheResumeContextAndStillReconnects(int closeCode) {
+        // 4007 (invalid seq) / 4009 (session timed out): Discord documents both as "reconnect and
+        // start a NEW session" — RESUMEing the same session/seq would just be closed again (4007 is
+        // the documented answer to an invalid resume seq, so a resume loop is the failure mode).
+        RecordingSleeper sleeper = new RecordingSleeper();
+        RecordingChannel channel = runningChannel(sleeper);
+        channel.gatewayUrl = BASE_URL;
+        channel.state = resumableState();
+
+        channel.onConnectionClosed(closeCode);
+
+        assertEquals(1, channel.connectCount, "4007/4009 are not fatal — the channel reconnects");
+        assertTrue(channel.running.get(), "the channel keeps running");
+        assertFalse(channel.state.canResume(), "the dead session's resume context is dropped");
+        assertEquals(BASE_URL, channel.connectTarget(),
+                "the reconnect must IDENTIFY fresh on the base URL, not re-send the invalid session");
     }
 
     @Test

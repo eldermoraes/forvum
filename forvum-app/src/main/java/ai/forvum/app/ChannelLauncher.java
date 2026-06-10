@@ -36,6 +36,13 @@ public class ChannelLauncher {
     static final String DISCORD_ID = "discord";
 
     /**
+     * Channel id of the Slack channel, which requires BOTH a {@code botToken} (xoxb-, the reply path)
+     * and an {@code appToken} (xapp-, opens the Socket Mode connection) to serve — the first multi-key
+     * entry exercising the {@code allMatch} gate.
+     */
+    static final String SLACK_ID = "slack";
+
+    /**
      * Per-channel config keys that must ALL be present and non-blank for the channel to count as
      * serving. Generalizes the original single {@code botToken} gate: each credential-gated channel
      * declares its own key set (Slack needs {@code botToken}+{@code appToken}, Matrix
@@ -45,10 +52,11 @@ public class ChannelLauncher {
      */
     static final Map<String, Set<String>> REQUIRED_SERVE_KEYS = Map.of(
             TELEGRAM_ID, Set.of("botToken"),
-            DISCORD_ID, Set.of("botToken"));
+            DISCORD_ID, Set.of("botToken"),
+            SLACK_ID, Set.of("botToken", "appToken"));
 
     /** Channel ids whose enablement keeps the process alive to serve. */
-    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID, DISCORD_ID);
+    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID, DISCORD_ID, SLACK_ID);
 
     /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.

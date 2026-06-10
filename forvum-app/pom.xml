@@ -115,6 +115,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-channel-discord</artifactId>
         </dependency>
+        <!-- Layer-3 Slack channel (P2-CH): a Socket Mode client over quarkus-websockets-next (CLIENT
+             mode) driving turns via ChannelTurnDriver; the socket URL is minted per connect by
+             apps.connections.open and replies go out via chat.postMessage over a blocking REST client. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-slack</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>

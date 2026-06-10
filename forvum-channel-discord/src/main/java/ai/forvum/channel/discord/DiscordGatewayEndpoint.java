@@ -7,11 +7,13 @@ import ai.forvum.channel.discord.GatewayProtocol.Reaction;
 import ai.forvum.channel.discord.GatewayProtocol.Reconnect;
 import ai.forvum.channel.discord.GatewayProtocol.ReIdentify;
 import ai.forvum.channel.discord.GatewayProtocol.SendIdentify;
+import ai.forvum.channel.discord.GatewayProtocol.SendResume;
 import ai.forvum.channel.discord.dto.GatewayPayload;
 import ai.forvum.channel.discord.dto.Ready;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import io.quarkus.websockets.next.CloseReason;
 import io.quarkus.websockets.next.OnClose;
 import io.quarkus.websockets.next.OnOpen;
 import io.quarkus.websockets.next.OnTextMessage;
@@ -32,18 +34,24 @@ import java.util.concurrent.locks.ReentrantLock;
  * to {@code wss://gateway.discord.gg/?v=10&encoding=json}, it implements the opcode flow:
  *
  * <ol>
- *   <li><strong>HELLO (op 10)</strong> → send IDENTIFY (op 2; token + Forvum intents) and arm the
- *       heartbeat loop with the server-supplied {@code heartbeat_interval}.</li>
+ *   <li><strong>HELLO (op 10)</strong> → send IDENTIFY (op 2; token + Forvum intents) for a fresh
+ *       session, or RESUME (op 6; token + captured {@code session_id} + last seq) when the
+ *       {@link GatewayState} holds a resumable session — the gateway then replays missed events and
+ *       dispatches {@code RESUMED}. Either way the heartbeat loop is armed with the server-supplied
+ *       {@code heartbeat_interval}.</li>
  *   <li><strong>HEARTBEAT loop (op 1)</strong> on a dedicated <em>virtual thread</em> (never the event
  *       loop): every {@code heartbeat_interval} ms it sends {@code { "op": 1, "d": <last seq> }},
  *       reading the last sequence from {@link GatewayState} (an atomic).</li>
  *   <li><strong>DISPATCH (op 0)</strong>: {@code READY} captures session_id + resume_gateway_url;
  *       {@code MESSAGE_CREATE} drives a turn via {@link MessageProcessor}.</li>
- *   <li><strong>RECONNECT (op 7)</strong> / <strong>INVALID_SESSION (op 9)</strong> close the connection;
- *       {@code @OnClose} then hands the close code to {@link DiscordChannel#onConnectionClosed(int)}, which
- *       re-opens the gateway with exponential backoff and a <em>fresh IDENTIFY</em> (v0.1 reconnect policy —
- *       full RESUME is a deferred follow-up) unless the channel is shutting down or the close code is a
- *       fatal 4xxx.</li>
+ *   <li><strong>RECONNECT (op 7)</strong> / <strong>INVALID_SESSION (op 9)</strong> close the connection
+ *       — with the {@link #RECONNECT_CLOSE_CODE 4000 resume-intent code} when the session should survive
+ *       (op 7, op 9 {@code d=true}; a client 1000/1001 close would invalidate it), or the default 1000
+ *       when it should not (op 9 {@code d=false}, which resets the state first). {@code @OnClose} then
+ *       hands the close code to {@link DiscordChannel#onConnectionClosed(int)}, which re-opens the
+ *       gateway with exponential backoff — dialing the resume URL for an op-6 RESUME when the session is
+ *       still resumable, else the base URL for a fresh IDENTIFY — unless the channel is shutting down or
+ *       the close code is a fatal 4xxx.</li>
  * </ol>
  *
  * <p><strong>Concurrency (CLAUDE.md §3.8).</strong> Inbound frames run {@code @RunOnVirtualThread} so
@@ -64,6 +72,16 @@ public class DiscordGatewayEndpoint {
 
     /** Per-connection user-data key carrying the bot token (set by the connector before connect). */
     static final String TOKEN_KEY = "forvum.discord.botToken";
+
+    /**
+     * The application close code (4000) for every close made with INTENT TO RESUME. Discord's Gateway
+     * docs (Disconnecting/Resuming): a CLIENT close with 1000 or 1001 invalidates the session, so
+     * closing NORMAL on op 7 / a resumable op 9 / a failed heartbeat would defeat the op-6 RESUME the
+     * reconnect is about to attempt — the resume would be refused (op 9 {@code d=false}) and a second
+     * round-trip would re-IDENTIFY. A deliberate shutdown and a non-resumable op 9 keep the default
+     * 1000 close (those sessions SHOULD die).
+     */
+    static final int RECONNECT_CLOSE_CODE = 4000;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -118,6 +136,13 @@ public class DiscordGatewayEndpoint {
             channel.onReady(); // a healthy session restarts the reconnect-backoff schedule
             LOG.info("Discord gateway READY; session established.");
         }
+        // RESUMED closes an op-6 resume: the gateway finished replaying missed events on the continued
+        // session, so the reconnect-backoff schedule restarts exactly as on READY.
+        if (payload.op() == GatewayProtocol.OP_DISPATCH
+                && GatewayProtocol.EVENT_RESUMED.equals(payload.t())) {
+            channel.onReady();
+            LOG.info("Discord gateway RESUMED; session continued, missed events replayed.");
+        }
         act(connection, reaction);
     }
 
@@ -128,12 +153,24 @@ public class DiscordGatewayEndpoint {
                 sendIdentify(connection);
                 startHeartbeat(connection, identify.heartbeatIntervalMillis());
             }
+            case SendResume resume -> {
+                sendResume(connection);
+                startHeartbeat(connection, resume.heartbeatIntervalMillis());
+            }
             case MessageReceived received ->
                     processor.process(received.message(), config.read(), rest, authorization(connection));
-            case Reconnect ignored -> closeQuietly(connection, "gateway requested reconnect (op 7)");
-            case ReIdentify reIdentify ->
-                    closeQuietly(connection,
-                            "gateway invalidated the session (op 9, resumable=" + reIdentify.resumable() + ")");
+            case Reconnect ignored ->
+                    closeForReconnect(connection, "gateway requested reconnect (op 7)");
+            case ReIdentify reIdentify -> {
+                // d=true keeps the session alive for an op-6 RESUME → close with resume intent;
+                // d=false means the session is dead (decide() already reset the state) → the
+                // deliberate session-invalidating 1000 close is correct.
+                if (reIdentify.resumable()) {
+                    closeForReconnect(connection, "gateway invalidated the session (op 9, resumable=true)");
+                } else {
+                    closeQuietly(connection, "gateway invalidated the session (op 9, resumable=false)");
+                }
+            }
             case Acknowledged ignored -> { /* state already updated; nothing to send */ }
             case Ignored ignored -> { /* an unhandled frame; nothing to do */ }
         }
@@ -143,6 +180,25 @@ public class DiscordGatewayEndpoint {
     private void sendIdentify(WebSocketClientConnection connection) {
         connection.sendTextAndAwait(GatewayProtocol.encodeIdentify(mapper, tokenOf(connection)));
         LOG.info("Discord gateway: sent IDENTIFY.");
+    }
+
+    /**
+     * Send the RESUME (op 6) continuing the captured session. {@code decide()} returns
+     * {@code SendResume} only when {@link GatewayState#canResume()}, but the state lives in atomics —
+     * if it was reset in between (an op 9 {@code d=false} racing this frame), fall back to a fresh
+     * IDENTIFY rather than sending a malformed RESUME. Package-private so the fallback branch is
+     * unit-testable (it is unreachable through SERIAL single-threaded {@code onText} calls).
+     */
+    void sendResume(WebSocketClientConnection connection) {
+        var sessionId = state.sessionId();
+        var lastSequence = state.lastSequence();
+        if (sessionId.isEmpty() || lastSequence.isEmpty()) {
+            sendIdentify(connection);
+            return;
+        }
+        connection.sendTextAndAwait(GatewayProtocol.encodeResume(
+                mapper, tokenOf(connection), sessionId.get(), lastSequence.get()));
+        LOG.info("Discord gateway: sent RESUME.");
     }
 
     /**
@@ -186,7 +242,7 @@ public class DiscordGatewayEndpoint {
             // Close the connection so @OnClose hands off to DiscordChannel, which reconnects with backoff.
             LOG.warnf("Discord: heartbeat send failed (%s); closing the connection so the gateway reconnects.",
                     DiscordChannel.redact(e.getMessage()));
-            closeQuietly(connection, "heartbeat send failed");
+            closeForReconnect(connection, "heartbeat send failed");
         }
     }
 
@@ -228,6 +284,23 @@ public class DiscordGatewayEndpoint {
         LOG.infof("Discord gateway: closing (%s).", reason);
         try {
             connection.closeAndAwait();
+        } catch (RuntimeException e) {
+            LOG.warnf("Discord: error while closing the gateway connection (%s).",
+                    DiscordChannel.redact(e.getMessage()));
+        }
+    }
+
+    /**
+     * Close with the {@link #RECONNECT_CLOSE_CODE} application code instead of the default 1000:
+     * Discord treats a client close with 1000/1001 as "invalidate the session", which would defeat
+     * the op-6 RESUME the imminent reconnect attempts. Used by every close-with-intent-to-resume path
+     * (op 7, op 9 resumable, a failed heartbeat); a deliberate shutdown and a non-resumable op 9 keep
+     * the default 1000 close via {@link #closeQuietly}.
+     */
+    private static void closeForReconnect(WebSocketClientConnection connection, String reason) {
+        LOG.infof("Discord gateway: closing for reconnect (%s).", reason);
+        try {
+            connection.closeAndAwait(new CloseReason(RECONNECT_CLOSE_CODE, reason));
         } catch (RuntimeException e) {
             LOG.warnf("Discord: error while closing the gateway connection (%s).",
                     DiscordChannel.redact(e.getMessage()));
