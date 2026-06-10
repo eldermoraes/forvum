@@ -264,9 +264,13 @@ approval.
 
 | Branch | Purpose |
 |---|---|
-| `main` | **default**; ships the multi-module reactor + architectural design docs. PRs target `main` unless demo-specific. |
-| `demo/conference-mvp` | conference-demo vertical slice (one agent vs local Ollama via CLI). Demo-specific PRs target this branch. |
+| `main` | **default**; ships the multi-module reactor + architectural design docs. PRs target `main`. |
 | `gh-pages` | published site (`forvum.ai` / GitHub Pages; brand assets under `docs/brand/`). |
+
+Historical branches are preserved as tags, not branches: the conference-demo vertical slice lives at
+tag `archive/demo-conference-mvp` (its D1–D8 deferrals are all absorbed — see the BR-CLEANUP #66
+disposition note in `docs/ISSUES.md`) and the pre-decision Tier-1 round draft at
+`archive/design-round-tier1` (BR-CLEANUP, #66).
 
 The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 

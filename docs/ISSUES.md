@@ -816,6 +816,8 @@ sandbox runtime; verify. **[PLUGIN]** scaffold via the MCP. **Dependencies.** M1
 `forvum-tools-shell` pattern (owned by M13 acceptance per X7 #73).
 **Commit.** `feat(tools-sandbox): add containerized code-execution sandbox`
 
+**Contract settled (§9.2.5 amendment, design-rounds close wave 2026-06-09).** The `ShellAllowlist` contract that both `forvum-tools-shell` (ships inside this PR per the wave plan; M13-acceptance-owned surface, X7 #73) and `forvum-tools-sandbox` implement is now authored in §9.2.5: one operator file `$FORVUM_HOME/tools/shell.json` — exact-match `allowedCommands` (argv[0] names or absolute paths; NO glob/regex in v1, predictability), optional per-command `allowedArgs` element-wise prefixes, `workingDir` confined via the hardened `WorkspaceRoot`, env pass-through exactly `{PATH, HOME, LANG}`, `timeoutSeconds` default 60, plus `sandboxImage`/`sandboxRuntime` keys. DEFAULT = EMPTY → fail-closed (inverts the devices/roles opt-in pattern: this file grants capability, not restriction). EVERY invocation is `USER_CONFIRM_REQUIRED` through the #39 blocking SQLite approval queue regardless of allowlist, audited in `tool_invocations` (`confirm_required` parking status — free-TEXT column, no migration). Execution is argv-vector `ProcessBuilder` list form only (no shell string, no PTY v1), via the M18 `ToolProvider.invoke` self-dispatch seam. Sandbox = `podman run --rm` with the workspace bind-mounted read-only by default, reusing `PermissionScope.SHELL_EXEC` (no new scope). Implementation obligations this PR: the `PermissionScope.SHELL_EXEC` constant (per the §4.3.4 reserved table; move the `PermissionScopeTest` unknown-name fixture off `"SHELL_EXEC"` — it currently asserts that string throws), the `tools/` registry wiring (`ForvumHome.tools()` + `"tools"` in `ConfigWatcher.WATCHED_SUBFOLDERS`, verified absent today), and the full `WorkspaceRoot` symlink/TOCTOU hardening (closing the M14 lexical-only deferral).
+
 ## P2-3 — Voice channel
 **Labels:** `phase-2`, `channel`, `native` · **Milestone:** `v0.5 Parity`
 **Context.** Local TTS/STT parity. **Scope.** Whisper + Piper streaming channel. **Files.**
@@ -1051,7 +1053,9 @@ extension per channel. **Dependencies.** M3, M7, M17 (channel pattern), MVP stab
 **Files.** `forvum-provider-copilot/` module + onboarding wizard hook. **Acceptance.** Device-code OAuth
 completes, a key is stored, a turn against the Copilot endpoint returns a reply; parity verified.
 **[NATIVE]** must-run-native (OpenAI-compatible HTTP). **[PLUGIN]** add the openai-compatible extension
-via the MCP; `context7` for the API. **Dependencies.** M11 (OpenAI-compatible pattern), P2-10 (wizard).
+via the MCP; `context7` for the API. **Dependencies.** M11 (OpenAI-compatible pattern). P2-10 (wizard) is
+NOT a blocker — OpenClaw's own Copilot login lives inside the provider plugin, so the device-code login
+ships as a provider-owned `forvum copilot login` one-shot; the generic wizard (P2-10) later wraps that seam.
 **Commit.** `feat(provider-copilot): add GitHub Copilot model provider`
 
 ## P2-QA — QA scenario suite (§7.2 item 18)
@@ -1302,6 +1306,8 @@ enforcement, sandboxing posture, what a plugin can do to prompt assembly / `Perm
 contract; decisions recorded. **Dependencies.** DR-6a (reuses the `OutputFilter`/`ToolExecutor`
 enforcement seam). **Commit.** `docs(design): settle Group 6b — plugin and MCP server trust`
 
+**Status:** DELIBERATED — round file `docs/design-rounds/group-6b-plugin-mcp-trust.md` (11 decision points DP-1…DP-11; wave-directive items pre-ratified 2026-06-09, the rest flagged for maintainer review). §9.3 authored: four trust tiers (first-party bundled / operator-installed drop-in plugin / remote MCP server / installed skill), with the mandated ruling that remote MCP tool-specs BREACH the §9.1.a author-authored assumption — they are UNTRUSTED specs behind three gates (belt allowlist; the new `PermissionScope.MCP_REMOTE` via the P2-11 RBAC second gate; `mcp add` = trust grant for LISTING only) and their results are untrusted DATA under the §9.1.c framing. Skills are operator-trusted CONTENT (never code): full front-matter input schema, template runs under the invoking agent's existing belt — escalation-by-skill has no mechanism. T1 drop-in plugins are in-process and unsandboxed (core-equivalent trust once loaded; the install act is the trust decision — OpenClaw-parity honesty); no prompt-assembly SPI hook exists. Supply chain (#31 as-built): HTTPS Central + Resolver SHA-1 checksums, hardened from the verified `warn` default to FAIL, owner-only `plugins/` creation (two one-line follow-ups on the merged surface); PGP signatures = documented deferral; build-input supply chain stays DR-6c. Revocation = file rm + hot reload (`mcp-servers/`/`skills/` verified in `ConfigWatcher.WATCHED_SUBFOLDERS`; #38's resync withdraws specs on DELETED/invalid; `plugins/` unwatched by design → delete JAR + fast-jar restart). Hands #38 the bridge contract (HTTP/SSE only, stdio parsed-but-flag-off, `mcp.<server>.<tool>` naming, `MCP_REMOTE` on every surfaced spec, one-shot `mcp add`/`mcp list`), #32 the owner-only install + real-reader validation, TEST-SEC three new negative scenarios. **NEXT:** maintainer ratifies/amends the flagged DPs (1, 4, 8, 9, 10 + the DP-5 coarseness note).
+
 ## DR-6c — Settle Group 6c (audit retention + supply chain + privacy)
 **Labels:** `design`, `security` · **Milestone:** `Design & Contracts`
 **Context.** Carved out of 6a; not yet specified; largely parallel to 6b. **Scope.** Define the
@@ -1311,6 +1317,8 @@ the native build inputs, privacy of persisted conversation + memory. **Files.**
 retention notes. **Acceptance.** §9.4 (or a dedicated subsection) authored; ties to native-first build
 inputs; decisions recorded. **Dependencies.** DR-6a (after). **Commit.** `docs(design): settle Group
 6c — audit retention, supply chain, privacy`
+
+**As-built (super wave, 2026-06-09).** Round file `docs/design-rounds/group-6c-retention-supplychain-privacy.md` (filename per the wave brief; this entry's older `group-6c-audit-supplychain-privacy.md` name is superseded); ULTRAPLAN §9.4 authored, ordered after DR-6b's §9.3, resolving §9.1's carve-out forward-reference. Fourteen decisions `[DP-1..14]`, posture-only — zero tables, zero columns, zero code. Retention: per-ledger classes over the V1/V2/V3 census — operational ledgers (`provider_calls`/`tool_invocations`/`tasks`) unbounded by default with `forvum sessions purge` a named deferred follow-up and raw SQL the v0.5 operator surface (the §7.2-item-21 precedent); `messages` reduced only by compaction (the V1 session cascade reserved for the future purge surface); `capr_events` archive-only ratified as built (P2-COMPACT); memory tiers owner-curated with no automatic forgetting; any purge surface identity-scoped once P3-5 #53 lands. Privacy: a three-row default egress inventory (provider calls + #48-gated channel egress + env-var-gated OTLP #40, default-off), extension egress operator-opt-in, and ledger-write filtering a named non-goal. Supply chain: native binary locked at build (closed-world classpath + M1 enforcer + BOM vetoes + X1 #67 banned-import greps), JVM drop-in trust cross-referenced to DR-6b §9.3, `SHA256SUMS` on release artifacts (#49) with SBOM/provenance deferred. Secrets at rest: owner-only `0700/0600` `$FORVUM_HOME` with the pre-ratified #35/#42 credentials JSON at `0600` (platform keychain = named follow-up), the `StateDirInitializer` umask gap named, and no-secret-in-logs confirmed as built (Telegram/Discord redaction) as a standing obligation. OpenClaw parity confirmed: upstream session maintenance defaults to `warn` (deletes nothing without opt-in `enforce`), matching the no-silent-deletion default.
 
 ## DR-4c — Settle Group 4c (FallbackChain)
 **Labels:** `design`, `core` · **Milestone:** `Design & Contracts`
@@ -1323,6 +1331,8 @@ Decision-9 short-circuit override door), and the `LineageWindow` interplay reser
 **Acceptance.** §4.3.5.3 materialized (no longer `*TBD*`); `FailureClass` enum spec'd; the §4.3.2
 line-477 migration path (`String reason` → `FailureClass`) pinned to M8. **Dependencies.** Group 4b
 (done); benefits from DR-6a. **Commit.** `docs(design): settle Group 4c — FallbackChain contract`
+
+**Status:** CLOSED as-built (`docs/design-rounds/group-4c-fallback-chain.md`, DP-1…DP-12; wave directive 2026-06-09). §4.3.5.3 materialized. Settled shape: `FallbackChain(ModelRef primary, List<ModelRef> fallbacks)` + `links()`/`single()` — **no `CostBudget` field** (this entry's `(primary, List<fallback>, CostBudget)` sketch is amended: the budget rides the persona/cron config and reaches the decorator alongside the chain; the Decision-8/9 pre-call wiring + e2e is the CostBudget-enforcement package, PR-9). `FailureClass` confirmed as the M8 engine-local sealed 3-way axis; the DR-6a `Filtered` handover **folds into `NonRetryable`** — no fourth permit (zero call sites: the egress `OutputFilteredException` never transits `FailureClassifier`); `FallbackReasons.FILTERED = "filtered"` spelling confirmed, token lands with P2-OUTPUTGUARD #48, egress-only (never a chain-hop reason). Traversal = M8 as-built: advance axis is `shouldFallback` (request-level rethrows; provider-level incl. auth advances), one `provider_calls` row per attempt + one `FallbackTriggered` per hop (`reason` nullable). Per-link `costDims` **declined for v0.5** (Decision-9 short-circuit stays non-overridable; door open); `LineageWindow` stays a reserved `Window` permit (no chain surface). #52 adaptive-routing contract fixed: `links()` is the authority set — reorder/drop only, ≥1 link, never invent, declared order = tiebreak. The §4.3.2 line-477 migration (`String reason` → `FailureClass`) confirmed **declined at M8**. Type lands with its first consumer (DR-8 composition + multi-link `LlmSelector`).
 
 ## DR-5 — Settle Group 5 (MemoryPolicy)
 **Status:** DELIBERATED — pending maintainer sign-off (`docs/design-rounds/group-5-memory-policy.md`,
@@ -1352,6 +1362,8 @@ demo's ad-hoc shape; define the on-disk `agents/<id>.json` schema authoritativel
 **Acceptance.** The `AgentSpec` subsection authored; demo D2 resolved permanently; the `agents/<id>.json`
 schema defined. **Dependencies.** DR-4c, DR-5, DR-6a (needs all composed types to exist first).
 **Commit.** `docs(design): settle Group 8 — Persona and AgentSpec composition`
+
+**Status:** DELIBERATED — pending maintainer sign-off (`docs/design-rounds/group-8-agentspec-composition.md`, 12 decision points DP-1…DP-12; materializes ULTRAPLAN §4.3.8). Settles the authoritative `agents/<id>.json` schema — 11 top-level keys, every key but `primaryModel` optional-with-default, every pre-DR-8 spec file parses unchanged. `Persona` grows additively to 12 components (`fallbackModels`, `memoryPolicy`, `roles`, `identityId` — the P2-11 `Identity.roles` overload precedent); the §5.2 registry value materializes as the engine `AgentSpec(Persona, CycleSpec)`; the Group-4c chain is composed engine-side from `primaryModel + fallbackModels` (no key migration — 4c's ceded field-name authority resolved). `costBudget` parsing is un-deferred (`AgentSpecReader.java:67` retired; day-window-only file syntax, `"session"` rejected at parse; activates the Decision-10 spawn guard, the `AgentRegistry.java:83` TODO). New semantics: `roles` = scope CAP by intersection at the two `CURRENT_EFFECTIVE_SCOPES` bind sites; `identityId` = fallback identity for unresolved sessions only; `cycle { steps[], maxRounds=3, stopSentinel? }` (§7.3 item 3 pulled forward) compiled engine-side, NOT inherited by workers. Validation split rides the P2-9 reader-as-oracle design (doctor findings for free); zero new `CoreReflectionRegistration` entries. **Resolves demo deferral D2 permanently.** Unblocks PR-8 (`persona.memoryPolicy` at the generate node; #51 cycles) and PR-9 (budget e2e; fallback links on the spec).
 
 ## TEST-SEC — Security-test layer (the "Group 7 Testing" gap)
 **Labels:** `design`, `security`, `ci-infra` · **Milestone:** `Design & Contracts`
@@ -1384,6 +1396,18 @@ unlikely to match the Tier-1 contracts). **Files.** none (repo hygiene); referen
 fate decided and recorded; the deferrals D1–D8 migrate into the relevant M-issues / contracts when
 settled (D8 → M5; D1 → M9–M12; D2 → DR-5/DR-8; D3 → M6; D4 → M5; D5 → M2; D6 → M8/DR-4c; D7 → respective
 milestones). **Dependencies.** none. **Commit.** `chore: delete stale design-round-tier1 branch`
+**As-built (super wave, 2026-06-09).** Maintainer-ratified "tag + delete all": both branches preserved
+as tags (`archive/design-round-tier1`, `archive/demo-conference-mvp`) then deleted, along with the
+already-merged `feat/m12-google-provider` / `feat/m16-channel-web` remotes and the stale local
+worktrees/branches that pinned them (incl. the mega-wave `wave-integration` scratch and the superseded
+`docs/tier-e-channels-plan`, kept locally as `archive/tier-e-channels-plan`). D1–D8 disposition —
+every deferral's return trigger has fired and its sink is merged: D1 → M7/M9–M12 (`ModelProvider.resolve`
+SPI + four providers); D2 → DR-5 (`MemoryPolicy`) + DR-8 (AgentSpec composition, this wave); D3 → M6
+(`@AgentScoped` ArC context); D4 → M5 (SQLite/Flyway + `provider_calls`); D5 → M2 (sealed `AgentEvent`);
+D6 → M8 (`FallbackChatModel`) + DR-4c (chain contract, this wave; CostBudget end-to-end lands with P3-4
+in the same wave); D7 → M18 CAPR substrate + P2-15 OTLP + P3-6 dev editor (this wave); D8 → M9–M12
+(Quarkiverse extensions). The original deferral text is preserved in the archive tag
+(`docs/design-rounds/demo-mvp-deferrals.md`).
 
 ---
 
