@@ -62,4 +62,23 @@ class ChannelLauncherTest {
         assertFalse(ChannelLauncher.serves("telegram", json("{ \"botToken\": \"   \" }")));
         assertTrue(ChannelLauncher.serves("telegram", json("{ \"botToken\": \"123:abc\" }")));
     }
+
+    @Test
+    void hasNonBlankRequiresAPresentNonBlankValueForTheGivenKey() {
+        assertFalse(ChannelLauncher.hasNonBlank(json("{}"), "appToken"));
+        assertFalse(ChannelLauncher.hasNonBlank(json("{ \"appToken\": \"\" }"), "appToken"));
+        assertFalse(ChannelLauncher.hasNonBlank(json("{ \"appToken\": \"  \" }"), "appToken"));
+        assertTrue(ChannelLauncher.hasNonBlank(json("{ \"appToken\": \"xapp-1\" }"), "appToken"));
+    }
+
+    @Test
+    void everyRequiredKeyMustBeNonBlankForACredentialGatedChannelToServe() {
+        // The map's entries are single-key today; the gate is allMatch over the declared set, so a
+        // channel declaring several keys (Slack: botToken+appToken) serves only with ALL present —
+        // pinned per entry here, and exercised at n>1 by each new channel module's own launcher test.
+        for (var entry : ChannelLauncher.REQUIRED_SERVE_KEYS.entrySet()) {
+            assertFalse(ChannelLauncher.serves(entry.getKey(), json("{}")),
+                    entry.getKey() + " must not serve with no credentials");
+        }
+    }
 }
