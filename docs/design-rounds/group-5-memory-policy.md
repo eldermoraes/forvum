@@ -290,7 +290,7 @@ fields it will need "when AgentSpec gets a full design round (likely Group 5 or 
 DR-5 **dissolves the `MemoryPolicy`-type half of D2's gap**: the type now has a settled shape, so the
 `memoryPolicy` field of a future `AgentSpec` has something concrete to hold. The *composition* of
 `AgentSpec` itself (adding the field, the `agents/<id>.json` schema, the `primaryModel → fallbackChain`
-rename) remains **DR-8's** job (ISSUES.md D2 → DR-5/DR-8). DR-5 therefore marks D2's memoryPolicy
+rename) remains **DR-8's** job (ISSUES.md D2 → DR-5/DR-8). *[Resolved by DR-8, 2026-06-09: composition settled as an additive optional `fallbackModels` list composed engine-side — NO `fallbackChain` field and NO `primaryModel` rename/migration; see `group-8-agentspec-composition.md` + ULTRAPLAN §4.3.8.]* DR-5 therefore marks D2's memoryPolicy
 sub-gap **resolved** and hands the residual AgentSpec assembly to DR-8 with a concrete type in hand.
 
 ---
