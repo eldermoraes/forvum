@@ -35,6 +35,9 @@ public class ChannelLauncher {
     /** Channel id of the Discord channel, which (like Telegram) additionally requires a {@code botToken}. */
     static final String DISCORD_ID = "discord";
 
+    /** Channel id of the Matrix channel, which requires a {@code homeserver} AND an {@code accessToken}. */
+    static final String MATRIX_ID = "matrix";
+
     /**
      * Per-channel config keys that must ALL be present and non-blank for the channel to count as
      * serving. Generalizes the original single {@code botToken} gate: each credential-gated channel
@@ -45,10 +48,11 @@ public class ChannelLauncher {
      */
     static final Map<String, Set<String>> REQUIRED_SERVE_KEYS = Map.of(
             TELEGRAM_ID, Set.of("botToken"),
-            DISCORD_ID, Set.of("botToken"));
+            DISCORD_ID, Set.of("botToken"),
+            MATRIX_ID, Set.of("homeserver", "accessToken"));
 
     /** Channel ids whose enablement keeps the process alive to serve. */
-    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID, DISCORD_ID);
+    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID, DISCORD_ID, MATRIX_ID);
 
     /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.

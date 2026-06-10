@@ -77,6 +77,12 @@ its model in `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`)
 The first turn can take several seconds while Ollama loads the model; the reply prints when complete
 (v0.1 has no token streaming or spinner yet).
 
+Chat channels are enabled the same way, one JSON file each under `~/.forvum/channels/` — e.g.
+`matrix.json` (`homeserver`, `accessToken`, `userId`, `allowedUserIds`) connects the assistant to a
+Matrix homeserver. **The Matrix channel supports unencrypted rooms only**: end-to-end encryption (E2EE)
+is not yet supported ([#125](https://github.com/eldermoraes/forvum/issues/125)) — the bot stays silent
+in encrypted rooms.
+
 ## Quick demo
 
 The demo lives on the `demo/conference-mvp` branch and runs a single agent against an Ollama model via an interactive CLI. It predates v0.1 — for everyday use, the install path above on `main` now provides the same interactive experience (banner, `forvum>` prompt, `/exit`) with the full v0.1 feature set; this branch remains as the frozen conference snapshot.
