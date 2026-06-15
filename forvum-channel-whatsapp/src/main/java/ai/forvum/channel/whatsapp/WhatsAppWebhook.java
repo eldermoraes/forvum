@@ -19,9 +19,11 @@ import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * The WhatsApp channel's inbound surface (P2-CH): the Meta Cloud API webhook, served as two declarative
@@ -75,33 +77,61 @@ public class WhatsAppWebhook {
         workers.shutdownNow();
     }
 
+    /**
+     * Read the channel config, returning {@code null} (instead of letting an {@link UncheckedIOException}
+     * escape the handler as a 500) when {@code channels/whatsapp.json} is malformed/unreadable — a
+     * misconfiguration must surface as a rejected webhook request, not a server error. The message is
+     * redacted (it could echo the file path / values).
+     */
+    private Spec readConfig() {
+        try {
+            return config.read();
+        } catch (RuntimeException e) {
+            LOG.warnf("WhatsApp: cannot read channels/whatsapp.json (%s); rejecting the webhook request.",
+                    MessageProcessor.redact(e.getMessage()));
+            return null;
+        }
+    }
+
     /** Meta's GET verification handshake. */
     @Route(path = PATH, methods = Route.HttpMethod.GET, type = Route.HandlerType.BLOCKING)
     void verify(RoutingContext rc) {
-        Spec spec = config.read();
+        Spec spec = readConfig();
         String mode = rc.request().getParam("hub.mode");
         String token = rc.request().getParam("hub.verify_token");
         String challenge = rc.request().getParam("hub.challenge");
-        if ("subscribe".equals(mode) && challenge != null
-                && spec.verifyToken().isPresent() && spec.verifyToken().get().equals(token)) {
+        if (spec != null && spec.enabled() && "subscribe".equals(mode) && challenge != null
+                && tokenMatches(spec, token)) {
             rc.response().setStatusCode(200).putHeader("Content-Type", "text/plain").end(challenge);
         } else {
             // Never log the tokens — only that verification was rejected.
-            LOG.warn("WhatsApp: webhook verification rejected (mode/verify_token mismatch or unconfigured).");
+            LOG.warn("WhatsApp: webhook verification rejected (disabled, mode/verify_token mismatch, "
+                    + "or unconfigured).");
             rc.response().setStatusCode(403).end();
         }
+    }
+
+    /** Constant-time, length-safe match of {@code token} against the configured {@code verifyToken}. */
+    private static boolean tokenMatches(Spec spec, String token) {
+        if (spec.verifyToken().isEmpty() || token == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                spec.verifyToken().get().getBytes(StandardCharsets.UTF_8),
+                token.getBytes(StandardCharsets.UTF_8));
     }
 
     /** A signed event notification POST: validate the signature, ack fast, drive turns on VTs. */
     @Route(path = PATH, methods = Route.HttpMethod.POST, type = Route.HandlerType.BLOCKING)
     void receive(RoutingContext rc) {
-        Spec spec = config.read();
+        Spec spec = readConfig();
         String signature = rc.request().getHeader(WhatsAppSignature.HEADER);
         Buffer buffer = rc.body() == null ? null : rc.body().buffer();
         byte[] rawBody = buffer == null ? null : buffer.getBytes();
-        if (spec.appSecret().isEmpty()
+        if (spec == null || !spec.enabled() || spec.appSecret().isEmpty()
                 || !WhatsAppSignature.isValid(rawBody, spec.appSecret().get(), signature)) {
-            LOG.warn("WhatsApp: rejected a webhook POST with an invalid or absent X-Hub-Signature-256.");
+            LOG.warn("WhatsApp: rejected a webhook POST (disabled, unconfigured, or invalid/absent "
+                    + "X-Hub-Signature-256).");
             rc.response().setStatusCode(403).end();
             return;
         }
@@ -112,15 +142,21 @@ public class WhatsAppWebhook {
         List<InboundMessage> messages =
                 WhatsAppEvents.parse(mapper, new String(rawBody, StandardCharsets.UTF_8));
         for (InboundMessage message : messages) {
-            workers.submit(() -> {
-                try {
-                    processor.process(message, spec, api);
-                } catch (RuntimeException e) {
-                    // One bad message must not kill the worker; content is never logged.
-                    LOG.warnf("WhatsApp: failed to process an inbound message (%s); continuing.",
-                            MessageProcessor.redact(e.getMessage()));
-                }
-            });
+            try {
+                workers.submit(() -> {
+                    try {
+                        processor.process(message, spec, api);
+                    } catch (RuntimeException e) {
+                        // One bad message must not kill the worker; content is never logged.
+                        LOG.warnf("WhatsApp: failed to process an inbound message (%s); continuing.",
+                                MessageProcessor.redact(e.getMessage()));
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                // A POST racing shutdown: the worker pool is gone but the 200 was already acked — drop
+                // the message (Meta's at-least-once redelivery will re-present it after restart).
+                LOG.warn("WhatsApp: dropped an inbound message — the worker pool is shutting down.");
+            }
         }
     }
 }

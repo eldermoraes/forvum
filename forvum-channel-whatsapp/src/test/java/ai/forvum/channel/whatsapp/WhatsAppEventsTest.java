@@ -99,4 +99,37 @@ class WhatsAppEventsTest {
         assertTrue(parse(null).isEmpty());
         assertTrue(parse("{ \"entry\": [] }").isEmpty());
     }
+
+    @Test
+    void messagesAcrossMultipleEntryElementsAreAllExtracted() {
+        // Meta batches notifications across multiple entry[] elements (one per WABA event group), not
+        // just multiple messages in one change — the OUTER loop must be exercised at n>1.
+        List<InboundMessage> messages = parse("""
+                { "entry": [
+                    { "changes": [ { "value": { "messages": [
+                        { "from": "1", "type": "text", "text": { "body": "from entry A" } } ] } } ] },
+                    { "changes": [ { "value": { "messages": [
+                        { "from": "2", "type": "text", "text": { "body": "from entry B" } } ] } } ] } ] }
+                """);
+
+        assertEquals(List.of("from entry A", "from entry B"),
+                messages.stream().map(InboundMessage::text).toList());
+    }
+
+    @Test
+    void aMixedBatchExtractsOnlyTheTextMessageAlongsideAStatusAndANonTextMessage() {
+        // The realistic payload interleaves a text message with a status receipt and a non-text message
+        // in the same value — only the text one drives a turn.
+        List<InboundMessage> messages = parse("""
+                { "entry": [ { "changes": [ { "value": {
+                    "statuses": [ { "id": "wamid.S", "status": "read" } ],
+                    "messages": [
+                        { "from": "1", "type": "image", "image": { "id": "m" } },
+                        { "from": "2", "type": "text", "text": { "body": "the real one" } } ] } } ] } ] }
+                """);
+
+        assertEquals(1, messages.size());
+        assertEquals("the real one", messages.get(0).text());
+        assertEquals("2", messages.get(0).from());
+    }
 }

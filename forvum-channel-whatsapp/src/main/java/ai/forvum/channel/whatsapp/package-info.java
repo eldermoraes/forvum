@@ -37,5 +37,12 @@
  * (single-user convenience), and a refusal is audited WITHOUT logging the sender id or the allow-list
  * members (they are operator PII). The webhook delivers only inbound user messages, so there is no
  * self-echo loop (unlike Signal).
+ *
+ * <p><strong>At-least-once delivery (documented limitation).</strong> The ack-before-process ordering
+ * defends against Meta re-sending an <em>un-acked</em> notification (the duplicate-turn trap), but the
+ * Cloud API is at-least-once: it may redeliver the SAME message (same {@code wamid}) even after a
+ * {@code 200}. v0.5 has no dedup store, so a genuine redelivery can re-drive a turn; idempotency keyed by
+ * {@code wamid} (already parsed onto {@link ai.forvum.channel.whatsapp.WhatsAppEvents.InboundMessage}) is
+ * a follow-up.
  */
 package ai.forvum.channel.whatsapp;

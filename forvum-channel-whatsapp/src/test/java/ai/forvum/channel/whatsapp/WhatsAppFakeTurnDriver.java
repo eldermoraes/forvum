@@ -13,6 +13,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -30,8 +32,28 @@ public class WhatsAppFakeTurnDriver implements ChannelTurnDriver {
 
     private final CopyOnWriteArrayList<ChannelMessage> dispatched = new CopyOnWriteArrayList<>();
 
+    /** If set, {@code dispatch} blocks on this latch before recording — to prove the HTTP 200 is acked
+     *  BEFORE (and independently of) the turn (the ack-before-inference / duplicate-turn guarantee). */
+    volatile CountDownLatch gate;
+    /** If set, {@code dispatch} throws it — to drive the webhook's per-worker failure-isolation catch. */
+    volatile RuntimeException throwOnDispatch;
+
     @Override
     public void dispatch(ChannelMessage message, Consumer<AgentEvent> sink) {
+        CountDownLatch g = gate;
+        if (g != null) {
+            try {
+                if (!g.await(5, TimeUnit.SECONDS)) {
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        if (throwOnDispatch != null) {
+            throw throwOnDispatch;
+        }
         dispatched.add(message);
         Instant now = Instant.now();
         String reply = "echo:" + message.content();
@@ -44,8 +66,22 @@ public class WhatsAppFakeTurnDriver implements ChannelTurnDriver {
         return List.copyOf(dispatched);
     }
 
-    /** Clear the recorded dispatches between tests. */
+    /** Block dispatch on a fresh latch and return it (the caller releases it). */
+    public CountDownLatch blockUntilReleased() {
+        CountDownLatch g = new CountDownLatch(1);
+        gate = g;
+        return g;
+    }
+
+    /** Make the next dispatch throw {@code error} (exercises the webhook worker-catch redaction). */
+    public void failWith(RuntimeException error) {
+        throwOnDispatch = error;
+    }
+
+    /** Clear the recorded dispatches and any gate/throw mode between tests. */
     public void reset() {
         dispatched.clear();
+        gate = null;
+        throwOnDispatch = null;
     }
 }

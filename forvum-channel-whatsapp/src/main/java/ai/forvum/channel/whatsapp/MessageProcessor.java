@@ -89,8 +89,11 @@ public class MessageProcessor {
                     "Bearer " + spec.accessToken().orElseThrow(), SendMessageRequest.text(to, text));
             JsonNode error = response == null ? null : response.get("error");
             if (error != null && !error.isNull()) {
+                // Redact the daemon's error text too (consistency with the transport-exception catch):
+                // it could echo a Bearer token in an upstream message.
                 LOG.warnf("WhatsApp: Graph send returned an error (code %s: %s) for a %d-char message.",
-                        error.path("code").asText("?"), error.path("message").asText("?"), text.length());
+                        error.path("code").asText("?"), redact(error.path("message").asText("?")),
+                        text.length());
             }
         } catch (RuntimeException e) {
             LOG.warnf("WhatsApp: failed to send a %d-char message (%s).",
