@@ -1,0 +1,7 @@
+{
+  "extension_id": "copilot",
+  "module_name": "forvum-provider-copilot",
+  "providers": [
+    { "type": "provider", "class": "ai.forvum.provider.copilot.CopilotModelProvider" }
+  ]
+}
