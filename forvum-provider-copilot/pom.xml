@@ -94,6 +94,47 @@
                 </configuration>
             </plugin>
 
+            <!-- Coverage gate (X3). JdkCopilotHttp is the live java.net.http transport for the GitHub
+                 device/token endpoints: it is exercised only against live GitHub, so it is excluded (the
+                 same disposition as the qdrant/mcp live-backend code). The auth logic (CopilotAuth), the
+                 credential store + token cache (CopilotCredentials), and the provider build/resolve
+                 (CopilotModelProvider) are all unit-tested and clear the global 80/75. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <excludes>
+                                <exclude>ai/forvum/provider/copilot/JdkCopilotHttp.class</exclude>
+                            </excludes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.line.minimum}</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.branch.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>

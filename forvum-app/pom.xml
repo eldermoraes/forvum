@@ -75,6 +75,12 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-provider-google</artifactId>
         </dependency>
+        <!-- Layer-3 GitHub Copilot provider (#42): OpenAI-compatible; `forvum copilot login` (device-code
+             OAuth) stores a GitHub token, exchanged per turn for a short-lived Copilot token. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-provider-copilot</artifactId>
+        </dependency>
         <!-- Layer-3 Qdrant memory provider (P2-5): the REFERENCE external MemoryProvider over Qdrant's REST
              API. Bundled so it native-COMPILES, but INERT unless an operator configures memory/qdrant.json
              and a MemoryPolicy selects it — it is NEVER the active provider just by being on the classpath. -->

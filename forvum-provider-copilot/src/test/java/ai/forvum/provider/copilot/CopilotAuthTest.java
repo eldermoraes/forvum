@@ -145,6 +145,72 @@ class CopilotAuthTest {
     }
 
     @Test
+    void httpErrorStatusesAreReportedNotSwallowed() {
+        FakeHttp dc = new FakeHttp();
+        dc.postResponses.add(new CopilotHttp.Resp(503, "oops"));
+        assertThrows(CopilotAuthException.class, () -> auth(dc, new AtomicLong(0)).requestDeviceCode());
+
+        FakeHttp poll = new FakeHttp();
+        poll.postResponses.add(new CopilotHttp.Resp(500, "oops"));
+        assertThrows(CopilotAuthException.class,
+                () -> auth(poll, new AtomicLong(0)).pollForAccessToken("DC", 1, 1_000_000));
+
+        FakeHttp ex = new FakeHttp();
+        ex.getResponses.add(new CopilotHttp.Resp(401, "unauthorized"));
+        assertThrows(CopilotAuthException.class, () -> auth(ex, new AtomicLong(0)).exchangeCopilotToken("gh"));
+    }
+
+    @Test
+    void deviceCodeMissingFieldsIsRejected() {
+        FakeHttp http = new FakeHttp();
+        http.postResponses.add(new CopilotHttp.Resp(200, "{\"user_code\":\"X\"}")); // no device_code/uri
+        assertThrows(CopilotAuthException.class, () -> auth(http, new AtomicLong(0)).requestDeviceCode());
+    }
+
+    @Test
+    void pollOnAnUnknownErrorFailsFast() {
+        FakeHttp http = new FakeHttp();
+        http.postResponses.add(new CopilotHttp.Resp(200, "{\"error\":\"unsupported_grant_type\"}"));
+        assertThrows(CopilotAuthException.class,
+                () -> auth(http, new AtomicLong(0)).pollForAccessToken("DC", 1, 1_000_000));
+    }
+
+    @Test
+    void deriveApiBaseUrlHandlesSchemePrefixedAndInvalidProxyEp() {
+        // proxy-ep already carrying a scheme is parsed as-is (the scheme branch).
+        assertEquals("https://api.q.githubcopilot.com",
+                CopilotAuth.deriveApiBaseUrl("proxy-ep=https://proxy.q.githubcopilot.com;x=1"));
+        // A proxy-ep that yields no host falls back to the default (the null-host / catch branch).
+        assertEquals(CopilotAuth.DEFAULT_API_BASE_URL, CopilotAuth.deriveApiBaseUrl("proxy-ep=:::::"));
+    }
+
+    @Test
+    void textFieldVariantsAreTreatedAsAbsent() {
+        // device_code present-but-null, user_code present-but-numeric, verification_uri present-but-blank
+        // → all three read as absent → missing-fields rejection (exercises the text() null/type/blank arms).
+        FakeHttp http = new FakeHttp();
+        http.postResponses.add(new CopilotHttp.Resp(200,
+                "{\"device_code\":null,\"user_code\":123,\"verification_uri\":\"  \"}"));
+        assertThrows(CopilotAuthException.class, () -> auth(http, new AtomicLong(0)).requestDeviceCode());
+    }
+
+    @Test
+    void parseExpiresAtRejectsMissingAndNonNumeric() {
+        assertThrows(CopilotAuthException.class, () -> CopilotAuth.parseExpiresAtMs(null));
+        assertThrows(CopilotAuthException.class, () -> CopilotAuth.parseExpiresAtMs(
+                com.fasterxml.jackson.databind.node.NullNode.getInstance()));
+        assertThrows(CopilotAuthException.class, () -> CopilotAuth.parseExpiresAtMs(
+                com.fasterxml.jackson.databind.node.TextNode.valueOf("not-a-number")));
+    }
+
+    @Test
+    void malformedJsonBodyIsReportedCleanly() {
+        FakeHttp http = new FakeHttp();
+        http.postResponses.add(new CopilotHttp.Resp(200, "{ not json"));
+        assertThrows(CopilotAuthException.class, () -> auth(http, new AtomicLong(0)).requestDeviceCode());
+    }
+
+    @Test
     void ideHeadersCarryEditorAndUserAgentAndOptionalApiVersion() {
         Map<String, String> withVersion = CopilotAuth.ideHeaders(true);
         assertEquals(CopilotAuth.EDITOR_VERSION, withVersion.get("Editor-Version"));

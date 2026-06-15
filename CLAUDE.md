@@ -1155,3 +1155,25 @@ Generalizable lessons from completed milestones; append here as milestones land.
   HTTP for a one-shot) so the sequential launches don't contend for the listener. Redact secret material
   (`userinfo`/query) from a server URL before `mcp list` prints it (the Telegram never-log-a-secret-URL
   lesson). [P2-13]
+- **A GitHub Copilot provider is the OpenAI recipe + a decoupled device-code OAuth login — and because
+  `OpenAiChatModel.builder()` is the Quarkiverse-SWAPPED builder, it needs NO `JdkHttpClientBuilder` pin and
+  NO `langchain4j-http-client-jdk` dep (unlike Ollama/Gemini).** `forvum-provider-copilot` (#42): the auth
+  flow (confirmed from the OpenClaw source — `CLIENT_ID Iv1.b507a08c87ecfe98`, `device/code` + poll,
+  `copilot_internal/v2/token` Bearer exchange, `proxy-ep`→base proxy.*→api.*, IDE headers, `expires_at`
+  sec/ms) lives behind a langchain4j-free `CopilotHttp` seam (`JdkCopilotHttp` = pure `java.net.http`) so
+  `CopilotAuth` is fully unit-testable with a scripted fake + injected sleeper/clock. `CopilotCredentials`
+  stores the long-lived GitHub token `0600` at `state/credentials/github-copilot.json` and caches the
+  short-lived Copilot token in memory (5-min margin) — re-exchanged at most once per ~25-min lifetime, never
+  per turn. **The build trap:** `OpenAiChatModel.builder()...build()` throws `IllegalState: Unable to locate
+  CDIProvider` outside an ArC context (the swapped builder reaches into CDI) AND the swap routes it through
+  the Quarkus REST client (native-safe like the OpenAI/Anthropic providers), so DON'T pin
+  `JdkHttpClientBuilder` (it neither helps — build still needs CDI — nor is needed — no empty native
+  ServiceLoader for a swapped builder); make the build/`resolve` test a `@QuarkusTest`. **The guard trap:**
+  Copilot's `resolve()` needs a live token exchange, so it CANNOT go in the offline app-level
+  `ProviderResolveInAppClasspathTest` (which builds every other provider with no network) — cover the build
+  + cached-`resolve` paths in-module under `@QuarkusTest` (credentials backed by a fake exchange) and
+  document the guard exclusion. `copilot` is a `CommandMode` one-shot (login writes only a credential file).
+  The login command stays offline-testable via a package-private `run(CopilotAuth, out, err)` + a fake
+  `CopilotHttp` + a `RecordingCreds` stub (extends `CopilotCredentials` through its public ctor, overrides
+  `storeGitHubToken`); jacoco-exclude only `JdkCopilotHttp` (live transport) and add a few error-branch
+  tests (the OAuth flow is dense with defensive null/status branches → branch coverage needs them). [P2-COPILOT]
