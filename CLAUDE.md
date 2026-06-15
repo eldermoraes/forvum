@@ -655,8 +655,10 @@ Generalizable lessons from completed milestones; append here as milestones land.
   scheduling (`CronScheduler`). The first cut gated only the first two; the 6-dim review caught the
   unguarded `CronScheduler` — combined with `scheduler.start-mode=forced`, a one-shot `init`/`--help` could
   fire a cron turn against the (deliberately) un-migrated DB. When you add a startup observer that touches
-  the DB/IO, gate it on `commandMode.isOneShot()` too (cheap side-effect-free ones — `ToolRegistry`,
-  `HttpClientFactorySelector` — are fine left ungated). Test the lever with a recording collaborator (a
+  the DB/IO, gate it on `commandMode.isOneShot()` too (`HttpClientFactorySelector`, set-only, stays
+  ungated). **`ToolRegistry.onStart` WAS left ungated as "cheap side-effect-free" — P2-13 invalidated that:
+  the MCP bridge's `tools()` does a blocking network connect, so `onStart` is now gated on
+  `isOneShot()` and `mcp list` re-materializes on demand.** Test the lever with a recording collaborator (a
   `Flyway` subclass whose `migrate()` records; `ConfigWatcher.isWatching()`) injected with a one-shot vs a
   normal `CommandMode` and assert BOTH branches — a single-direction test stays green when the guard is
   deleted (verified by mutating `isOneShot()`→`false` and watching the one-shot assertions go red). [M20]
@@ -1110,3 +1112,46 @@ Generalizable lessons from completed milestones; append here as milestones land.
   the dev suite and reading its noise as a broken build; contributors run `./mvnw verify`). Test the
   install path as a user would — `init`/`doctor`/piped turn/no-config run on a clean `FORVUM_HOME` — not
   just the milestone Verify scripts. [UX-INSTALL]
+- **The MCP bridge MUST build its transport from the Quarkiverse `QuarkusHttpMcpTransport`, NOT the
+  standalone langchain4j `HttpMcpTransport` — the latter drags in OkHttp's `okhttp-sse`, which is absent
+  from the classpath AND not native-friendly.** P2-13's `forvum-tools-mcp-bridge` is the provider Layer-3
+  recipe (`forvum-sdk` + `quarkus-arc` + `quarkus-langchain4j-mcp`, no `build` goal, copied enforcer
+  allowlist) surfacing `mcp-servers/<id>.json` servers as `mcp.<server>.<tool>` `ToolSpec`s carrying
+  `PermissionScope.MCP_REMOTE` (DR-6b §9.3 — remote specs are UNTRUSTED, behind belt + the P2-11 RBAC
+  scope gate). The §7 mandate ("the Quarkiverse extension, NOT the beta") is load-bearing, not advisory:
+  `new dev.langchain4j.mcp.client.transport.http.HttpMcpTransport.Builder().build()` constructs an OkHttp
+  `SseEventListener` → `NoClassDefFoundError: okhttp3/sse/EventSourceListener` at connect time. Use
+  `io.quarkiverse.langchain4j.mcp.runtime.http.QuarkusHttpMcpTransport.Builder` (Vert.x, native-ready,
+  the extension's own `McpRecorder` builds clients the same way) — its API differs (`headers(Map)` not
+  `customHeaders`, plus `mcpClientName`); it `implements McpTransport`, so it still feeds
+  `new DefaultMcpClient.Builder().transport(...)`. THE TEST TRAP: that `NoClassDefFoundError` is an
+  `Error`, so it escapes the provider's best-effort `catch (RuntimeException)` and CRASHES boot
+  (`ToolRegistry.onStart` → `tools()` → connect) — but the no-config wiring IT NEVER connects (empty
+  `mcp-servers/`), so it ships green. Only a test whose home HAS a server exercises the real transport
+  build; the multi-launch app `McpCommandTest` catches it because its shared `forvum.home` accumulates
+  server files, so the 2nd+ launch's boot connects. Keep the SOLE langchain4j-touching class
+  (`DefaultMcpClientFactory`) behind a `McpClientFactory` seam so the provider + its units stay
+  langchain4j-free (fake factory), and jacoco-exclude that adapter (live-server-only, qdrant/telegram
+  policy). [P2-13]
+- **Materializing MCP tools is a SYNCHRONOUS network call, so `ToolRegistry.onStart` is NO LONGER the
+  "cheap side-effect-free" observer M20 left ungated — gate it on one-shot, and re-materialize `mcp list`
+  on demand.** Listing a server's tools is a connect + `listTools` round-trip; if `onStart` materializes
+  unconditionally, EVERY one-shot (`--help`/`--version`/`init`/`doctor`/`plugin`/`skill`/`mcp add`) blocks
+  at boot up to the connect timeout PER configured server on a machine with `mcp-servers/*.json` — the
+  pre-merge review's headline finding, invisible to the CI `<200 ms` gate (it runs with no `~/.forvum/` →
+  zero connects). Fix: `ToolRegistry.onStart` now returns early when `commandMode.isOneShot()` (inject the
+  engine `CommandMode`); `mcp list` (a one-shot) re-materializes by calling the bridge directly
+  (`McpBridgeToolProvider.tools()`), so the connect cost is paid only when the operator asks to list. Test
+  BOTH directions (one-shot boot → registry empty; normal boot → materialized) — the [M20] discipline.
+  Keep a tunable `forvum.mcp.connect-timeout-seconds` (default 5) so a normal server boot can't hang long
+  on a down server. **The resync swap MUST be atomic:** hold `(tools, owners)` in ONE `volatile` `Index`
+  record swapped in a single write — a `clear()`+`putAll()` across two `ConcurrentMap`s lets a concurrent
+  turn read a half-rebuilt registry and `ToolCallBridge` then throws belt/registry-divergence on a tool
+  that exists identically before and after (the review's second major). The engine-side registry wiring is
+  the 5-edit recipe BUT `ForvumHome.mcpServers()` + `ConfigWatcher.WATCHED_SUBFOLDERS` were already
+  pre-declared; the only new engine code is `ToolRegistry.onConfigChange` (filtered to `mcp-servers/`).
+  A multi-launch `@QuarkusMainTest` over the bundled Web channel must set `quarkus.http.host-enabled=false`
+  in the test profile (the launcher drives `QuarkusApplication.run()`, not the static `main` that unbinds
+  HTTP for a one-shot) so the sequential launches don't contend for the listener. Redact secret material
+  (`userinfo`/query) from a server URL before `mcp list` prints it (the Telegram never-log-a-secret-URL
+  lesson). [P2-13]

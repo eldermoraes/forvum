@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.forvum</groupId>
+        <artifactId>forvum-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forvum-tools-mcp-bridge</artifactId>
+
+    <name>Forvum Tools — MCP Bridge</name>
+    <description>Layer-3 Forvum extension: the MCP bridge (P2-13). Surfaces tools from operator-registered
+        remote MCP servers (HTTP/SSE only in v0.5; stdio parsed but flag-off, Risk #9) into the engine
+        ToolRegistry as `mcp.&lt;server&gt;.&lt;tool&gt;` specs, each carrying PermissionScope.MCP_REMOTE
+        (remote tool-specs are UNTRUSTED, DR-6b §9.3). The MCP client is the Quarkiverse
+        quarkus-langchain4j-mcp extension (native-ready). Servers are file-driven
+        (`$FORVUM_HOME/mcp-servers/&lt;name&gt;.json`), hot-reloaded with a ToolRegistry resync. No engine
+        dependency.</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Layer-1 plugin SPI: the ONLY ai.forvum dependency a Layer-3 extension carries (enforced
+             below). The provider implements ToolProvider (tools()/invoke()) carrying forvum-core types
+             (ToolSpec, PermissionScope). No engine dependency. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
+        <!-- CDI (ArC): @ApplicationScoped bean discovery. Version via Quarkus platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- The MCP client: Quarkiverse quarkus-langchain4j-mcp (native-ready, the issue's mandated client
+             — NOT the standalone langchain4j-mcp beta). Connects to a remote MCP server over HTTP/SSE,
+             lists its tools, and invokes them. Version managed versionlessly via quarkus-langchain4j-bom
+             imported by forvum-bom (same as the provider modules). -->
+        <dependency>
+            <groupId>io.quarkiverse.langchain4j</groupId>
+            <artifactId>quarkus-langchain4j-mcp</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Quarkus codegen + dev/test bootstrap. No `build` goal: forvum-tools-mcp-bridge is a Layer-3
+                 library, never a runnable artifact (that is forvum-app). The absent `build` goal makes
+                 Quarkus skip quarkus:dev on this module as a "support library", so its @QuarkusTest *IT run
+                 under Surefire in the reactor build (CLAUDE.md §4 exception). -->
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <!-- Coverage gate (X3). DefaultMcpClientFactory (incl. its nested ClientConnection) is the
+                 langchain4j/QuarkusHttpMcpTransport adapter: its connect/listTools/executeTool round-trips
+                 need a LIVE MCP server, so it is exercised end-to-end only against a real server (and at
+                 forvum-app boot), not by this module's Surefire units — the same disposition as the qdrant/
+                 telegram live-backend code. Excluded so the gate measures the unit-tested logic
+                 (McpServerConfig, McpServerSpec, McpBridgeToolProvider), which clears the global 80/75. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <excludes>
+                                <exclude>ai/forvum/tools/mcp/DefaultMcpClientFactory*.class</exclude>
+                            </excludes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.line.minimum}</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.branch.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-plugin-layering</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- Allowlist form: ban every ai.forvum module, re-allow forvum-sdk +
+                                         forvum-core (the Layer-0 contracts the SPI re-exposes — ToolSpec,
+                                         PermissionScope). forvum-engine, another extension, and the app
+                                         stay banned. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                        <include>ai.forvum:forvum-core</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>A Forvum extension (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,7 @@
+{
+  "extension_id": "mcp",
+  "module_name": "forvum-tools-mcp-bridge",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.mcp.McpBridgeToolProvider" }
+  ]
+}

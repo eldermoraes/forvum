@@ -25,6 +25,8 @@ class CommandModeTest {
                 "'plugin' only resolves+writes a JAR — it must skip the DB/watcher/cron boot (P2-6)");
         assertTrue(CommandMode.isOneShotCommand(new String[] {"skill", "install", "https://x/skill.md"}),
                 "'skill' only downloads+writes a .md — it must skip the DB/watcher/cron boot (P2-7)");
+        assertTrue(CommandMode.isOneShotCommand(new String[] {"mcp", "list"}),
+                "'mcp' reads/writes mcp-servers/ only — it must skip the DB/watcher/cron boot (P2-13)");
     }
 
     @Test

@@ -24,7 +24,9 @@ import java.util.concurrent.Callable;
  * {@code init} subcommand scaffolds {@code ~/.forvum}; {@code ask} runs one non-interactive turn and exits;
  * {@code doctor} validates the {@code ~/.forvum} configuration and exits non-zero on problems;
  * {@code replay} reproduces a stored session's recorded message and tool sequence; {@code plugin install}
- * resolves a Maven coordinate into {@code ~/.forvum/plugins/} (fast-jar drop-in; native users rebuild).
+ * resolves a Maven coordinate into {@code ~/.forvum/plugins/} (fast-jar drop-in; native users rebuild);
+ * {@code skill install} downloads a skill {@code .md} into {@code ~/.forvum/skills/}; {@code mcp add}/
+ * {@code mcp list} manage the remote MCP-server registry under {@code ~/.forvum/mcp-servers/}.
  */
 @CommandLine.Command(
         name = "forvum",
@@ -32,7 +34,7 @@ import java.util.concurrent.Callable;
         versionProvider = VersionProvider.class,
         description = "Forvum - local-first, open-source personal AI agents on the JVM.",
         subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class, SessionReplayCommand.class,
-                PluginCommand.class, SkillCommand.class })
+                PluginCommand.class, SkillCommand.class, McpCommand.class })
 public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";

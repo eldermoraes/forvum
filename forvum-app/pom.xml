@@ -87,6 +87,12 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-filesystem</artifactId>
         </dependency>
+        <!-- Layer-3 MCP bridge (P2-13): surfaces remote MCP-server tools as mcp.<server>.<tool>
+             (PermissionScope.MCP_REMOTE). Brings the Quarkiverse quarkus-langchain4j-mcp client. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-mcp-bridge</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>

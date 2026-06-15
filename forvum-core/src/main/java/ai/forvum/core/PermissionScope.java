@@ -17,7 +17,16 @@ package ai.forvum.core;
  */
 public enum PermissionScope {
     FS_READ,
-    FS_WRITE;
+    FS_WRITE,
+    /**
+     * Authority to invoke a tool surfaced from a REMOTE MCP server (P2-13, DR-6b §9.3). Remote MCP
+     * tool-specs are UNTRUSTED (they breach the author-authored assumption), so the MCP bridge stamps
+     * this scope on every {@code mcp.<server>.<tool>} spec; it is the RBAC second gate (beyond belt
+     * membership) that the P2-11 effective-scopes check enforces. The permissive {@code default-user}
+     * role ({@code EnumSet.allOf}) includes it, so an operator who registers a server and puts its tool
+     * in an agent's belt gets it working; a restricted role can withhold it.
+     */
+    MCP_REMOTE;
 
     /**
      * Parses a string into a {@code PermissionScope}, throwing a contextual
