@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.forvum</groupId>
+        <artifactId>forvum-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forvum-channel-whatsapp</artifactId>
+
+    <name>Forvum Channel — WhatsApp</name>
+    <description>Layer-3 Forvum extension: the WhatsApp channel (P2-CH) over the Meta WhatsApp Business
+        Cloud API. Inbound is a webhook (@Route over the already-present vertx-http): a GET verification
+        handshake plus signed POST message events whose X-Hub-Signature-256 HMAC is validated against the
+        app secret before any processing; the turn is acked fast (HTTP 200) and driven on a virtual thread
+        through the engine's ChannelTurnDriver. Outbound replies are Graph API sends through a blocking
+        REST client. allowedUserIds in channels/whatsapp.json restricts who may drive a turn. The webhook
+        must be reachable from Meta (a public ingress / tunnel is the operator's concern) — a documented
+        limitation. No AI library, no engine dependency.</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Layer-1 plugin SPI: the ONLY ai.forvum dependency a Layer-3 extension carries (enforced
+             below). The channel injects the SDK ChannelTurnDriver contract — it never depends on the
+             engine. Version managed by forvum-bom. A WhatsApp channel uses no langchain4j. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
+        <!-- CDI (ArC): @ApplicationScoped bean discovery. Version via Quarkus platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- The inbound webhook endpoint: a declarative @Route over the already-present vertx-http
+             server (the same extension forvum-app's CaprDashboardRoute uses), chosen over quarkus-rest so
+             it does not perturb the langchain4j HttpClientFactorySelector / REST-client stack (CLAUDE.md
+             X6 lesson). The @Route handler reads the RAW request body for HMAC signature validation.
+             Version via platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-reactive-routes</artifactId>
+        </dependency>
+        <!-- Outbound Graph API sends: the BLOCKING REST client on a virtual thread (never a reactive
+             return type — Mutiny/Multi is a PR-reject, CLAUDE.md §3.8), same as the Telegram/Matrix
+             channels. Version via platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-client-jackson</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Quarkus codegen + dev/test bootstrap. No `build` goal: forvum-channel-whatsapp is a
+                 Layer-3 library, never a runnable artifact (that is forvum-app). The absent `build` goal
+                 (no runnable app) is what makes Quarkus skip quarkus:dev on this module as a "support
+                 library" (same as forvum-engine / forvum-channel-web), so the Dev-UI test runner cannot
+                 attach and its @QuarkusTest *IT run under Surefire in the reactor build (CLAUDE.md §4
+                 exception). -->
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- A @QuarkusTest *IT here boots Quarkus in-JVM; it also runs through the reactor
+                         build under Surefire (CI `verify`). -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-plugin-layering</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- Allowlist form (consistent with the provider/web/matrix modules):
+                                         ban every ai.forvum module, re-allow forvum-sdk + forvum-core. The
+                                         channel injects ChannelTurnDriver (an SDK contract carrying only
+                                         forvum-core types), so it depends on forvum-sdk + forvum-core
+                                         only; forvum-engine, another extension, and the app stay banned. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                        <include>ai.forvum:forvum-core</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>A Forvum channel (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ChannelMessage/AgentEvent in the ChannelTurnDriver SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -151,4 +151,29 @@ class ChannelLauncherTest {
                         + " \"account\": \"+15559990000\" }")),
                 "a disabled channel never serves, even fully configured");
     }
+
+    @Test
+    void whatsappServesOnlyWithAllFourWebhookAndGraphKeys() {
+        // WhatsApp declares FOUR required keys (verifyToken + appSecret to receive, accessToken +
+        // phoneNumberId to reply): the allMatch gate must refuse a config missing any one, else an
+        // enabled-but-half-configured whatsapp.json would hang the binary serving nothing (the M17 trap).
+        assertFalse(ChannelLauncher.serves("whatsapp", json("{}")));
+        assertFalse(ChannelLauncher.serves("whatsapp",
+                json("{ \"verifyToken\": \"vt\", \"appSecret\": \"as\", \"accessToken\": \"at\" }")),
+                "phoneNumberId missing");
+        assertFalse(ChannelLauncher.serves("whatsapp",
+                json("{ \"appSecret\": \"as\", \"accessToken\": \"at\", \"phoneNumberId\": \"PNID\" }")),
+                "verifyToken missing");
+        assertFalse(ChannelLauncher.serves("whatsapp",
+                json("{ \"verifyToken\": \"vt\", \"appSecret\": \"  \", \"accessToken\": \"at\","
+                        + " \"phoneNumberId\": \"PNID\" }")),
+                "a blank appSecret is not a credential");
+        assertTrue(ChannelLauncher.serves("whatsapp",
+                json("{ \"verifyToken\": \"vt\", \"appSecret\": \"as\", \"accessToken\": \"at\","
+                        + " \"phoneNumberId\": \"PNID\" }")));
+        assertFalse(ChannelLauncher.serves("whatsapp",
+                json("{ \"enabled\": false, \"verifyToken\": \"vt\", \"appSecret\": \"as\","
+                        + " \"accessToken\": \"at\", \"phoneNumberId\": \"PNID\" }")),
+                "a disabled channel never serves, even fully configured");
+    }
 }
