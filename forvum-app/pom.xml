@@ -122,6 +122,14 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-channel-slack</artifactId>
         </dependency>
+        <!-- Layer-3 Matrix channel (P2-CH): a blocking REST client /sync long-poll worker on a virtual
+             thread driving turns via ChannelTurnDriver (the Telegram recipe over the Matrix
+             client-server API v3). Brings quarkus-rest-client-jackson. Unencrypted rooms only — E2EE
+             is not supported (issue #125). -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-matrix</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
