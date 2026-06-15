@@ -45,9 +45,10 @@ public class CommandMode {
         for (String arg : args) {
             switch (arg) {
                 // Canonical one-shot forms only — must match RootCommand's surface (mixinStandardHelpOptions
-                // + the 'init'/'doctor'/'plugin' subcommands). Bare 'help'/'version' are NOT registered
-                // subcommands. 'plugin' (P2-6) only resolves+writes a JAR, so it skips the DB/watcher too.
-                case "--help", "-h", "--version", "-V", "init", "doctor", "plugin" -> {
+                // + the 'init'/'doctor'/'plugin'/'skill' subcommands). Bare 'help'/'version' are NOT
+                // registered subcommands. 'plugin' (P2-6) only resolves+writes a JAR and 'skill' (P2-7) only
+                // downloads+writes a .md, so both skip the DB/watcher too.
+                case "--help", "-h", "--version", "-V", "init", "doctor", "plugin", "skill" -> {
                     return true;
                 }
                 default -> {
