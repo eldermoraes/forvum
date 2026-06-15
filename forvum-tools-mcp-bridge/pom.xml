@@ -102,6 +102,48 @@
                 </configuration>
             </plugin>
 
+            <!-- Coverage gate (X3). DefaultMcpClientFactory (incl. its nested ClientConnection) is the
+                 langchain4j/QuarkusHttpMcpTransport adapter: its connect/listTools/executeTool round-trips
+                 need a LIVE MCP server, so it is exercised end-to-end only against a real server (and at
+                 forvum-app boot), not by this module's Surefire units — the same disposition as the qdrant/
+                 telegram live-backend code. Excluded so the gate measures the unit-tested logic
+                 (McpServerConfig, McpServerSpec, McpBridgeToolProvider), which clears the global 80/75. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <excludes>
+                                <exclude>ai/forvum/tools/mcp/DefaultMcpClientFactory*.class</exclude>
+                            </excludes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.line.minimum}</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.branch.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
