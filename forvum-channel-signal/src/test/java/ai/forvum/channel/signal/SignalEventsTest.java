@@ -192,9 +192,36 @@ class SignalEventsTest {
     }
 
     @Test
-    void anEnvelopeLessPayloadIsIgnored() {
+    void aDaemonExceptionPayloadIsSurfacedNotSwallowed() {
+        // signal-cli emits a stream-side receive error as { "exception": { "message": "..." } } with no
+        // envelope; it must carry the daemon-exception reason (the consume loop logs it at WARN), NOT
+        // the generic "no envelope" that other ignores get at DEBUG.
+        Ignored ignored = assertInstanceOf(Ignored.class,
+                parse("{ \"exception\": { \"message\": \"receive failed: not registered\" } }"));
+        assertTrue(ignored.reason().startsWith(SignalEvents.DAEMON_EXCEPTION_REASON),
+                "a daemon stream error must carry the daemon-exception reason prefix");
+        assertTrue(ignored.reason().contains("receive failed: not registered"),
+                "the daemon's error detail is kept (logged at WARN by the consume loop)");
+    }
+
+    @Test
+    void aTrulyEnvelopeLessPayloadIsIgnored() {
         assertEquals("no envelope",
-                assertInstanceOf(Ignored.class, parse("{ \"exception\": { \"message\": \"x\" } }")).reason());
+                assertInstanceOf(Ignored.class, parse("{ \"foo\": 1 }")).reason());
+    }
+
+    @Test
+    void anEditMessageIsIgnoredWithAnEditSpecificReason() {
+        // signal-cli delivers an edited message under envelope.editMessage.dataMessage (the top-level
+        // dataMessage is absent), so it must be ignored EXPLICITLY as an edit — not the misleading
+        // generic "no data message" the absent top-level field would otherwise produce.
+        Ignored ignored = assertInstanceOf(Ignored.class, parse("""
+                { "envelope": { "sourceNumber": "+15550001111",
+                                "editMessage": { "targetSentTimestamp": 5,
+                                                 "dataMessage": { "message": "corrected text" } } } }
+                """));
+        assertTrue(ignored.reason().contains("edit message"),
+                "an edited message is ignored with an edit-specific reason");
     }
 
     @Test

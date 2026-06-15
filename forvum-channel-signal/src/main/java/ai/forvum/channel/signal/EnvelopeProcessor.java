@@ -74,9 +74,20 @@ public class EnvelopeProcessor {
      */
     public void process(TextMessage message, Spec spec, SignalRpcApi api, String baseUrl,
                         String account) {
+        if (isOwnMessage(message, account)) {
+            // The daemon can surface the account's OWN sends as a plain dataMessage (a "Note to Self",
+            // or a linked-device transcript) — NOT always wrapped in syncMessage, so the parse-time
+            // syncMessage filter does not catch it. Replying would send the bot's message back to
+            // itself and re-ingest it: an unbounded self-reply loop. Drop it before the allow-list
+            // check (an empty allow-list would otherwise "allow" the bot's own number) and any reply.
+            LOG.debug("Signal: ignoring the bot's own message (self-echo); no turn, no reply.");
+            return;
+        }
         if (!spec.isSenderAllowed(message.sourceNumber(), message.sourceUuid(), message.replyTo())) {
-            LOG.warnf("Signal: refused unauthorized sender %s; not in allowedUserIds %s.",
-                    message.replyTo(), spec.allowedUserIds());
+            // Audit the refusal WITHOUT the sender id or the allow-list members: for Signal both are
+            // phone numbers / source UUIDs (the operator's contact graph), so logging them raw is a
+            // PII disclosure to anyone with log access — only the authorized-set SIZE is logged.
+            LOG.warn(refusalAudit(spec.allowedUserIds().size()));
             send(api, baseUrl, account, message.replyTo(), REFUSAL_MESSAGE);
             return;
         }
@@ -89,6 +100,32 @@ public class EnvelopeProcessor {
                 send(api, baseUrl, account, message.replyTo(), rendered);
             }
         });
+    }
+
+    /**
+     * Whether {@code message} is the bot's OWN account echoed back (self-echo): {@code account} matches
+     * any id signal-cli stamps on the envelope ({@code sourceNumber}, {@code sourceUuid}, or the
+     * {@code replyTo} fallback). A blank/absent account never matches. Package-private + pure for direct
+     * unit testing.
+     */
+    static boolean isOwnMessage(TextMessage message, String account) {
+        if (account == null || account.isBlank()) {
+            return false;
+        }
+        return account.equals(message.sourceNumber())
+                || account.equals(message.sourceUuid())
+                || account.equals(message.replyTo());
+    }
+
+    /**
+     * The non-identifying refusal audit line logged at WARN ("denied + audited", CLAUDE.md §11): the
+     * authorized-set SIZE only, NEVER the rejected sender id or the allow-list members (for Signal those
+     * are phone numbers / UUIDs — operator PII). Package-private + pure so a test pins that no
+     * identifying material can structurally reach the logs (mirrors {@link SignalChannel#redact}).
+     */
+    static String refusalAudit(int authorizedCount) {
+        return "Signal: refused an unauthorized sender (not in allowedUserIds; "
+                + authorizedCount + " authorized id(s)).";
     }
 
     /**

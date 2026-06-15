@@ -18,8 +18,11 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -111,6 +114,62 @@ class SignalSseStreamTest {
     }
 
     /**
+     * The failure → back-off → retry arm driven end-to-end through {@code eventLoop}: a server that
+     * always 503s makes {@code streamOnce} throw the reconnect-triggering {@link IOException}, the loop
+     * catches it and sleeps {@code backoff.nextDelayMillis()} via the {@code sleeper} seam, and the
+     * back-off ADVANCES across failures (no healthy event resets it). A recording sleeper captures the
+     * schedule and stops the loop after three failures — proving both the IOException catch arm and the
+     * growing 1 s/2 s/4 s back-off without any real waiting.
+     */
+    @Test
+    void eventLoopBacksOffWithGrowingDelaysOnRepeatedFailureViaTheSleeperSeam() {
+        server.createContext("/api/v1/events", exchange -> {
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+        });
+
+        SignalChannel channel = wiredChannel(new FakeTurnDriver());
+        channel.backoff = new Backoff(); // default 1 s, 2 s, 4 s, … (no reset — every connect fails)
+        List<Long> delays = new CopyOnWriteArrayList<>();
+        channel.sleeper = millis -> {
+            delays.add(millis);
+            if (delays.size() >= 3) {
+                channel.running = false; // exit the while(running) loop after the third back-off
+            }
+        };
+        channel.running = true;
+
+        channel.eventLoop(new RecordingSignalRpcApi(), baseUrl(), "+15559990000");
+
+        assertEquals(List.of(1_000L, 2_000L, 4_000L), List.copyOf(delays),
+                "a repeatedly-failing connect backs off with a doubling, un-reset schedule");
+    }
+
+    /**
+     * A {@code shutdownNow} arriving WHILE the loop is in its back-off sleep: the {@code sleeper} throws
+     * {@link InterruptedException}, and {@code eventLoop} must re-set the interrupt flag and exit
+     * promptly (not loop forever). Drives the interrupt-during-backoff early-return branch.
+     */
+    @Test
+    void eventLoopExitsAndReSetsTheInterruptFlagWhenInterruptedDuringBackoff() {
+        server.createContext("/api/v1/events", exchange -> {
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+        });
+
+        SignalChannel channel = wiredChannel(new FakeTurnDriver());
+        channel.sleeper = millis -> {
+            throw new InterruptedException("shutdownNow during back-off");
+        };
+        channel.running = true;
+
+        channel.eventLoop(new RecordingSignalRpcApi(), baseUrl(), "+15559990000");
+
+        assertTrue(Thread.interrupted(), // reads AND clears the flag
+                "an interrupt during the back-off sleep must re-set the thread's interrupt flag on exit");
+    }
+
+    /**
      * The full lifecycle against the in-test daemon: an ENABLED {@code channels/signal.json} pointing at
      * the server → {@code onStart} launches the virtual-thread worker → the streamed event drives a turn
      * → the stream ends (server closes) → the loop backs off (shrunk schedule) and reconnects →
@@ -121,7 +180,9 @@ class SignalSseStreamTest {
     void onStartStreamsReconnectsAndStopsCleanly(@org.junit.jupiter.api.io.TempDir Path home)
             throws Exception {
         CountDownLatch connections = new CountDownLatch(2); // initial connect + at least one reconnect
+        AtomicInteger connectionCount = new AtomicInteger();
         server.createContext("/api/v1/events", exchange -> {
+            connectionCount.incrementAndGet();
             connections.countDown();
             byte[] body = TEXT_EVENT.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
@@ -141,7 +202,8 @@ class SignalSseStreamTest {
         SignalChannel channel = new SignalChannel();
         channel.processor = processor;
         channel.config = new SignalChannelConfig(channels.resolve("signal.json"));
-        channel.api = new RecordingSignalRpcApi();
+        RecordingSignalRpcApi api = new RecordingSignalRpcApi(); // KEEP the reference (assert the reply)
+        channel.api = api;
         channel.backoff = new Backoff(1L, 4L); // shrink the reconnect schedule for the test
 
         channel.onStart(null);
@@ -152,8 +214,19 @@ class SignalSseStreamTest {
         } finally {
             channel.onStop(null);
         }
-        assertTrue(channel.worker.isShutdown(), "onStop shuts the worker down");
+        // A deliberate shutdown TERMINATES the worker and must NOT reconnect (the Discord-lesson
+        // invariant): isShutdown() only confirms shutdownNow() was called, so assert the loop actually
+        // ended (awaitTermination) and that no further connection arrives after it stopped.
+        assertTrue(channel.worker.awaitTermination(5, TimeUnit.SECONDS),
+                "onStop terminates the worker loop (not merely requests shutdown)");
+        int connectionsAtStop = connectionCount.get();
+        Thread.sleep(100); // several shrunk (1–4 ms) back-off intervals — a reconnect would fire here
+        assertEquals(connectionsAtStop, connectionCount.get(),
+                "a deliberately-stopped worker opens no further connections (no reconnect after shutdown)");
         assertTrue(driver.dispatched().size() >= 1, "at least one streamed event drove a turn");
         assertEquals("over http", driver.dispatched().get(0).content());
+        assertTrue(api.sent.size() >= 1, "the streamed event's reply went out as a JSON-RPC send");
+        assertEquals("echo:over http", api.sent.get(0).request().params().message(),
+                "the reply reached the daemon through the production onStart/eventLoop path");
     }
 }

@@ -94,6 +94,19 @@ class EnvelopeProcessorIT {
     }
 
     @Test
+    void anOwnAccountMessageIsNeitherDispatchedNorReplied() {
+        // The daemon surfaced the bot's OWN account as a plain dataMessage (a Note to Self / a
+        // linked-device echo, NOT wrapped in syncMessage). With an empty allow-list it would otherwise
+        // be "allowed" and the reply would be sent back to the bot itself, re-ingested as another
+        // inbound message — an unbounded self-reply loop. It must be dropped: no turn, no send.
+        processor.process(text("+15559990000", null, "loop me"), spec(Set.of()), api,
+                "http://localhost:8080", "+15559990000");
+
+        assertTrue(driver.dispatched().isEmpty(), "the bot's own message must NOT drive a turn");
+        assertTrue(api.sent.isEmpty(), "the bot must NOT reply to its own message (no self-loop)");
+    }
+
+    @Test
     void aDisallowedSenderIsRefusedWithAFriendlyMessageAndNoTurnRuns() {
         processor.process(text("+15557772222", null, "let me in"),
                 spec(Set.of("+15550001111")), api, "http://localhost:8080", "+15559990000");

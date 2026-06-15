@@ -29,8 +29,13 @@
  * calls ({@code POST {baseUrl}/api/v1/rpc}) over a blocking REST client.
  *
  * <p><strong>Scope (v0.5).</strong> Direct text messages only: receipts, typing notifications, sync
- * messages, and group messages ({@code dataMessage.groupInfo} present) are ignored — group support is a
- * documented limitation. {@code allowedUserIds} (phone numbers and/or UUIDs) restricts who may drive a
- * turn; an empty list allows any sender (single-user convenience).
+ * messages, edited messages ({@code envelope.editMessage}), and group messages
+ * ({@code dataMessage.groupInfo} present) are ignored — group and edit support are documented
+ * limitations. The bot's own sends are dropped (self-echo: by {@code syncMessage}, and by an
+ * own-{@code account} sender match, so a plain-{@code dataMessage} echo cannot loop the bot onto
+ * itself). {@code allowedUserIds} (phone numbers and/or UUIDs) restricts who may drive a turn; an empty
+ * list allows any sender (single-user convenience), and a refusal is audited WITHOUT logging the sender
+ * id or the allow-list members (they are operator PII). A daemon-reported stream error
+ * ({@code {"exception":{...}}}) is surfaced at WARN, not swallowed.
  */
 package ai.forvum.channel.signal;

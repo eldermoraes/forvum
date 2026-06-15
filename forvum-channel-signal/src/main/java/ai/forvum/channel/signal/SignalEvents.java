@@ -40,6 +40,13 @@ public final class SignalEvents {
     /** The SSE event name the daemon stamps on receive events. */
     static final String EVENT_RECEIVE = "receive";
 
+    /**
+     * Reason prefix for a daemon-reported stream-side receive error ({@code {"exception":{...}}}); the
+     * consuming loop ({@code SignalChannel.consume}) surfaces an {@link Ignored} carrying this prefix at
+     * WARN (not the usual DEBUG) so a daemon receive failure is not swallowed silently.
+     */
+    static final String DAEMON_EXCEPTION_REASON = "daemon exception";
+
     private SignalEvents() {
     }
 
@@ -106,6 +113,16 @@ public final class SignalEvents {
             payload = params; // the JSON-RPC notification wrapping — unwrap to the receive payload
         }
 
+        // A daemon-reported stream-side receive error: { "exception": { "message": "..." } } with no
+        // envelope. Surface it (the consuming loop logs it at WARN) instead of swallowing it as the
+        // generic "no envelope" at DEBUG — a receive failure (auth, registration) must be visible.
+        JsonNode exception = payload.get("exception");
+        if (exception != null && exception.isObject()) {
+            String detail = textOrNull(exception, "message");
+            return new Ignored(detail != null ? DAEMON_EXCEPTION_REASON + ": " + detail
+                    : DAEMON_EXCEPTION_REASON);
+        }
+
         JsonNode envelope = payload.get("envelope");
         if (envelope == null || !envelope.isObject()) {
             return new Ignored("no envelope");
@@ -120,6 +137,13 @@ public final class SignalEvents {
         }
         if (envelope.has("typingMessage")) {
             return new Ignored("typing notification");
+        }
+        // An EDITED message rides envelope.editMessage.dataMessage (not the top-level dataMessage).
+        // Edits are out of scope for v0.5 (acting on an edit would re-run a turn for an old message),
+        // so ignore them EXPLICITLY here rather than letting the absent top-level dataMessage fall
+        // through to the misleading generic "no data message".
+        if (envelope.has("editMessage")) {
+            return new Ignored("edit message (not supported in v0.5)");
         }
 
         JsonNode dataMessage = envelope.get("dataMessage");

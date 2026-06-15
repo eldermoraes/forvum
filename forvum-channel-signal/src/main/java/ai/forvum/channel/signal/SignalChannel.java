@@ -210,8 +210,15 @@ public class SignalChannel {
                 switch (SignalEvents.parse(mapper, event)) {
                     case SignalEvents.TextMessage text ->
                             processor.process(text, config.read(), api, baseUrl, account);
-                    case SignalEvents.Ignored ignored ->
+                    case SignalEvents.Ignored ignored -> {
+                        if (ignored.reason().startsWith(SignalEvents.DAEMON_EXCEPTION_REASON)) {
+                            // A daemon-reported receive error (auth, registration, …) — surface at WARN
+                            // (account query redacted), not the silent DEBUG the other ignores get.
+                            LOG.warnf("Signal: %s; continuing the stream.", redact(ignored.reason()));
+                        } else {
                             LOG.debugf("Signal: ignoring event (%s).", ignored.reason());
+                        }
+                    }
                 }
             } catch (RuntimeException e) {
                 // One bad event (a config read failure, an unexpected processor error) must not kill
