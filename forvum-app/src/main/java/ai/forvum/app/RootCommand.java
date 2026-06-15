@@ -32,7 +32,7 @@ import java.util.concurrent.Callable;
         versionProvider = VersionProvider.class,
         description = "Forvum - local-first, open-source personal AI agents on the JVM.",
         subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class, SessionReplayCommand.class,
-                PluginCommand.class })
+                PluginCommand.class, SkillCommand.class })
 public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";

@@ -26,12 +26,43 @@ import java.util.Map;
  * <p>The validator is deliberately stateless and depends only on a shared {@link ObjectMapper}; it carries
  * no DTO record, so it needs no {@code @RegisterForReflection}.
  */
-final class OutputSchemaValidator {
+public final class OutputSchemaValidator {
 
     private final ObjectMapper mapper;
 
-    OutputSchemaValidator(ObjectMapper mapper) {
+    public OutputSchemaValidator(ObjectMapper mapper) {
         this.mapper = mapper;
+    }
+
+    /**
+     * Validate that {@code schemaJson} is itself a well-formed v0.5-subset schema — used to validate a
+     * DECLARED schema at config-read time (the skill front-matter {@code inputSchema}, P2-7), reusing the
+     * SAME subset this class enforces against values so there is no parallel schema definition (the P2-9
+     * doctor lesson). Checks: valid JSON; a JSON object; {@code required} (if present) is an array; and
+     * {@code properties} (if present) is an object. Unknown {@code type} keywords are tolerated, matching
+     * {@link #matchesType}'s forward-leniency. Throws {@link OutputSchemaException} naming the problem.
+     */
+    public void validateSchema(String schemaJson) {
+        JsonNode schema;
+        try {
+            schema = mapper.readTree(schemaJson);
+        } catch (JsonProcessingException e) {
+            throw new OutputSchemaException(
+                "the declared input schema is not valid JSON: " + e.getOriginalMessage(), e);
+        }
+        if (schema == null || !schema.isObject()) {
+            throw new OutputSchemaException("the declared input schema must be a JSON object.", null);
+        }
+        JsonNode required = schema.get("required");
+        if (required != null && !required.isArray()) {
+            throw new OutputSchemaException(
+                "the declared input schema's 'required' must be an array of field names.", null);
+        }
+        JsonNode properties = schema.get("properties");
+        if (properties != null && !properties.isObject()) {
+            throw new OutputSchemaException(
+                "the declared input schema's 'properties' must be an object.", null);
+        }
     }
 
     /**
