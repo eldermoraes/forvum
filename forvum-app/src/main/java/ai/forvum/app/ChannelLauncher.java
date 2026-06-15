@@ -54,26 +54,35 @@ public class ChannelLauncher {
     static final String SLACK_ID = "slack";
 
     /**
+     * Channel id of the WhatsApp channel, which requires the webhook {@code verifyToken} +
+     * {@code appSecret} (to complete Meta's verification handshake and validate inbound signatures) AND
+     * the Graph API {@code accessToken} + {@code phoneNumberId} (to reply) to serve.
+     */
+    static final String WHATSAPP_ID = "whatsapp";
+
+    /**
      * Per-channel config keys that must ALL be present and non-blank for the channel to count as
      * serving. Generalizes the original single {@code botToken} gate: each credential-gated channel
      * declares its own key set (Slack needs {@code botToken}+{@code appToken}, Matrix
-     * {@code homeserver}+{@code accessToken}+{@code userId}, Signal {@code baseUrl}+{@code account} —
-     * each entry lands WITH its channel module, never before, or an enabled config for an absent module
-     * would hang the binary in server mode serving nothing, the M17 trap). A channel with no entry has
-     * no key requirement. The keys mirror each channel's own {@code onStart} gate (whatever makes it
-     * warn + no-op makes it non-serving here), so they are not strictly credentials — Matrix's
-     * {@code userId} is the bot's own identity, required for its self-echo filter.
+     * {@code homeserver}+{@code accessToken}+{@code userId}, Signal {@code baseUrl}+{@code account},
+     * WhatsApp {@code verifyToken}+{@code appSecret}+{@code accessToken}+{@code phoneNumberId} — each
+     * entry lands WITH its channel module, never before, or an enabled config for an absent module would
+     * hang the binary in server mode serving nothing, the M17 trap). A channel with no entry has no key
+     * requirement. The keys mirror each channel's own {@code onStart} gate (whatever makes it warn +
+     * no-op makes it non-serving here), so they are not strictly credentials — Matrix's {@code userId}
+     * is the bot's own identity, required for its self-echo filter.
      */
     static final Map<String, Set<String>> REQUIRED_SERVE_KEYS = Map.of(
             TELEGRAM_ID, Set.of("botToken"),
             DISCORD_ID, Set.of("botToken"),
             SLACK_ID, Set.of("botToken", "appToken"),
             MATRIX_ID, Set.of("homeserver", "accessToken", "userId"),
-            SIGNAL_ID, Set.of("baseUrl", "account"));
+            SIGNAL_ID, Set.of("baseUrl", "account"),
+            WHATSAPP_ID, Set.of("verifyToken", "appSecret", "accessToken", "phoneNumberId"));
 
     /** Channel ids whose enablement keeps the process alive to serve. */
     static final Set<String> SERVER_CHANNELS =
-            Set.of("web", TELEGRAM_ID, DISCORD_ID, SLACK_ID, MATRIX_ID, SIGNAL_ID);
+            Set.of("web", TELEGRAM_ID, DISCORD_ID, SLACK_ID, MATRIX_ID, SIGNAL_ID, WHATSAPP_ID);
 
     /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.

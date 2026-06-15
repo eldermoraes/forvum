@@ -1,0 +1,7 @@
+{
+  "extension_id": "whatsapp",
+  "module_name": "forvum-channel-whatsapp",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.whatsapp.WhatsAppChannelProvider" }
+  ]
+}

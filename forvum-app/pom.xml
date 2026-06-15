@@ -138,6 +138,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-channel-signal</artifactId>
         </dependency>
+        <!-- Layer-3 WhatsApp channel (P2-CH): the Meta Cloud API webhook — a @Route over the
+             already-present vertx-http validates the X-Hub-Signature-256 HMAC and drives turns via
+             ChannelTurnDriver, replying through the Graph API blocking REST client. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-whatsapp</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>

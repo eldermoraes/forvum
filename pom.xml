@@ -39,6 +39,7 @@
         <module>forvum-channel-slack</module>
         <module>forvum-channel-matrix</module>
         <module>forvum-channel-signal</module>
+        <module>forvum-channel-whatsapp</module>
         <module>forvum-app</module>
     </modules>
 
