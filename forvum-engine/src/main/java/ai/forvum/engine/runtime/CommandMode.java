@@ -7,15 +7,17 @@ import jakarta.inject.Inject;
 
 /**
  * Detects a <em>one-shot CLI command</em> ({@code --help}/{@code --version}/{@code init}/{@code doctor}/
- * {@code plugin}/{@code skill}/{@code mcp}) from the process arguments (M20). Such an invocation prints +
+ * {@code plugin}/{@code skill}/{@code mcp}/{@code copilot}) from the process arguments (M20). Such an
+ * invocation prints +
  * exits without running an agent turn, so the heavy {@code @Observes StartupEvent} work — Flyway
  * migration, the config {@code WatchService}, cron scheduling, AND the {@code ToolRegistry} tool
  * materialization (whose MCP bridge connect is a blocking network round-trip, P2-13) — is skipped for it,
  * keeping the {@code --help} cold-start path off the DB/IO/network (the lever for the &lt;200 ms gate).
  * {@code doctor} (P2-9) only reads the config files, {@code plugin install} (P2-6) only resolves a Maven
  * coordinate and writes a JAR into {@code ~/.forvum/plugins/}, {@code skill install} (P2-7) downloads a
- * {@code .md} into {@code ~/.forvum/skills/}, and {@code mcp add}/{@code mcp list} (P2-13) read/write
- * {@code ~/.forvum/mcp-servers/} — none needs the DB or the watcher. Interactive/server invocations
+ * {@code .md} into {@code ~/.forvum/skills/}, {@code mcp add}/{@code mcp list} (P2-13) read/write
+ * {@code ~/.forvum/mcp-servers/}, and {@code copilot login} (#42) device-code authenticates + writes a
+ * credential file — none needs the DB or the watcher. Interactive/server invocations
  * ({@code oneShot == false}) boot normally. Reads {@code @CommandLineArguments}, which Quarkus populates
  * before any startup observer runs.
  *
@@ -26,8 +28,8 @@ import jakarta.inject.Inject;
  *
  * <p>The recognized set is the app's own CLI surface: the picocli-universal {@code --help}/{@code -h}/
  * {@code --version}/{@code -V} plus the app-defined {@code init}, {@code doctor}, {@code plugin},
- * {@code skill}, and {@code mcp} subcommands. It must stay in sync with {@code RootCommand} (which owns
- * them); only canonical single-token
+ * {@code skill}, {@code mcp}, and {@code copilot} subcommands. It must stay in sync with {@code RootCommand}
+ * (which owns them); only canonical single-token
  * forms are matched — a non-canonical input (e.g. clustered {@code -hV}) merely pays the full boot once,
  * never misbehaves.
  */

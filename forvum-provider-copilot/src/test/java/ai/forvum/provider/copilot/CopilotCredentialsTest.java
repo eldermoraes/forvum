@@ -24,9 +24,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 class CopilotCredentialsTest {
 
-    /** A fake returning a fixed Copilot-token JSON from the exchange GET, counting the calls. */
+    /** A fake returning a fixed Copilot-token JSON from the exchange GET, counting calls + recording auth. */
     private static final class CountingHttp implements CopilotHttp {
         final AtomicInteger getCalls = new AtomicInteger();
+        volatile String lastAuth;
         private final long expiresAtSeconds;
 
         CountingHttp(long expiresAtSeconds) {
@@ -41,6 +42,7 @@ class CopilotCredentialsTest {
         @Override
         public Resp get(String url, Map<String, String> headers) {
             getCalls.incrementAndGet();
+            lastAuth = headers.get("Authorization");
             return new Resp(200, "{\"token\":\"tid=abc;proxy-ep=proxy.x.githubcopilot.com\","
                     + "\"expires_at\":" + expiresAtSeconds + "}");
         }
@@ -85,6 +87,8 @@ class CopilotCredentialsTest {
         assertEquals("https://api.x.githubcopilot.com", first.baseUrl());
         assertEquals(first.token(), second.token());
         assertEquals(1, http.getCalls.get(), "the Copilot token is cached, not re-exchanged per call");
+        assertEquals("Bearer gho_SECRET", http.lastAuth,
+                "the STORED GitHub token is the one placed in the exchange Authorization header");
     }
 
     @Test
@@ -127,5 +131,6 @@ class CopilotCredentialsTest {
         creds.currentApiToken();                 // exchange #2
 
         assertEquals(2, http.getCalls.get(), "a re-login re-exchanges the Copilot token");
+        assertEquals("Bearer gho_SECOND", http.lastAuth, "the exchange uses the NEW stored token");
     }
 }

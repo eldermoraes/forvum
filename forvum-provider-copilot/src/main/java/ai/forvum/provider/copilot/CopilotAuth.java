@@ -98,6 +98,10 @@ public class CopilotAuth {
      * terminal {@code expired_token}/{@code access_denied} errors. Throws on overall expiry.
      */
     public String pollForAccessToken(String deviceCode, long intervalMs, long expiresAtMs) {
+        // Floor the interval (mirrors the OpenClaw reference Math.max(1000, ...)): a malformed device-code
+        // response with interval 0 would otherwise busy-poll GitHub, and a negative value would make
+        // Thread.sleep throw an uncaught IllegalArgumentException. Self-protecting for every caller.
+        long pollInterval = Math.max(1000L, intervalMs);
         Map<String, String> form = Map.of("client_id", CLIENT_ID, "device_code", deviceCode,
                 "grant_type", "urn:ietf:params:oauth:grant-type:device_code");
         Map<String, String> headers = Map.of("Accept", "application/json",
@@ -113,8 +117,8 @@ public class CopilotAuth {
                 return accessToken;
             }
             switch (text(json, "error") == null ? "unknown" : text(json, "error")) {
-                case "authorization_pending" -> sleepQuietly(intervalMs);
-                case "slow_down" -> sleepQuietly(intervalMs + 2000);
+                case "authorization_pending" -> sleepQuietly(pollInterval);
+                case "slow_down" -> sleepQuietly(pollInterval + 2000);
                 case "expired_token" -> throw new CopilotAuthException(
                         "GitHub device code expired; run `forvum copilot login` again");
                 case "access_denied" -> throw new CopilotAuthException("GitHub login was cancelled");

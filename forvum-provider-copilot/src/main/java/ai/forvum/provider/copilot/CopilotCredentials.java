@@ -94,6 +94,9 @@ public class CopilotCredentials {
             Path dir = credentialsFile.getParent();
             if (POSIX) {
                 Files.createDirectories(dir, PosixFilePermissions.asFileAttribute(DIR_PERMS));
+                // createDirectories only applies the attribute to dirs it CREATES; re-tighten an
+                // already-present credentials dir to owner-only (the token file beneath it holds a secret).
+                Files.setPosixFilePermissions(dir, DIR_PERMS);
             } else {
                 Files.createDirectories(dir);
             }

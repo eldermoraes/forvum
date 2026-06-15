@@ -72,7 +72,9 @@ java -jar "$JAR"                # interactive session (the same `forvum> ` REPL 
 
 Configuration lives in `~/.forvum` (override with the `FORVUM_HOME` env var). Cloud providers
 (Anthropic, OpenAI, Google) need an API key (env var / `~/.forvum`); point an agent at one by editing
-its model in `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`). If a turn fails with
+its model in `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`). GitHub Copilot uses a
+device-code login instead of an API key: run `forvum copilot login`, authorize in the browser, then point
+an agent at a `copilot:<model>` ModelRef (e.g. `copilot:gpt-4o`). If a turn fails with
 `Is the model provider running?`, start Ollama (`ollama serve`) and pull the model named in the error.
 The first turn can take several seconds while Ollama loads the model; the reply prints when complete
 (v0.1 has no token streaming or spinner yet).

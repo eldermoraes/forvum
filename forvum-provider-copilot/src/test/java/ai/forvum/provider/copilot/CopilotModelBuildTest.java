@@ -64,4 +64,31 @@ class CopilotModelBuildTest {
         assertSame(first, again, "a stable Copilot token reuses the cached model for the same id");
         assertNotNull(provider.resolve(ModelRef.parse("copilot:gpt-4o-mini")), "a different model resolves too");
     }
+
+    @Test
+    void resolveRebuildsTheModelWhenTheCopilotTokenRefreshes(@TempDir Path home) {
+        long past = System.currentTimeMillis() / 1000 - 10; // already expired → re-exchange every call
+        java.util.Deque<String> tokens = new java.util.ArrayDeque<>(java.util.List.of(
+                "tid=A;proxy-ep=proxy.x.githubcopilot.com", "tid=B;proxy-ep=proxy.x.githubcopilot.com"));
+        CopilotCredentials creds = new CopilotCredentials(home, new CopilotAuth(new CopilotHttp() {
+            @Override
+            public Resp postForm(String url, Map<String, String> form, Map<String, String> headers) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public Resp get(String url, Map<String, String> headers) {
+                return new Resp(200, "{\"token\":\"" + tokens.poll() + "\",\"expires_at\":" + past + "}");
+            }
+        }));
+        creds.storeGitHubToken("gho_TOKEN");
+        CopilotModelProvider provider = new CopilotModelProvider();
+        provider.credentials = creds;
+
+        ChatModel withTokenA = provider.resolve(ModelRef.parse("copilot:gpt-4o"));
+        ChatModel withTokenB = provider.resolve(ModelRef.parse("copilot:gpt-4o"));
+
+        org.junit.jupiter.api.Assertions.assertNotSame(withTokenA, withTokenB,
+                "a refreshed Copilot token rebuilds the model (the token is baked in at build time)");
+    }
 }

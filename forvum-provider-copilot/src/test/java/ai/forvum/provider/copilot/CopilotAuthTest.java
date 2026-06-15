@@ -69,11 +69,31 @@ class CopilotAuthTest {
         http.postResponses.add(new CopilotHttp.Resp(200, "{\"error\":\"authorization_pending\"}"));
         http.postResponses.add(new CopilotHttp.Resp(200, "{\"error\":\"slow_down\"}"));
         http.postResponses.add(new CopilotHttp.Resp(200, "{\"access_token\":\"gho_TOKEN\",\"token_type\":\"bearer\"}"));
+        List<Long> sleeps = new java.util.ArrayList<>();
+        CopilotAuth auth = new CopilotAuth(http, sleeps::add, () -> 0L);
 
-        String token = auth(http, new AtomicLong(0)).pollForAccessToken("DC", 10, 1_000_000);
+        String token = auth.pollForAccessToken("DC", 10, 1_000_000);
 
         assertEquals("gho_TOKEN", token);
         assertEquals(3, http.postCalls, "polled through pending + slow_down to the token");
+        // The 10ms interval is floored to 1000ms; slow_down adds the extra 2000ms back-off.
+        assertEquals(List.of(1000L, 3000L), sleeps,
+                "authorization_pending waits the floored interval; slow_down waits interval + 2000ms");
+    }
+
+    @Test
+    void pollFloorsAZeroOrNegativeIntervalInsteadOfBusyPollingOrThrowing() {
+        // A malformed device-code response (interval 0 or negative) must NOT busy-poll, and a negative
+        // value must NOT reach Thread.sleep (which would throw IllegalArgumentException and escape the
+        // command's CopilotAuthException catch). The interval is floored to 1000ms.
+        FakeHttp http = new FakeHttp();
+        http.postResponses.add(new CopilotHttp.Resp(200, "{\"error\":\"authorization_pending\"}"));
+        http.postResponses.add(new CopilotHttp.Resp(200, "{\"access_token\":\"gho_TOKEN\"}"));
+        List<Long> sleeps = new java.util.ArrayList<>();
+        CopilotAuth auth = new CopilotAuth(http, sleeps::add, () -> 0L);
+
+        assertEquals("gho_TOKEN", auth.pollForAccessToken("DC", -100, 1_000_000));
+        assertEquals(List.of(1000L), sleeps, "a negative interval is floored to 1000ms, never passed raw");
     }
 
     @Test
