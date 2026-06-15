@@ -35,6 +35,9 @@ public class ChannelLauncher {
     /** Channel id of the Discord channel, which (like Telegram) additionally requires a {@code botToken}. */
     static final String DISCORD_ID = "discord";
 
+    /** Channel id of the Signal channel, which requires the daemon {@code baseUrl} AND {@code account}. */
+    static final String SIGNAL_ID = "signal";
+
     /**
      * Channel id of the Matrix channel, which requires a {@code homeserver}, an {@code accessToken},
      * AND a {@code userId} (Matrix {@code /sync} echoes the bot's own sends, so
@@ -54,21 +57,23 @@ public class ChannelLauncher {
      * Per-channel config keys that must ALL be present and non-blank for the channel to count as
      * serving. Generalizes the original single {@code botToken} gate: each credential-gated channel
      * declares its own key set (Slack needs {@code botToken}+{@code appToken}, Matrix
-     * {@code homeserver}+{@code accessToken}+{@code userId}, Signal {@code baseUrl} — each entry lands
-     * WITH its channel module, never before, or an enabled config for an absent module would hang the
-     * binary in server mode serving nothing, the M17 trap). A channel with no entry has no key
-     * requirement. The keys mirror each channel's own {@code onStart} gate (whatever makes it warn +
-     * no-op makes it non-serving here), so they are not strictly credentials — Matrix's {@code userId}
-     * is the bot's own identity, required for its self-echo filter.
+     * {@code homeserver}+{@code accessToken}+{@code userId}, Signal {@code baseUrl}+{@code account} —
+     * each entry lands WITH its channel module, never before, or an enabled config for an absent module
+     * would hang the binary in server mode serving nothing, the M17 trap). A channel with no entry has
+     * no key requirement. The keys mirror each channel's own {@code onStart} gate (whatever makes it
+     * warn + no-op makes it non-serving here), so they are not strictly credentials — Matrix's
+     * {@code userId} is the bot's own identity, required for its self-echo filter.
      */
     static final Map<String, Set<String>> REQUIRED_SERVE_KEYS = Map.of(
             TELEGRAM_ID, Set.of("botToken"),
             DISCORD_ID, Set.of("botToken"),
             SLACK_ID, Set.of("botToken", "appToken"),
-            MATRIX_ID, Set.of("homeserver", "accessToken", "userId"));
+            MATRIX_ID, Set.of("homeserver", "accessToken", "userId"),
+            SIGNAL_ID, Set.of("baseUrl", "account"));
 
     /** Channel ids whose enablement keeps the process alive to serve. */
-    static final Set<String> SERVER_CHANNELS = Set.of("web", TELEGRAM_ID, DISCORD_ID, SLACK_ID, MATRIX_ID);
+    static final Set<String> SERVER_CHANNELS =
+            Set.of("web", TELEGRAM_ID, DISCORD_ID, SLACK_ID, MATRIX_ID, SIGNAL_ID);
 
     /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.
