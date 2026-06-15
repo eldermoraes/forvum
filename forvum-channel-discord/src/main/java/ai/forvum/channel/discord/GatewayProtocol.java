@@ -5,6 +5,7 @@ import ai.forvum.channel.discord.dto.Hello;
 import ai.forvum.channel.discord.dto.Identify;
 import ai.forvum.channel.discord.dto.MessageCreate;
 import ai.forvum.channel.discord.dto.Ready;
+import ai.forvum.channel.discord.dto.Resume;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,6 +31,7 @@ public final class GatewayProtocol {
     public static final int OP_DISPATCH = 0;
     public static final int OP_HEARTBEAT = 1;
     public static final int OP_IDENTIFY = 2;
+    public static final int OP_RESUME = 6;
     public static final int OP_RECONNECT = 7;
     public static final int OP_INVALID_SESSION = 9;
     public static final int OP_HELLO = 10;
@@ -49,15 +51,26 @@ public final class GatewayProtocol {
 
     // --- Dispatch event names (op 0) -------------------------------------------------------------
     static final String EVENT_READY = "READY";
+    static final String EVENT_RESUMED = "RESUMED";
     static final String EVENT_MESSAGE_CREATE = "MESSAGE_CREATE";
 
     /** What the endpoint should do in response to an inbound frame. A sealed, exhaustive decision. */
     public sealed interface Reaction
-            permits SendIdentify, MessageReceived, Reconnect, ReIdentify, Acknowledged, Ignored {
+            permits SendIdentify, SendResume, MessageReceived, Reconnect, ReIdentify, Acknowledged,
+            Ignored {
     }
 
-    /** HELLO arrived: send IDENTIFY and arm the heartbeat loop at {@code heartbeatIntervalMillis}. */
+    /** HELLO arrived with no resumable session: send IDENTIFY (a fresh session) and arm the heartbeat
+     *  loop at {@code heartbeatIntervalMillis}. */
     public record SendIdentify(long heartbeatIntervalMillis) implements Reaction {
+    }
+
+    /**
+     * HELLO arrived with a {@linkplain GatewayState#canResume() resumable session}: send RESUME (op 6,
+     * continuing the captured session — the gateway replays missed events then dispatches
+     * {@code RESUMED}) and arm the heartbeat loop at {@code heartbeatIntervalMillis}.
+     */
+    public record SendResume(long heartbeatIntervalMillis) implements Reaction {
     }
 
     /** A MESSAGE_CREATE dispatch decoded into its payload — the endpoint drives a turn from it. */
@@ -107,7 +120,11 @@ public final class GatewayProtocol {
         return switch (payload.op()) {
             case OP_HELLO -> {
                 Hello hello = mapper.convertValue(payload.d(), Hello.class);
-                yield new SendIdentify(hello.heartbeatInterval());
+                // A resumable session (READY captured + a non-resumable INVALID_SESSION has NOT reset
+                // it) continues via RESUME; otherwise a fresh session opens via IDENTIFY.
+                yield state.canResume()
+                        ? new SendResume(hello.heartbeatInterval())
+                        : new SendIdentify(hello.heartbeatInterval());
             }
             case OP_DISPATCH -> dispatch(mapper, payload);
             case OP_RECONNECT -> new Reconnect();
@@ -130,8 +147,10 @@ public final class GatewayProtocol {
             case EVENT_MESSAGE_CREATE ->
                     new MessageReceived(mapper.convertValue(payload.d(), MessageCreate.class));
             // READY's session/resume capture is done by the endpoint (it needs the typed Ready); here we
-            // simply acknowledge so the seq is recorded.
+            // simply acknowledge so the seq is recorded. RESUMED (the gateway finished replaying missed
+            // events after an op 6) is likewise acknowledged; the endpoint resets the backoff on it.
             case EVENT_READY -> new Acknowledged();
+            case EVENT_RESUMED -> new Acknowledged();
             default -> new Ignored();
         };
     }
@@ -144,6 +163,15 @@ public final class GatewayProtocol {
     /** Encode the {@code op 2} IDENTIFY frame for {@code token} with Forvum's intents. */
     public static String encodeIdentify(ObjectMapper mapper, String token) {
         return encodeFrame(mapper, OP_IDENTIFY, Identify.of(token, FORVUM_INTENTS));
+    }
+
+    /**
+     * Encode the {@code op 6} RESUME frame continuing {@code sessionId} from {@code lastSequence}
+     * (the gateway replays every later event, then dispatches {@code RESUMED}).
+     */
+    public static String encodeResume(ObjectMapper mapper, String token, String sessionId,
+            long lastSequence) {
+        return encodeFrame(mapper, OP_RESUME, new Resume(token, sessionId, lastSequence));
     }
 
     /**

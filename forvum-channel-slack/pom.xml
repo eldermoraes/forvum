@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.forvum</groupId>
+        <artifactId>forvum-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forvum-channel-slack</artifactId>
+
+    <name>Forvum Channel — Slack</name>
+    <description>Layer-3 Forvum extension: the Slack channel (P2-CH). A hand-rolled minimal Slack Socket
+        Mode client over quarkus-websockets-next (CLIENT mode, plain JSON) drives turns through the
+        engine's ChannelTurnDriver (the SDK turn-driver contract); the socket URL is obtained from
+        apps.connections.open (app-level xapp- token) and replies go out via chat.postMessage (bot xoxb-
+        token) over a blocking quarkus-rest-client-jackson client — no Bolt SDK, no AI library, no engine
+        dependency. allowedUserIds in channels/slack.json refuses other users with a friendly message.</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Layer-1 plugin SPI: the ONLY ai.forvum dependency a Layer-3 extension carries (enforced
+             below). The channel injects the SDK ChannelTurnDriver contract — it never depends on the
+             engine. Version managed by forvum-bom. A slack channel uses no langchain4j. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
+        <!-- CDI (ArC): @ApplicationScoped bean discovery. Version via Quarkus platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- Slack Socket Mode is a persistent WebSocket; quarkus-websockets-next CLIENT mode
+             (@WebSocketClient) is the native-clean transport the Discord channel (P2-CH) already proved.
+             The client connects to the TEMPORARY wss URL returned by apps.connections.open, acks
+             events_api envelopes, and drives turns on a virtual thread (@RunOnVirtualThread inbound
+             frames). Version via platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-websockets-next</artifactId>
+        </dependency>
+        <!-- Blocking REST client + Jackson binding for the Slack Web API (apps.connections.open to mint
+             the socket URL; chat.postMessage to reply). Per CLAUDE.md §3.8 the channel uses the BLOCKING
+             REST client on a virtual thread, never a reactive return type (Mutiny/Multi is a PR-reject).
+             Version via platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-client-jackson</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Quarkus codegen + dev/test bootstrap. No `build` goal: forvum-channel-slack is a
+                 Layer-3 library, never a runnable artifact (that is forvum-app). The absent `build` goal
+                 (no runnable app) is what makes Quarkus skip quarkus:dev on this module as a "support
+                 library" (same as forvum-engine / forvum-channel-web / -telegram / -discord), so the
+                 Dev-UI test runner cannot attach and its @QuarkusTest *IT run under Surefire in the
+                 reactor build (CLAUDE.md §4 exception). -->
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- A @QuarkusTest *IT here boots Quarkus in-JVM (no HTTP server needed); it also
+                         runs through the reactor build under Surefire (CI `verify`). -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <excludes>
+                                <!-- @WebSocketClient Socket Mode endpoint: framework-callback-coupled (onText/
+                                     onOpen/onClose are invoked by the WebSocket runtime against a live Slack
+                                     socket), exercised by the live socket path, not unit-Surefire-coverable; no
+                                     CI live test (no tokens). The pure decode/encode logic lives in
+                                     SlackSocketProtocol (well unit-tested) and the reconnect policy in
+                                     Backoff/SlackChannelReconnectTest — the same justified exclusion as the
+                                     Discord channel's DiscordGatewayEndpoint. -->
+                                <exclude>ai/forvum/channel/slack/SlackSocketEndpoint.class</exclude>
+                            </excludes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <!-- Measured 86.26% after excluding the endpoint — the global gate
+                                                 holds with no per-module relaxation. -->
+                                            <minimum>${jacoco.line.minimum}</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <!-- Measured 84.85% after excluding the endpoint. -->
+                                            <minimum>${jacoco.branch.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-plugin-layering</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- Allowlist form (consistent with the provider/web/telegram/discord
+                                         modules): ban every ai.forvum module, re-allow forvum-sdk +
+                                         forvum-core. The channel injects ChannelTurnDriver (an SDK
+                                         contract carrying only forvum-core types), so it depends on
+                                         forvum-sdk + forvum-core only; forvum-engine, another extension,
+                                         and the app stay banned. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                        <include>ai.forvum:forvum-core</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>A Forvum channel (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ChannelMessage/AgentEvent in the ChannelTurnDriver SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
