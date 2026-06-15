@@ -14,8 +14,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 
 /**
  * {@link SkillInstaller#install}: download (file:// + http://), validate through the real
@@ -131,5 +133,63 @@ class SkillInstallerTest {
         assertThrows(SkillSpecException.class, () -> installer.install(url, skills));
         // parse() throws BEFORE the installer creates the skills dir / writes — so nothing landed.
         assertFalse(Files.exists(skills), "a malformed skill must not create the skills dir or any file");
+    }
+
+    @Test
+    void aTraversalFrontMatterNameIsSanitizedAndStaysUnderTheSkillsDir(@TempDir Path tmp)
+            throws IOException {
+        Path remote = Files.createDirectories(tmp.resolve("remote"));
+        Path skills = tmp.resolve("skills");
+        String evil = "---\n{ \"name\": \"../../etc/evil\", \"description\": \"x\" }\n---\nbody\n";
+        String url = fileUrl(remote, "innocent.md", evil);
+
+        SkillInstallResult result = installer.install(url, skills);
+
+        assertFalse(result.id().contains("/"), "the id must carry no path separator");
+        assertFalse(result.id().contains(".."), "the id must carry no parent-dir token");
+        Path normalizedSkills = skills.toAbsolutePath().normalize();
+        assertTrue(result.path().toAbsolutePath().normalize().startsWith(normalizedSkills),
+                "the written file must stay under the skills dir; got " + result.path());
+        assertEquals(normalizedSkills, result.path().toAbsolutePath().normalize().getParent(),
+                "the file must be a DIRECT child of skills/ (no traversal up or down)");
+    }
+
+    @Test
+    void aNameThatSanitizesToEmptyIsRejected(@TempDir Path tmp) throws IOException {
+        Path remote = Files.createDirectories(tmp.resolve("remote"));
+        // name ".." → only dots/dashes → stripped to empty → no derivable id.
+        String url = fileUrl(remote, "dots.md", "---\n{ \"name\": \"..\" }\n---\nbody\n");
+        assertThrows(SkillInstallException.class, () -> installer.install(url, tmp.resolve("skills")));
+    }
+
+    @Test
+    void theInstalledSkillIsOwnerOnly(@TempDir Path tmp) throws IOException {
+        boolean posix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+        if (!posix) {
+            return; // permission bits are a POSIX concern (the production code is POSIX-guarded too)
+        }
+        Path remote = Files.createDirectories(tmp.resolve("remote"));
+        Path skills = tmp.resolve("skills");
+        SkillInstallResult result = installer.install(fileUrl(remote, "x.md", VALID_SKILL), skills);
+
+        assertEquals(PosixFilePermissions.fromString("rw-------"),
+                Files.getPosixFilePermissions(result.path()), "the skill file must be 0600");
+        assertEquals(PosixFilePermissions.fromString("rwx------"),
+                Files.getPosixFilePermissions(skills), "the skills dir must be 0700");
+    }
+
+    @Test
+    void reinstallingTheSameSkillOverwritesIt(@TempDir Path tmp) throws IOException {
+        Path remote = Files.createDirectories(tmp.resolve("remote"));
+        Path skills = tmp.resolve("skills");
+        installer.install(fileUrl(remote, "v1.md",
+                "---\n{ \"name\": \"sum\" }\n---\nVersion one"), skills);
+        SkillInstallResult second = installer.install(fileUrl(remote, "v2.md",
+                "---\n{ \"name\": \"sum\" }\n---\nVersion two"), skills);
+
+        assertEquals("sum", second.id());
+        assertTrue(Files.readString(second.path()).contains("Version two"),
+                "a re-install with the same id overwrites (upgrade semantics)");
+        assertFalse(Files.readString(second.path()).contains("Version one"));
     }
 }

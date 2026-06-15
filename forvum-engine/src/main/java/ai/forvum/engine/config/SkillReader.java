@@ -70,6 +70,9 @@ public class SkillReader {
      */
     public static SkillSpec parse(String label, String markdown) {
         String body = markdown == null ? "" : markdown;
+        if (!body.isEmpty() && body.charAt(0) == 0xFEFF) {
+            body = body.substring(1); // strip a leading UTF-8 BOM (Windows editors / git-raw exports)
+        }
         String[] lines = body.split("\n", -1);
 
         int open = 0;
@@ -129,7 +132,11 @@ public class SkillReader {
     }
 
     private static Optional<String> nonBlank(JsonNode root, String field) {
+        // Only a present, TEXTUAL, non-blank value counts: a JSON null (NullNode.asText() == "null"),
+        // a number, or a boolean is treated as absent rather than coerced to a literal string.
         JsonNode node = root.get(field);
-        return node == null || node.asText().isBlank() ? Optional.empty() : Optional.of(node.asText());
+        return node == null || !node.isTextual() || node.asText().isBlank()
+                ? Optional.empty()
+                : Optional.of(node.asText());
     }
 }

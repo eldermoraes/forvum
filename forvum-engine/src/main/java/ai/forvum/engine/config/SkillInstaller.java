@@ -34,7 +34,9 @@ public class SkillInstaller {
     private static final Set<PosixFilePermission> FILE_PERMS = PosixFilePermissions.fromString("rw-------");
 
     /**
-     * Download, validate, and install the skill at {@code source} into {@code skillsDir}.
+     * Download, validate, and install the skill at {@code source} into {@code skillsDir}. Re-installing a
+     * skill with the same derived id OVERWRITES the existing file (upgrade semantics) — the validation
+     * gate runs first, so a malformed re-install never clobbers a good skill.
      *
      * @throws SkillInstallException on an invalid/unsupported URL, a download failure, an undeterminable
      *         id, or a write failure
@@ -85,6 +87,10 @@ public class SkillInstaller {
                         "downloading " + source + " returned HTTP " + response.statusCode() + ".");
                 }
                 return response.body();
+            }
+            if (scheme.isEmpty()) {
+                throw new SkillInstallException("skill source '" + source + "' has no URL scheme — "
+                        + "prefix a local path with 'file://', or use an http/https URL.");
             }
             throw new SkillInstallException(
                 "unsupported skill URL scheme '" + scheme + "' (use http, https, or file).");

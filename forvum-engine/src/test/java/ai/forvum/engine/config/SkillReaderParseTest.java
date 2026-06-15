@@ -1,7 +1,6 @@
 package ai.forvum.engine.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -105,6 +104,32 @@ class SkillReaderParseTest {
     void leadingBlankLinesBeforeTheFenceStillParse() {
         SkillSpec spec = SkillReader.parse("padded", "\n\n---\n{ \"name\": \"x\" }\n---\nbody");
         assertEquals("x", spec.name().orElseThrow());
+        assertEquals("body", spec.template());
+    }
+
+    @Test
+    void aJsonNullOrNonStringNameIsTreatedAsAbsentNotCoerced() {
+        // A present JSON null must NOT become the literal "null"; a number must NOT become "42".
+        assertTrue(SkillReader.parse("n", "---\n{ \"name\": null }\n---\nbody").name().isEmpty(),
+                "a JSON null name is absent, not the string \"null\"");
+        assertTrue(SkillReader.parse("n", "---\n{ \"name\": 42 }\n---\nbody").name().isEmpty(),
+                "a non-string name is absent, not coerced");
+        assertTrue(SkillReader.parse("n", "---\n{ \"description\": null }\n---\nb").description().isEmpty());
+    }
+
+    @Test
+    void crlfLineEndingsAreHandled() {
+        SkillSpec spec = SkillReader.parse("crlf",
+                "---\r\n{ \"name\": \"crlfskill\" }\r\n---\r\nThe template body\r\n");
+        assertEquals("crlfskill", spec.name().orElseThrow(), "a trailing \\r must not defeat the fence");
+        assertEquals("The template body", spec.template());
+    }
+
+    @Test
+    void aLeadingByteOrderMarkDoesNotDefeatFrontMatterDetection() {
+        String withBom = (char) 0xFEFF + "---\n{ \"name\": \"bomskill\" }\n---\nbody";
+        SkillSpec spec = SkillReader.parse("bom", withBom);
+        assertEquals("bomskill", spec.name().orElseThrow(), "a leading UTF-8 BOM is stripped");
         assertEquals("body", spec.template());
     }
 }
