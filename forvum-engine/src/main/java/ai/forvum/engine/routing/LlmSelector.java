@@ -10,6 +10,8 @@ import ai.forvum.sdk.ModelProvider;
 
 import dev.langchain4j.model.chat.ChatModel;
 
+import io.opentelemetry.api.trace.Tracer;
+
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -36,6 +38,9 @@ public class LlmSelector {
     @Inject
     ProviderCallRecorder recorder;
 
+    @Inject
+    Tracer tracer;
+
     /** Resolve {@code persona}'s primary model to a fallback-wrapped {@link ChatModel} for the turn. */
     public ChatModel select(Persona persona, String sessionId) {
         return resolve(persona.primaryModel(), persona.id().value(), sessionId);
@@ -50,7 +55,7 @@ public class LlmSelector {
         ModelProvider provider = providerFor(ref);
         ChatModel resolved = provider.resolve(ref);
         FallbackLink link = new FallbackLink(ref, resolved, null);
-        return new FallbackChatModel(List.of(link), sessionId, agentId, classifier, recorder, null);
+        return new FallbackChatModel(List.of(link), sessionId, agentId, classifier, recorder, null, tracer);
     }
 
     private ModelProvider providerFor(ModelRef ref) {

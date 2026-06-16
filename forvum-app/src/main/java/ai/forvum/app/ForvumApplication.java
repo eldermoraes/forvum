@@ -39,6 +39,16 @@ public class ForvumApplication implements QuarkusApplication {
         if (CommandMode.isOneShotCommand(args)) {
             System.setProperty("quarkus.http.host-enabled", "false");
         }
+        // P2-15 (#40): OTLP export is opt-in via OTEL_EXPORTER_OTLP_ENDPOINT. With no endpoint configured,
+        // disable the OTel SDK at runtime so a default run pays zero telemetry overhead and skips the
+        // resource-detection getLocalHost() path. Same M20 lever as host-enabled: a system property set
+        // before Quarkus boots (sdk.disabled is read at RUNTIME_INIT). Set-only-if-absent leaves an
+        // operator -Dquarkus.otel.sdk.disabled override (and a configured endpoint turns the SDK on).
+        String otlpEndpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT");
+        if ((otlpEndpoint == null || otlpEndpoint.isBlank())
+                && System.getProperty("quarkus.otel.sdk.disabled") == null) {
+            System.setProperty("quarkus.otel.sdk.disabled", "true");
+        }
         Quarkus.run(ForvumApplication.class, args);
     }
 

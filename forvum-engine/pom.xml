@@ -56,6 +56,15 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-scheduler</artifactId>
         </dependency>
+        <!-- P2-15 (#40): OpenTelemetry tracing — the §3.6 four-span baseline (@WithSpan on Agent.respond /
+             ToolExecutor.execute / SupervisorGraph.run; a programmatic Tracer span on FallbackChatModel.chat),
+             each carrying thread.is_virtual. The OTLP exporter is gated by OTEL_EXPORTER_OTLP_ENDPOINT
+             (configured in forvum-app), default-off, so a default run pays zero telemetry overhead. Version
+             via the platform BOM — never pinned. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-opentelemetry</artifactId>
+        </dependency>
 
         <!-- M5 persistence: SQLite via Hibernate ORM Panache + Flyway. SQLite has no Quarkus JDBC
              extension, so it is wired as an "Other database" (db-kind=other + bare Xerial driver +
@@ -105,6 +114,13 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- P2-15: InMemorySpanExporter to assert the turn-path spans in TurnSpanIT. Version via the
+             OpenTelemetry BOM imported transitively by quarkus-opentelemetry. -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

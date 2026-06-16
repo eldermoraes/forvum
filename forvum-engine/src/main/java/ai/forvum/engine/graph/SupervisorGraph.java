@@ -23,6 +23,9 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
+
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -99,7 +102,13 @@ public class SupervisorGraph {
     ObjectMapper mapper;
 
     /** Run one turn through the compiled graph, returning the final assistant text. */
+    @WithSpan("forvum.graph.run")
     public String run(GraphTurnRequest request) {
+        // §3.6 baseline: name the supervisor-graph span + mark its carrier (no-op when the SDK is disabled).
+        Span.current()
+                .setAttribute("forvum.session.id", request.sessionId())
+                .setAttribute("forvum.agent.id", request.agentId().value())
+                .setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
         Turn turn = new Turn(request, toolCallBridge.specificationsFor(request.belt()));
         String finalText;
         try {
