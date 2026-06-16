@@ -77,14 +77,34 @@ class PairCommandTest {
     }
 
     @Test
+    void approveWithoutReasonClearsAStaleDecisionReason(QuarkusMainLauncher launcher) {
+        LaunchResult result = launcher.launch("pair", "approve", "phonestale");
+
+        Assertions.assertEquals(0, result.exitCode(), () -> "stderr: " + result.getErrorOutput());
+        Assertions.assertEquals(null, decisionReason("phonestale"),
+                "approve with no --reason must clear the stale prior reason");
+    }
+
+    @Test
+    void aNonObjectDeviceFileFailsCleanlyNotCrash(QuarkusMainLauncher launcher) {
+        LaunchResult result = launcher.launch("pair", "approve", "phonebad");
+
+        Assertions.assertEquals(1, result.exitCode(), "a non-object device file must fail cleanly");
+        Assertions.assertTrue(result.getErrorOutput().contains("not a JSON object"),
+                () -> "must surface a contextual error, not a stack trace; stderr: " + result.getErrorOutput());
+    }
+
+    @Test
     void devicesListsRequestedVsApprovedAndFlagsDrift(QuarkusMainLauncher launcher) {
         LaunchResult result = launcher.launch("devices");
 
         Assertions.assertEquals(0, result.exitCode(), () -> "stderr: " + result.getErrorOutput());
         String out = result.getOutput();
-        Assertions.assertTrue(out.contains("phonedrift"), () -> "must list the device; got: " + out);
-        Assertions.assertTrue(out.contains("DRIFT"),
-                () -> "a requested-but-unapproved scope must be flagged DRIFT; got: " + out);
+        // Bind the DRIFT flag to the device-under-test's own line — a DRIFT elsewhere must not pass this.
+        String driftLine = out.lines().filter(l -> l.contains("phonedrift")).findFirst().orElse("");
+        Assertions.assertFalse(driftLine.isEmpty(), () -> "must list phonedrift; got: " + out);
+        Assertions.assertTrue(driftLine.contains("DRIFT"),
+                () -> "the phonedrift line must be flagged DRIFT; got: " + driftLine);
     }
 
     private static JsonNode device(String id) {
@@ -128,6 +148,12 @@ class PairCommandTest {
                 write(devices, "phonereject", "[\"FS_READ\"]", null);
                 write(devices, "phonenotreq", "[\"FS_READ\"]", null);
                 write(devices, "phonedrift", "[\"FS_READ\",\"FS_WRITE\"]", "[\"FS_READ\"]");
+                // carries a stale decisionReason: approving without --reason must clear it.
+                Files.writeString(devices.resolve("phonestale.json"),
+                        "{\"identityId\":\"alice\",\"requestedScopes\":[\"FS_READ\"],"
+                      + "\"decisionReason\":\"old reason\"}");
+                // a non-object device file (a JSON array): commands must fail cleanly, never crash.
+                Files.writeString(devices.resolve("phonebad.json"), "[\"not\",\"an\",\"object\"]");
                 return home;
             } catch (IOException e) {
                 throw new UncheckedIOException(e);

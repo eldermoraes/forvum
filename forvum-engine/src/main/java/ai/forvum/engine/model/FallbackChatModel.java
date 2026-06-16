@@ -8,6 +8,7 @@ import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.FallbackTriggered;
 
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 
@@ -76,6 +77,12 @@ public final class FallbackChatModel implements ChatModel {
         span.setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
         try (Scope scope = span.makeCurrent()) {
             return doChat(request, span);
+        } catch (RuntimeException e) {
+            // The chain was exhausted (or hit a request-level failure) — mark the span so a trace shows
+            // the failed model call, not a silently-OK span.
+            span.setStatus(StatusCode.ERROR, e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            span.recordException(e);
+            throw e;
         } finally {
             span.end();
         }

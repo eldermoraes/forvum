@@ -209,7 +209,9 @@ public final class ConfigDoctor {
                 findings.add(new Finding(Severity.ERROR, location, e.getMessage(), "Fix " + location + "."));
                 continue;
             }
-            if (device.hasScopeDrift()) {
+            // A revoked device was decided (rejected), so it is not an upgrade "awaiting approval" — only
+            // a live device with requested-but-unapproved scopes is a pending upgrade doctor should flag.
+            if (!device.revoked() && device.hasScopeDrift()) {
                 Set<PermissionScope> pending = new TreeSet<>(device.requestedScopes());
                 pending.removeAll(device.approvedScopes());
                 findings.add(new Finding(Severity.WARNING, location,

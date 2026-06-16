@@ -46,7 +46,13 @@ public class PairApproveCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        Optional<ObjectNode> existing = store.read(deviceId);
+        Optional<ObjectNode> existing;
+        try {
+            existing = store.read(deviceId);
+        } catch (RuntimeException e) {
+            System.err.println("pair approve failed: " + e.getMessage());
+            return 1;
+        }
         if (existing.isEmpty()) {
             System.err.println("pair approve failed: device '" + deviceId + "' is not paired (no devices/"
                     + deviceId + ".json). Pair it first.");
@@ -89,8 +95,12 @@ public class PairApproveCommand implements Callable<Integer> {
             approvedArray.add(scope.name());
         }
         node.put("revoked", false);
+        // decisionReason records the LAST decision: set it when given, else clear any stale prior reason
+        // (e.g. a previous rejection's "too broad") so it never misreports why the device is in its state.
         if (reason != null && !reason.isBlank()) {
             node.put("decisionReason", reason);
+        } else {
+            node.remove("decisionReason");
         }
         store.write(deviceId, node);
 

@@ -40,14 +40,15 @@ public class DevicesCommand implements Callable<Integer> {
         }
         DeviceSpecReader specReader = new DeviceSpecReader();
         for (String id : ids) {
-            Optional<ObjectNode> node = store.read(id);
-            if (node.isEmpty()) {
-                continue; // listed but vanished between list and read
-            }
             Device device;
             try {
+                Optional<ObjectNode> node = store.read(id);
+                if (node.isEmpty()) {
+                    continue; // listed but vanished between list and read
+                }
                 device = specReader.parse(id, node.get());
-            } catch (IllegalStateException e) {
+            } catch (RuntimeException e) {
+                // a non-object/malformed device file or a bad scope name → one clean line, never a crash
                 System.out.printf("%-16s  (invalid: %s)%n", id, e.getMessage());
                 continue;
             }

@@ -279,6 +279,21 @@ class ConfigDoctorTest {
     }
 
     @Test
+    void aRevokedDeviceWithUnapprovedScopesIsNotReportedAsPending() throws IOException {
+        writeValidMainAgent();
+        write("devices/phone.json",
+                "{\"identityId\":\"alice\",\"requestedScopes\":[\"FS_READ\"],\"approvedScopes\":[],"
+              + "\"revoked\":true}");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.healthy());
+        assertFalse(hasWarning(report, "devices/phone.json"),
+                () -> "a revoked device is decided (rejected), not a pending upgrade; findings: "
+                        + report.findings());
+    }
+
+    @Test
     void aMalformedDeviceScopeIsAnError() throws IOException {
         writeValidMainAgent();
         write("devices/phone.json",

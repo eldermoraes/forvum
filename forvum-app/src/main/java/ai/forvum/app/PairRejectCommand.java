@@ -33,7 +33,13 @@ public class PairRejectCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        Optional<ObjectNode> existing = store.read(deviceId);
+        Optional<ObjectNode> existing;
+        try {
+            existing = store.read(deviceId);
+        } catch (RuntimeException e) {
+            System.err.println("pair reject failed: " + e.getMessage());
+            return 1;
+        }
         if (existing.isEmpty()) {
             System.err.println("pair reject failed: device '" + deviceId + "' is not paired (no devices/"
                     + deviceId + ".json).");
@@ -41,8 +47,11 @@ public class PairRejectCommand implements Callable<Integer> {
         }
         ObjectNode node = existing.get();
         node.put("revoked", true);
+        // decisionReason records the LAST decision: set it when given, else clear any stale prior reason.
         if (reason != null && !reason.isBlank()) {
             node.put("decisionReason", reason);
+        } else {
+            node.remove("decisionReason");
         }
         store.write(deviceId, node);
         System.out.println("Rejected device '" + deviceId + "' (revoked)"

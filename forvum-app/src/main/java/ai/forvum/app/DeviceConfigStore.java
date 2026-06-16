@@ -2,6 +2,7 @@ package ai.forvum.app;
 
 import ai.forvum.engine.config.ForvumHome;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -65,11 +66,19 @@ public class DeviceConfigStore {
         if (!Files.isRegularFile(file)) {
             return Optional.empty();
         }
+        JsonNode node;
         try {
-            return Optional.of((ObjectNode) MAPPER.readTree(Files.readString(file)));
+            node = MAPPER.readTree(Files.readString(file));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+        // A device file that parses but is not a JSON object (an array, a scalar) would otherwise
+        // ClassCastException on the cast — surface a clean, contextual error the commands turn into exit 1.
+        if (node == null || !node.isObject()) {
+            throw new IllegalStateException(
+                    "devices/" + id + ".json is not a JSON object. A device file must be a JSON object.");
+        }
+        return Optional.of((ObjectNode) node);
     }
 
     /** Write {@code node} to {@code devices/<id>.json} owner-only (0600), creating the dir owner-only. */
