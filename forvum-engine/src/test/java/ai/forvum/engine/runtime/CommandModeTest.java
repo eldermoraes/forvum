@@ -29,6 +29,10 @@ class CommandModeTest {
                 "'mcp' reads/writes mcp-servers/ only — it must skip the DB/watcher/cron boot (P2-13)");
         assertTrue(CommandMode.isOneShotCommand(new String[] {"copilot", "login"}),
                 "'copilot' device-code logs in + writes a credential file — it must skip the DB/watcher boot (#42)");
+        assertTrue(CommandMode.isOneShotCommand(new String[] {"pair", "approve", "phone"}),
+                "'pair' only reads/writes devices/ — it must skip the DB/watcher/cron boot (#44)");
+        assertTrue(CommandMode.isOneShotCommand(new String[] {"devices"}),
+                "'devices' only lists devices/ — it must skip the DB/watcher/cron boot (#44)");
     }
 
     @Test
