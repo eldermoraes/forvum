@@ -7,7 +7,8 @@ import jakarta.inject.Inject;
 
 /**
  * Detects a <em>one-shot CLI command</em> ({@code --help}/{@code --version}/{@code init}/{@code doctor}/
- * {@code plugin}/{@code skill}/{@code mcp}/{@code copilot}) from the process arguments (M20). Such an
+ * {@code plugin}/{@code skill}/{@code mcp}/{@code copilot}/{@code pair}/{@code devices}) from the process
+ * arguments (M20). Such an
  * invocation prints +
  * exits without running an agent turn, so the heavy {@code @Observes StartupEvent} work — Flyway
  * migration, the config {@code WatchService}, cron scheduling, AND the {@code ToolRegistry} tool
@@ -28,8 +29,10 @@ import jakarta.inject.Inject;
  *
  * <p>The recognized set is the app's own CLI surface: the picocli-universal {@code --help}/{@code -h}/
  * {@code --version}/{@code -V} plus the app-defined {@code init}, {@code doctor}, {@code plugin},
- * {@code skill}, {@code mcp}, and {@code copilot} subcommands. It must stay in sync with {@code RootCommand}
- * (which owns them); only canonical single-token
+ * {@code skill}, {@code mcp}, {@code copilot}, {@code pair}, and {@code devices} subcommands ({@code pair}
+ * approves/rejects a paired device's requested scopes and {@code devices} lists them — both only read/write
+ * {@code ~/.forvum/devices/}, so neither needs the DB or watcher). It must stay in sync with
+ * {@code RootCommand} (which owns them); only canonical single-token
  * forms are matched — a non-canonical input (e.g. clustered {@code -hV}) merely pays the full boot once,
  * never misbehaves.
  */
@@ -56,7 +59,7 @@ public class CommandMode {
                 // downloads+writes a .md, 'mcp' (P2-13) reads/writes mcp-servers/, and 'copilot' (#42)
                 // device-code logs in + writes a credential file — none needs the DB/watcher.
                 case "--help", "-h", "--version", "-V", "init", "doctor", "plugin", "skill", "mcp",
-                        "copilot" -> {
+                        "copilot", "pair", "devices" -> {
                     return true;
                 }
                 default -> {

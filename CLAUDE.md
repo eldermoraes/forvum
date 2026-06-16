@@ -1177,3 +1177,75 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `CopilotHttp` + a `RecordingCreds` stub (extends `CopilotCredentials` through its public ctor, overrides
   `storeGitHubToken`); jacoco-exclude only `JdkCopilotHttp` (live transport) and add a few error-branch
   tests (the OAuth flow is dense with defensive null/status branches → branch coverage needs them). [P2-COPILOT]
+- **The DR-6a §9.2 `OutputFilter` is a sealed-disposition value in core + a sealed SPI in the SDK + an
+  engine-only enforcement surface — the egress is filtered, the memory transcript is NOT.** P2-OUTPUTGUARD
+  (#48): `FilteringOutcome` (sealed `Allowed`/`Redacted`/`Blocked`) lives in `forvum-core` (registered for
+  native from `CoreReflectionRegistration` §6.3, NOT `@RegisterForReflection` — core bans `io.quarkus*`);
+  `OutputGuard` (sealed, `permits AbstractOutputGuard`) + `OutputContext`/`HookLayer` live in `forvum-sdk`
+  ROOT package (mirroring `ModelProvider`, Quarkus-free); `OutputFilteredException` is engine-local,
+  mirroring `BudgetExhaustedException`'s behavioral pattern (unchecked, engine-caught terminal
+  short-circuit) but NOT a Layer-0 value. The engine `OutputGuardChain` folds guards **fail-closed +
+  most-restrictive-wins** (any `Blocked` dominates `Redacted` dominates `Allowed`; redactions chain
+  forward + union; a guard that throws or returns null folds to `Blocked`). The default `SecretRedactionGuard`
+  is **on by default** (opt-out `forvum.output-guard.secret-redaction.enabled=false`) and only ever
+  Redacts (full Block is reserved for policy guards v0.1 does not ship). Hook is `TurnService.dispatch`
+  AFTER `agent.respond` returns and BEFORE emitting `TokenDelta`/`Done` (the pre-channel-emit seam,
+  `HookLayer.PRE_CHANNEL_EMIT` — the only one wired; `PRE_MEMORY_WRITE` is reserved, so the model
+  transcript already persisted by `agent.respond` keeps the raw secret — only the channel egress is
+  masked). A `Blocked` throws `OutputFilteredException`, caught by a NEW catch arm BEFORE the generic
+  `RuntimeException` arm → `ErrorEvent(code="output_filtered")` on the `FallbackReasons.FILTERED` path.
+  **TRAP (a green module build hid it):** a test-only blocking guard declared `@Alternative @Priority(N)`
+  is enabled APP-WIDE (CDI: an alternative WITH a priority is global), so it blocked EVERY `@QuarkusTest`'s
+  egress → 6 unrelated turn ITs flipped to a 1-event ErrorEvent. Isolate a test alternative with
+  `@Alternative` and NO `@Priority`, enabled per-test via `QuarkusTestProfile.getEnabledAlternatives()`.
+  `SecretRedactor` is pure (unit-tested without CDI): conservative regexes keyed on scheme prefixes that do
+  not occur in prose (`sk-`/`xox[baprs]-`/`gh[posru]_`/`AIza`/`AKIA`/PEM blocks/`Bearer <opaque>`), each
+  match → prefix + `***`, exact count, null/empty safe. **JaCoCo trap (CI-only):** adding the `OutputContext`
+  record (a canonical-ctor null-check = executable lines + a branch) to the previously logic-free
+  `forvum-sdk` broke its vacuously-passing coverage gate — and `verify` runs the JaCoCo `check` while
+  `test` does NOT, so a green local `test` still fails CI. RUN `./mvnw verify` (not just `test`) before
+  pushing. Fix honestly: a test for the new executable type (`OutputContextTest` covers the validation +
+  the `HookLayer` enum) and extend the bridge exclude to `Abstract*.class` (`AbstractOutputGuard` is a
+  logic-free `non-sealed` bridge like the `Abstract*Provider`s). New CLI command branches (`pair`/`devices`
+  error/`--reason` paths) also pushed `forvum-app` branch coverage under its 0.70 override → cover the
+  cheap JVM-reachable ones (approve `--reason`, reject-without-reason, invalid id) rather than relax. [P2-OUTPUTGUARD]
+- **"Scope-upgrade approval" is CLI governance + visibility ONLY this PR — the turn-path enforcement of
+  `approvedScopes` is deferred to #39 (ratified), so do not wire a third `ToolExecutor` gate here.**
+  P2-PAIR-SCOPE (#44): `Device` grows `requestedScopes`/`approvedScopes` (`Set<PermissionScope>`) +
+  `decisionReason`; a 4-arg ctor delegates to the 7-arg (backward compatible, a scope-less device file
+  still parses, no migration). `forvum pair approve|reject` + `forvum devices` are `CommandMode` one-shots
+  (file-only, no DB/watcher — keep them in sync with `RootCommand`). `DeviceConfigStore` is the
+  `McpAddCommand` 0600-file recipe + a `safeId` anti-traversal guard, editing the parsed `ObjectNode` so
+  unknown JSON fields survive, and parsing through the SAME `DeviceSpecReader` the engine/doctor use (no
+  parallel schema). `ConfigDoctor.checkDevices` reuses `DeviceReader`+`DeviceSpecReader` as the oracle and
+  warns on drift. **TRAPS the 6-dim review caught (all green-for-wrong-reason / unguarded edges):** (1)
+  `decisionReason` must reflect the LAST decision — approve/reject with no `--reason` must CLEAR a stale
+  prior reason (else an approve shows an old rejection's reason); (2) `store.read()` casting the top-level
+  JSON to `ObjectNode` crashes with a raw stack trace on a non-object device file — validate `isObject()`
+  and surface a contextual error the commands turn into a clean exit 1 / `(invalid: …)` line; (3) doctor
+  must NOT report a REVOKED device as "a pending upgrade awaiting approval" (it was decided/rejected) —
+  gate the drift warning on `!revoked`. Pin each with a regression test (stale-reason device, non-object
+  file, revoked-with-drift device). [P2-PAIR-SCOPE]
+- **The §3.6 four-span OTel baseline is `@WithSpan` on the three CDI beans + a PROGRAMMATIC span on the one
+  plain object, and it is OFF BY DEFAULT via the M20 `main()` system-property lever — so it adds zero
+  cold-start cost.** P2-15 (#40): `forvum.agent.turn` (`Agent.respond`), `forvum.tool.call`
+  (`ToolExecutor.execute`), `forvum.graph.run` (`SupervisorGraph.run`) via `@WithSpan`; `forvum.llm.call`
+  via a `Tracer` span in `FallbackChatModel.chat` — a plain object, so the `Tracer` is injected into
+  `LlmSelector` and passed through a NEW 7-arg ctor (the 6-arg ctor delegates with a null tracer, leaving
+  the 7 unit-test call-sites untouched; a null tracer skips the span). Each span carries
+  `thread.is_virtual` (`Thread.currentThread().isVirtual()`). `Agent.respond` annotates BOTH overloads
+  (2-arg channel entry, 3-arg cron entry) and sets attributes in the 3-arg via `Span.current()` — a CDI
+  self-invocation (`this.respond(...)`) does NOT re-intercept, so the 2-arg's span is the active one and
+  there is exactly one turn span on either entry. **Off-by-default:** `ForvumApplication.main` sets
+  `quarkus.otel.sdk.disabled=true` (set-only-if-absent) before `Quarkus.run` when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is unset (the host-enabled lever's twin — `sdk.disabled` is RUNTIME_INIT
+  config, too early for a `StartupEvent`); the SDK-off path makes every `Span.current()`/`@WithSpan` a
+  no-op, skips OTel resource detection, and keeps the native cold-start ~70 ms (gate 200 ms). dev/test set
+  `%dev`/`%test.quarkus.otel.sdk.disabled=true`; engine tests default it off via a new
+  `forvum-engine/src/test/resources/application.properties`, and `TurnSpanIT` re-enables it
+  (`getConfigOverrides`) with a profile-scoped `@Produces InMemorySpanExporter` + a deterministic
+  `OpenTelemetrySdk.getSdkTracerProvider().forceFlush().join(...)` (no sleep/poll). **TRAP the review
+  caught:** OTel `Context` is thread-local and does NOT cross the worker virtual-thread fan-out (the same
+  reason `CURRENT_AGENT` is re-bound in the worker), so a spawned worker's spans orphan — capture
+  `Context parent = Context.current()` before the loop and submit `parent.wrap(task)`. `opentelemetry-sdk-testing`
+  resolves via the OTel BOM transitive to `quarkus-opentelemetry` (no pin). [P2-15]

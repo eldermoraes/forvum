@@ -17,6 +17,9 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -74,6 +77,7 @@ public class Agent {
      * written only <em>after</em> a successful turn, so a failed turn leaves no orphan rows (the failed
      * attempt is still ledgered in {@code provider_calls} by the fallback decorator).
      */
+    @WithSpan("forvum.agent.turn")
     public String respond(String sessionId, String userText) {
         return respond(sessionId, userText, null);
     }
@@ -83,8 +87,17 @@ public class Agent {
      * model when non-null — the M19 cron path runs a turn with the cron's own model (distinct from the
      * agent's default). All other behavior (session, memory, graph, CAPR) is identical.
      */
+    @WithSpan("forvum.agent.turn")
     public String respond(String sessionId, String userText, ChatModel modelOverride) {
         AgentId id = CurrentAgent.CURRENT_AGENT.get();
+        // §3.6 baseline: name the turn span and mark its carrier (Span.current() is the @WithSpan span,
+        // whether created here on the cron path or by the 2-arg overload on the channel path — a no-op
+        // span when the SDK is disabled, the default). thread.is_virtual distinguishes the VT carrier
+        // (every channel/cron turn) for the §3.8 Concurrency view.
+        Span.current()
+                .setAttribute("forvum.agent.id", id.value())
+                .setAttribute("forvum.session.id", sessionId)
+                .setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
         sessions.ensureSession(sessionId, id);
 
         Persona persona = registry.persona(id);

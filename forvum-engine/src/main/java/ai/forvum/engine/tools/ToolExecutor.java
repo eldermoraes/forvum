@@ -8,6 +8,9 @@ import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.model.ToolInvocation;
 import ai.forvum.engine.model.ToolInvocationRecorder;
 
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
+
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -51,8 +54,14 @@ public class ToolExecutor {
      * @throws PermissionDeniedException if the tool is not in {@code belt}, or its required scope is
      *         outside the caller's bound effective scopes (the action is not run in either case)
      */
+    @WithSpan("forvum.tool.call")
     public String execute(String sessionId, AgentId agentId, List<ToolSpec> belt,
             String toolName, String arguments, Supplier<String> action) {
+        // §3.6 baseline: name the tool span + mark its carrier (no-op when the SDK is disabled, the default).
+        Span.current()
+                .setAttribute("forvum.tool.name", toolName)
+                .setAttribute("forvum.agent.id", agentId.value())
+                .setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
         long createdAt = System.currentTimeMillis();
         ToolSpec tool = belt.stream().filter(spec -> spec.name().equals(toolName)).findFirst().orElse(null);
         if (tool == null) {

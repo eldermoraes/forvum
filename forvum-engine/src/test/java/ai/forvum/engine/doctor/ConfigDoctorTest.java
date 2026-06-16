@@ -251,6 +251,62 @@ class ConfigDoctorTest {
     }
 
     @Test
+    void aDeviceWithAPendingScopeUpgradeIsAWarning() throws IOException {
+        writeValidMainAgent();
+        write("devices/phone.json",
+                "{\"identityId\":\"alice\",\"requestedScopes\":[\"FS_READ\",\"FS_WRITE\"],"
+              + "\"approvedScopes\":[\"FS_READ\"]}");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.healthy(), () -> "pending scope upgrade is advisory, not fatal; findings: "
+                + report.findings());
+        assertTrue(hasWarning(report, "devices/phone.json"),
+                () -> "a device with requested-but-unapproved scopes must warn; findings: " + report.findings());
+    }
+
+    @Test
+    void aFullyApprovedDeviceProducesNoFinding() throws IOException {
+        writeValidMainAgent();
+        write("devices/phone.json",
+                "{\"identityId\":\"alice\",\"requestedScopes\":[\"FS_READ\"],\"approvedScopes\":[\"FS_READ\"]}");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.healthy());
+        assertFalse(hasWarning(report, "devices/phone.json"),
+                () -> "a settled device must produce no drift warning; findings: " + report.findings());
+    }
+
+    @Test
+    void aRevokedDeviceWithUnapprovedScopesIsNotReportedAsPending() throws IOException {
+        writeValidMainAgent();
+        write("devices/phone.json",
+                "{\"identityId\":\"alice\",\"requestedScopes\":[\"FS_READ\"],\"approvedScopes\":[],"
+              + "\"revoked\":true}");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.healthy());
+        assertFalse(hasWarning(report, "devices/phone.json"),
+                () -> "a revoked device is decided (rejected), not a pending upgrade; findings: "
+                        + report.findings());
+    }
+
+    @Test
+    void aMalformedDeviceScopeIsAnError() throws IOException {
+        writeValidMainAgent();
+        write("devices/phone.json",
+                "{\"identityId\":\"alice\",\"requestedScopes\":[\"FS_TELEPORT\"]}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(hasError(report, "devices/phone.json"),
+                () -> "an unknown device scope must be an error; findings: " + report.findings());
+    }
+
+    @Test
     void aMalformedRootConfigIsAnError() throws IOException {
         writeValidMainAgent();
         write("config.json", "{ broken ");

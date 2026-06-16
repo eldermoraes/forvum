@@ -1,5 +1,6 @@
 package ai.forvum.engine.doctor;
 
+import ai.forvum.core.PermissionScope;
 import ai.forvum.core.Persona;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.agent.AgentSpecReader;
@@ -8,9 +9,12 @@ import ai.forvum.engine.config.ChannelReader;
 import ai.forvum.engine.config.ConfigFileReader;
 import ai.forvum.engine.config.ConfigLoader;
 import ai.forvum.engine.config.CronReader;
+import ai.forvum.engine.config.DeviceReader;
 import ai.forvum.engine.config.ForvumHome;
 import ai.forvum.engine.cron.CronSpec;
 import ai.forvum.engine.cron.CronSpecReader;
+import ai.forvum.engine.pairing.Device;
+import ai.forvum.engine.pairing.DeviceSpecReader;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.UncheckedIOException;
@@ -72,6 +76,7 @@ public final class ConfigDoctor {
         checkRawJsonDirectory(findings, home.identities(), "identities");
         checkRawJsonDirectory(findings, home.channels(), "channels");
         checkRawJsonDirectory(findings, home.mcpServers(), "mcp-servers");
+        checkDevices(findings);
         checkRootConfig(findings);
 
         return new DoctorReport(findings);
@@ -173,6 +178,48 @@ public final class ConfigDoctor {
                 loader.readJson(dir.resolve(id + ".json"));
             } catch (UncheckedIOException e) {
                 findings.add(malformed(location, e));
+            }
+        }
+    }
+
+    /**
+     * Surface a pending device scope upgrade (P2-PAIR-SCOPE #44) as a WARNING: a device that requested a
+     * scope the owner has not approved is awaiting an explicit {@code forvum pair approve}. A malformed
+     * device file (bad JSON, unknown scope) is an ERROR via the same reader oracle used elsewhere.
+     */
+    private void checkDevices(List<Finding> findings) {
+        DeviceReader reader = new DeviceReader(loader, home);
+        DeviceSpecReader specReader = new DeviceSpecReader();
+        for (String id : reader.ids()) {
+            String location = "devices/" + id + ".json";
+            JsonNode node;
+            try {
+                node = reader.read(id).orElse(null);
+            } catch (UncheckedIOException e) {
+                findings.add(malformed(location, e));
+                continue;
+            }
+            if (node == null) {
+                continue;
+            }
+            Device device;
+            try {
+                device = specReader.parse(id, node);
+            } catch (IllegalStateException e) {
+                findings.add(new Finding(Severity.ERROR, location, e.getMessage(), "Fix " + location + "."));
+                continue;
+            }
+            // A revoked device was decided (rejected), so it is not an upgrade "awaiting approval" — only
+            // a live device with requested-but-unapproved scopes is a pending upgrade doctor should flag.
+            if (!device.revoked() && device.hasScopeDrift()) {
+                Set<PermissionScope> pending = new TreeSet<>(device.requestedScopes());
+                pending.removeAll(device.approvedScopes());
+                findings.add(new Finding(Severity.WARNING, location,
+                        "Device '" + id + "' has a pending scope upgrade: requested "
+                      + new TreeSet<>(device.requestedScopes()) + " but approved "
+                      + new TreeSet<>(device.approvedScopes()) + " (awaiting " + pending + ")",
+                        "Approve with `forvum pair approve " + id + "`, or reject it with "
+                      + "`forvum pair reject " + id + "`."));
             }
         }
     }

@@ -23,6 +23,10 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
+
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -99,7 +103,13 @@ public class SupervisorGraph {
     ObjectMapper mapper;
 
     /** Run one turn through the compiled graph, returning the final assistant text. */
+    @WithSpan("forvum.graph.run")
     public String run(GraphTurnRequest request) {
+        // §3.6 baseline: name the supervisor-graph span + mark its carrier (no-op when the SDK is disabled).
+        Span.current()
+                .setAttribute("forvum.session.id", request.sessionId())
+                .setAttribute("forvum.agent.id", request.agentId().value())
+                .setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
         Turn turn = new Turn(request, toolCallBridge.specificationsFor(request.belt()));
         String finalText;
         try {
@@ -255,11 +265,16 @@ public class SupervisorGraph {
     }
 
     private Map<String, Object> workerRun(GraphState state, Turn turn) {
+        // Capture the turn's OTel context so each worker's spans (its forvum.llm.call) nest under the turn
+        // trace rather than orphaning — OTel context is thread-local and does NOT cross the VT fan-out
+        // (the same reason CURRENT_AGENT is re-bound inside the worker). A no-op when the SDK is disabled.
+        Context parent = Context.current();
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<Future<?>> futures = new ArrayList<>(turn.spawns.size());
             for (SpawnRequest spawn : turn.spawns) {
-                futures.add(executor.submit(() -> turn.digests.put(spawn.request().id(),
-                        workerRunner.runWorker(spawn.childId(), spawn.task(), turn.sessionId))));
+                Runnable task = () -> turn.digests.put(spawn.request().id(),
+                        workerRunner.runWorker(spawn.childId(), spawn.task(), turn.sessionId));
+                futures.add(executor.submit(parent.wrap(task)));
             }
             for (Future<?> future : futures) {
                 future.get();
