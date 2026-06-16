@@ -11,9 +11,13 @@ import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.pairing.DeviceRegistry;
+import ai.forvum.engine.security.OutputFilteredException;
+import ai.forvum.engine.security.OutputGuardChain;
 import ai.forvum.engine.session.compaction.CompactionPolicy;
 import ai.forvum.engine.session.compaction.SessionCompactor;
 import ai.forvum.sdk.ChannelTurnDriver;
+import ai.forvum.sdk.HookLayer;
+import ai.forvum.sdk.OutputContext;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;
@@ -84,6 +88,9 @@ public class TurnService implements ChannelTurnDriver {
     @Inject
     DeviceRegistry devices;
 
+    @Inject
+    OutputGuardChain outputGuards;
+
     /**
      * Drive a turn for an inbound {@link ChannelMessage}, rendering it to {@code sink}. The session is
      * keyed {@code channelId:nativeUserId} (one conversation per user per channel) and carries the
@@ -136,10 +143,24 @@ public class TurnService implements ChannelTurnDriver {
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, effectiveScopes)
                     .call(() -> agent.respond(sessionId, message.content()));
 
+            // P2-OUTPUTGUARD pre-channel-emit seam (DR-6a §9.2): run the composed OutputGuard chain over
+            // the reply before it reaches the channel. A Redacted disposition returns the masked text (the
+            // user still gets an answer, minus the secret); a Blocked disposition throws
+            // OutputFilteredException, caught below as a terminal output_filtered error rather than leak.
+            // Only the EGRESS is filtered — the model transcript already persisted by agent.respond is
+            // untouched (PRE_MEMORY_WRITE is reserved, not wired in v0.1).
+            String egress = outputGuards.enforce(
+                    new OutputContext(HookLayer.PRE_CHANNEL_EMIT, agentId, turnId), reply);
+
             ModelRef model = registry.persona(agentId).primaryModel();
             Instant now = Instant.now();
-            sink.accept(new TokenDelta(now, reply, model));
-            sink.accept(new Done(now, turnId, reply));
+            sink.accept(new TokenDelta(now, egress, model));
+            sink.accept(new Done(now, turnId, egress));
+        } catch (OutputFilteredException filtered) {
+            // An OutputGuard suppressed the egress rather than leak a secret/PII. Surface the turn on the
+            // FallbackReasons.FILTERED path as a terminal output_filtered ErrorEvent — never the candidate.
+            sink.accept(ErrorEvent.from(Instant.now(), turnId, "output_filtered",
+                    filtered.getMessage(), filtered));
         } catch (RuntimeException e) {
             // A failed turn (model/network failure, fallback exhaustion, a persistence error) must not
             // escape a self-driving channel's callback. Surface it as a terminal ErrorEvent; the failed

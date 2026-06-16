@@ -17,6 +17,7 @@ import ai.forvum.core.TaskStatus;
 import ai.forvum.core.TaskType;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.event.FallbackTriggered;
+import ai.forvum.core.security.FilteringOutcome;
 import ai.forvum.core.budget.CostBudget;
 import ai.forvum.core.budget.DayWindow;
 import ai.forvum.core.budget.ExhaustionCause;
@@ -61,7 +62,11 @@ import ai.forvum.core.id.Identity;
         MemoryQuery.class,
         MemoryHit.class,
         RetrievalStrategy.class,
-        MemoryTier.class
+        MemoryTier.class,
+        FilteringOutcome.class,
+        FilteringOutcome.Allowed.class,
+        FilteringOutcome.Redacted.class,
+        FilteringOutcome.Blocked.class
 })
 public final class CoreReflectionRegistration {
     private CoreReflectionRegistration() {
