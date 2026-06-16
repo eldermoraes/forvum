@@ -1200,7 +1200,15 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `@Alternative` and NO `@Priority`, enabled per-test via `QuarkusTestProfile.getEnabledAlternatives()`.
   `SecretRedactor` is pure (unit-tested without CDI): conservative regexes keyed on scheme prefixes that do
   not occur in prose (`sk-`/`xox[baprs]-`/`gh[posru]_`/`AIza`/`AKIA`/PEM blocks/`Bearer <opaque>`), each
-  match → prefix + `***`, exact count, null/empty safe. [P2-OUTPUTGUARD]
+  match → prefix + `***`, exact count, null/empty safe. **JaCoCo trap (CI-only):** adding the `OutputContext`
+  record (a canonical-ctor null-check = executable lines + a branch) to the previously logic-free
+  `forvum-sdk` broke its vacuously-passing coverage gate — and `verify` runs the JaCoCo `check` while
+  `test` does NOT, so a green local `test` still fails CI. RUN `./mvnw verify` (not just `test`) before
+  pushing. Fix honestly: a test for the new executable type (`OutputContextTest` covers the validation +
+  the `HookLayer` enum) and extend the bridge exclude to `Abstract*.class` (`AbstractOutputGuard` is a
+  logic-free `non-sealed` bridge like the `Abstract*Provider`s). New CLI command branches (`pair`/`devices`
+  error/`--reason` paths) also pushed `forvum-app` branch coverage under its 0.70 override → cover the
+  cheap JVM-reachable ones (approve `--reason`, reject-without-reason, invalid id) rather than relax. [P2-OUTPUTGUARD]
 - **"Scope-upgrade approval" is CLI governance + visibility ONLY this PR — the turn-path enforcement of
   `approvedScopes` is deferred to #39 (ratified), so do not wire a third `ToolExecutor` gate here.**
   P2-PAIR-SCOPE (#44): `Device` grows `requestedScopes`/`approvedScopes` (`Set<PermissionScope>`) +

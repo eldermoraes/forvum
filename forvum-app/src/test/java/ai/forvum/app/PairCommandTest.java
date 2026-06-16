@@ -77,6 +77,33 @@ class PairCommandTest {
     }
 
     @Test
+    void approveWithAReasonRecordsIt(QuarkusMainLauncher launcher) {
+        LaunchResult result = launcher.launch("pair", "approve", "phonereason", "--reason", "trusted device");
+
+        Assertions.assertEquals(0, result.exitCode(), () -> "stderr: " + result.getErrorOutput());
+        Assertions.assertEquals("trusted device", decisionReason("phonereason"));
+    }
+
+    @Test
+    void rejectWithoutReasonStillRevokesAndClearsAStaleReason(QuarkusMainLauncher launcher) {
+        LaunchResult result = launcher.launch("pair", "reject", "phonerej2");
+
+        Assertions.assertEquals(0, result.exitCode(), () -> "stderr: " + result.getErrorOutput());
+        Assertions.assertTrue(revoked("phonerej2"), "reject must revoke even with no reason");
+        Assertions.assertEquals(null, decisionReason("phonerej2"),
+                "reject with no --reason must clear the stale prior reason");
+    }
+
+    @Test
+    void anInvalidDeviceIdFailsCleanly(QuarkusMainLauncher launcher) {
+        LaunchResult result = launcher.launch("pair", "approve", ".");
+
+        Assertions.assertEquals(1, result.exitCode(), "a path-traversal-ish id must be refused");
+        Assertions.assertTrue(result.getErrorOutput().contains("Invalid device id"),
+                () -> "must reject the id, not resolve it; stderr: " + result.getErrorOutput());
+    }
+
+    @Test
     void approveWithoutReasonClearsAStaleDecisionReason(QuarkusMainLauncher launcher) {
         LaunchResult result = launcher.launch("pair", "approve", "phonestale");
 
@@ -154,6 +181,11 @@ class PairCommandTest {
                       + "\"decisionReason\":\"old reason\"}");
                 // a non-object device file (a JSON array): commands must fail cleanly, never crash.
                 Files.writeString(devices.resolve("phonebad.json"), "[\"not\",\"an\",\"object\"]");
+                write(devices, "phonereason", "[\"FS_READ\"]", null);   // approve --reason records it
+                // reject without --reason must still revoke and clear a stale reason.
+                Files.writeString(devices.resolve("phonerej2.json"),
+                        "{\"identityId\":\"alice\",\"requestedScopes\":[\"FS_READ\"],"
+                      + "\"decisionReason\":\"earlier\"}");
                 return home;
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
