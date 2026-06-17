@@ -72,9 +72,15 @@ class CdpFrameRouterTest {
 
     @Test
     void aResponseToAForgottenCommandIsSilentlyIgnored() {
-        // No pending future for id 9 (it was forgotten/timed out); the frame must not throw or be routed.
+        // The future for id 9 was forgotten (timed out); a late response must neither throw nor complete
+        // the abandoned future (it is no longer in the pending map).
         CdpFrameRouter router = router();
-        router.onFrame("{\"id\":9,\"result\":{}}"); // no exception
+        CompletableFuture<JsonNode> abandoned = router.awaitResponse(9L);
+        router.forget(9L);
+
+        router.onFrame("{\"id\":9,\"result\":{}}");
+
+        assertFalse(abandoned.isDone(), "a late response to a forgotten id must complete nothing");
     }
 
     @Test
@@ -86,10 +92,12 @@ class CdpFrameRouterTest {
     @Test
     void forgetDropsAPendingIdSoItDoesNotLeak() {
         CdpFrameRouter router = router();
-        router.awaitResponse(3L);
+        CompletableFuture<JsonNode> future = router.awaitResponse(3L);
         router.forget(3L);
-        // A later response to the forgotten id is ignored (no future to complete).
+        // A later response to the forgotten id is ignored (no future left in the map to complete).
         router.onFrame("{\"id\":3,\"result\":{}}");
+
+        assertFalse(future.isDone(), "after forget, a late response to that id leaves the future uncompleted");
     }
 
     @Test

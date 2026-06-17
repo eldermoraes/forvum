@@ -1,6 +1,7 @@
 package ai.forvum.tools.browser;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -80,6 +81,20 @@ class BrowserOperationsTest {
         assertEquals("https://forvum.ai",
                 cdp.sent.get(1).params().get("url").asText(), "the navigate carries the url");
         assertTrue(out.contains("https://forvum.ai"));
+    }
+
+    @Test
+    void navigateClearsAStaleLoadEventSoASubsequentWaitDoesNotShortCircuit() {
+        // A Page.loadEventFired buffered from a PRIOR navigation in the same session must be dropped by the
+        // next navigate, or wait() would short-circuit to "complete" on the stale event while the NEW page
+        // is still loading. Goes red if navigate() omits clearLoadEvents().
+        FakeCdpExecutor cdp = new FakeCdpExecutor(c -> emptyResult());
+        cdp.loadEvent = true;
+
+        new BrowserOperations(cdp).navigate("https://forvum.ai");
+
+        assertFalse(cdp.loadEventSeen(),
+                "navigate must drop the prior navigation's buffered load event");
     }
 
     @Test

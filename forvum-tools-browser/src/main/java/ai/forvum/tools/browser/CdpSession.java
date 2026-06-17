@@ -175,6 +175,17 @@ public class CdpSession implements CdpExecutor {
             Thread.currentThread().interrupt();
             router.forget(command.id());
             throw new CdpException("Interrupted awaiting CDP command '" + command.method() + "'.", e);
+        } catch (RuntimeException e) {
+            // Mutiny's sendTextAndAwait rethrows a socket-write failure as a RAW RuntimeException (not
+            // wrapped in CompletionException) — e.g. the connection dropped between ensureConnected() and
+            // the write. The pending future was already registered, so forget it (no map leak) and surface
+            // it as a CdpException so invoke() relays it gracefully instead of it escaping as a generic
+            // turn error. (A CompletionException — itself a RuntimeException — is handled by the arm above.)
+            router.forget(command.id());
+            if (e instanceof CdpException cdp) {
+                throw cdp;
+            }
+            throw new CdpException("CDP command '" + command.method() + "' failed: " + e.getMessage(), e);
         }
     }
 

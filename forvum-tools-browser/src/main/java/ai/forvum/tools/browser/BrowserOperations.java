@@ -30,6 +30,9 @@ public final class BrowserOperations {
 
     /** Navigate to {@code url}; returns a short confirmation with the final frame's URL where available. */
     public String navigate(String url) {
+        // Drop any Page.loadEventFired buffered from a PRIOR navigation in this session, so a subsequent
+        // wait() can't short-circuit to "complete" on the stale event while THIS page is still loading.
+        cdp.clearLoadEvents();
         cdp.send(cdp.protocol().pageEnable());
         JsonNode result = cdp.send(cdp.protocol().pageNavigate(url));
         JsonNode error = result == null ? null : result.get("errorText");
