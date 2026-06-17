@@ -10,6 +10,7 @@ import ai.forvum.core.ModelRef;
 import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.Done;
 import ai.forvum.core.event.TokenDelta;
+import ai.forvum.sdk.ApprovalContext;
 import ai.forvum.sdk.ChannelTurnDriver;
 
 import org.junit.jupiter.api.Test;
@@ -151,6 +152,67 @@ class TuiChannelReplTest {
         channel.repl(in("/exit\nyo\n"), out(new ByteArrayOutputStream()), TuiView.plain(), false);
 
         assertEquals(List.of("/exit", "yo"), driver.dispatched);
+    }
+
+    /** A driver that reads the bound {@link ApprovalContext#PROMPTER}'s decision (the TTY approval path). */
+    private static final class PromptingDriver implements ChannelTurnDriver {
+        Boolean decision;
+
+        @Override
+        public void dispatch(ChannelMessage message, Consumer<AgentEvent> sink) {
+            if (ApprovalContext.PROMPTER.isBound()) {
+                decision = ApprovalContext.PROMPTER.get().promptApproval("main", "shell.exec", "{}");
+            }
+            sink.accept(new Done(Instant.EPOCH, UUID.randomUUID(), "ok"));
+        }
+    }
+
+    /** A driver that records whether {@link ApprovalContext#NON_INTERACTIVE} was bound true. */
+    private static final class NonInteractiveProbeDriver implements ChannelTurnDriver {
+        boolean nonInteractive;
+
+        @Override
+        public void dispatch(ChannelMessage message, Consumer<AgentEvent> sink) {
+            nonInteractive = ApprovalContext.NON_INTERACTIVE.orElse(Boolean.FALSE);
+            sink.accept(new Done(Instant.EPOCH, UUID.randomUUID(), "ok"));
+        }
+    }
+
+    @Test
+    void interactiveReplBindsAConsolePrompterThatApprovesOnYes() {
+        // P2-14 #39 TTY fallback: an interactive REPL binds a console prompter; the next stdin line answers
+        // the confirmation. "do it" is the turn; "y" is the approval the prompter reads.
+        PromptingDriver driver = new PromptingDriver();
+        TuiChannel channel = new TuiChannel();
+        channel.turns = driver;
+
+        channel.repl(in("do it\ny\n"), out(new ByteArrayOutputStream()), TuiView.plain(), true);
+
+        assertEquals(Boolean.TRUE, driver.decision, "a 'y' answer must approve the parked tool call");
+    }
+
+    @Test
+    void interactiveReplPrompterRejectsOnAnythingButYes() {
+        PromptingDriver driver = new PromptingDriver();
+        TuiChannel channel = new TuiChannel();
+        channel.turns = driver;
+
+        channel.repl(in("do it\nn\n"), out(new ByteArrayOutputStream()), TuiView.plain(), true);
+
+        assertEquals(Boolean.FALSE, driver.decision, "an 'n' answer must reject the parked tool call");
+    }
+
+    @Test
+    void pipedReplDeniesConfirmRequiredToolsNonInteractively() {
+        // A piped (non-TTY) session cannot prompt, so it binds the non-interactive flag → the engine denies
+        // a confirm-required tool immediately rather than block.
+        NonInteractiveProbeDriver driver = new NonInteractiveProbeDriver();
+        TuiChannel channel = new TuiChannel();
+        channel.turns = driver;
+
+        channel.repl(in("do it\n"), out(new ByteArrayOutputStream()), TuiView.plain(), false);
+
+        assertTrue(driver.nonInteractive, "a piped TUI turn must bind NON_INTERACTIVE so confirm tools deny");
     }
 
     @Test

@@ -4,6 +4,7 @@ import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.event.Done;
 import ai.forvum.core.event.ErrorEvent;
 import ai.forvum.engine.pairing.DeviceRegistry;
+import ai.forvum.sdk.ApprovalContext;
 import ai.forvum.sdk.ChannelTurnDriver;
 
 import jakarta.inject.Inject;
@@ -61,19 +62,22 @@ public class AskCommand implements Callable<Integer> {
         // terminal event only: Done -> the reply to stdout (exit 0); ErrorEvent -> a diagnostic to stderr
         // (exit 1). The failed turn is already ledgered in provider_calls by the model decorator (M7).
         int[] exitCode = {0};
-        turns.dispatch(message, event -> {
-            switch (event) {
-                case Done done -> System.out.println(done.finalMessage());
-                case ErrorEvent error -> {
-                    System.err.println("ask failed [" + error.code() + "]: " + error.message());
-                    exitCode[0] = 1;
-                }
-                default -> {
-                    // Intermediate events (TokenDelta, tool events) are not rendered by the one-shot ask;
-                    // the full reply arrives on Done. True per-token streaming is a later, non-breaking upgrade.
-                }
-            }
-        });
+        // P2-14 #39: ask is a one-shot with no human at the keyboard mid-turn and no dashboard requester, so
+        // a confirm-required tool must deny immediately rather than block for an approval that never arrives.
+        ScopedValue.where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE).run(() ->
+                turns.dispatch(message, event -> {
+                    switch (event) {
+                        case Done done -> System.out.println(done.finalMessage());
+                        case ErrorEvent error -> {
+                            System.err.println("ask failed [" + error.code() + "]: " + error.message());
+                            exitCode[0] = 1;
+                        }
+                        default -> {
+                            // Intermediate events (TokenDelta, tool events) are not rendered by the one-shot
+                            // ask; the full reply arrives on Done. Per-token streaming is a later upgrade.
+                        }
+                    }
+                }));
         return exitCode[0];
     }
 
