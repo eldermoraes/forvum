@@ -1,0 +1,7 @@
+{
+  "extension_id": "voice",
+  "module_name": "forvum-channel-voice",
+  "providers": [
+    { "type": "channel", "class": "ai.forvum.channel.voice.VoiceChannelProvider" }
+  ]
+}

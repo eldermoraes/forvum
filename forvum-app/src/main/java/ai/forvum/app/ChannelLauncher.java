@@ -61,6 +61,15 @@ public class ChannelLauncher {
     static final String WHATSAPP_ID = "whatsapp";
 
     /**
+     * Channel id of the Voice channel, which requires the operator-installed {@code whisperBin} +
+     * {@code whisperModel} (STT) AND {@code piperBin} + {@code piperVoice} (TTS) to serve. Mirrors
+     * {@code VoiceChannel.onStart}, which gates on {@code Spec.isReady()} — all FOUR present — and warns +
+     * no-ops otherwise, so an enabled config with only the two binaries (no models) must not count as
+     * serving or the binary would hang in server mode serving nothing (the M17 trap).
+     */
+    static final String VOICE_ID = "voice";
+
+    /**
      * Per-channel config keys that must ALL be present and non-blank for the channel to count as
      * serving. Generalizes the original single {@code botToken} gate: each credential-gated channel
      * declares its own key set (Slack needs {@code botToken}+{@code appToken}, Matrix
@@ -78,11 +87,12 @@ public class ChannelLauncher {
             SLACK_ID, Set.of("botToken", "appToken"),
             MATRIX_ID, Set.of("homeserver", "accessToken", "userId"),
             SIGNAL_ID, Set.of("baseUrl", "account"),
-            WHATSAPP_ID, Set.of("verifyToken", "appSecret", "accessToken", "phoneNumberId"));
+            WHATSAPP_ID, Set.of("verifyToken", "appSecret", "accessToken", "phoneNumberId"),
+            VOICE_ID, Set.of("whisperBin", "whisperModel", "piperBin", "piperVoice"));
 
     /** Channel ids whose enablement keeps the process alive to serve. */
     static final Set<String> SERVER_CHANNELS =
-            Set.of("web", TELEGRAM_ID, DISCORD_ID, SLACK_ID, MATRIX_ID, SIGNAL_ID, WHATSAPP_ID);
+            Set.of("web", TELEGRAM_ID, DISCORD_ID, SLACK_ID, MATRIX_ID, SIGNAL_ID, WHATSAPP_ID, VOICE_ID);
 
     /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.

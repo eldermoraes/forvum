@@ -163,6 +163,15 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-channel-whatsapp</artifactId>
         </dependency>
+        <!-- Layer-3 Voice channel (P2-3 / #28): a file-drop inbox/outbox channel doing STT via an
+             operator-installed whisper.cpp binary and TTS via piper, both driven as external subprocesses
+             through java.lang.ProcessBuilder. The JVM links no audio codec (the binaries consume/produce
+             WAV themselves), so the channel's native surface is just ProcessBuilder + java.nio + a
+             virtual-thread poll loop — all already proven native. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-channel-voice</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>

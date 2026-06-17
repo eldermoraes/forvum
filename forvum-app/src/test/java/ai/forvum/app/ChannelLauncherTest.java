@@ -153,6 +153,34 @@ class ChannelLauncherTest {
     }
 
     @Test
+    void voiceServesOnlyWithAllFourWhisperAndPiperKeys() {
+        // Voice declares FOUR required keys — whisperBin + whisperModel (STT), piperBin + piperVoice
+        // (TTS) — to MATCH VoiceChannel.onStart's Spec.isReady() gate (all four present). The two
+        // binaries alone are NOT enough: with the models missing, onStart warns + no-ops, so a config
+        // carrying only whisperBin + piperBin must NOT count as serving, else the binary would hang in
+        // server mode serving nothing (the M17 trap; the serve-gate must mirror isReady() exactly).
+        String full = "{ \"whisperBin\": \"/opt/whisper\", \"whisperModel\": \"/m/ggml.bin\","
+                + " \"piperBin\": \"/opt/piper\", \"piperVoice\": \"/v/voice.onnx\" }";
+        assertFalse(ChannelLauncher.serves("voice", json("{}")));
+        assertFalse(ChannelLauncher.serves("voice",
+                json("{ \"whisperBin\": \"/opt/whisper\", \"piperBin\": \"/opt/piper\" }")),
+                "the two binaries without the models must NOT serve — isReady() needs the models too");
+        assertFalse(ChannelLauncher.serves("voice",
+                json("{ \"whisperBin\": \"/opt/whisper\", \"whisperModel\": \"/m/ggml.bin\","
+                        + " \"piperBin\": \"/opt/piper\" }")), "piperVoice missing");
+        assertFalse(ChannelLauncher.serves("voice",
+                json("{ \"whisperBin\": \"/opt/whisper\", \"whisperModel\": \"/m/ggml.bin\","
+                        + " \"piperBin\": \"/opt/piper\", \"piperVoice\": \"   \" }")),
+                "a blank piperVoice counts as missing");
+        assertTrue(ChannelLauncher.serves("voice", json(full)));
+        assertFalse(ChannelLauncher.serves("voice",
+                json("{ \"enabled\": false, \"whisperBin\": \"/opt/whisper\","
+                        + " \"whisperModel\": \"/m/ggml.bin\", \"piperBin\": \"/opt/piper\","
+                        + " \"piperVoice\": \"/v/voice.onnx\" }")),
+                "a disabled channel never serves, even fully configured");
+    }
+
+    @Test
     void whatsappServesOnlyWithAllFourWebhookAndGraphKeys() {
         // WhatsApp declares FOUR required keys (verifyToken + appSecret to receive, accessToken +
         // phoneNumberId to reply): the allMatch gate must refuse a config missing any one, else an

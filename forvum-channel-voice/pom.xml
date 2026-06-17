@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.forvum</groupId>
+        <artifactId>forvum-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forvum-channel-voice</artifactId>
+
+    <name>Forvum Channel — Voice</name>
+    <description>Layer-3 Forvum extension: the Voice channel (P2-3 / #28). A self-driving FILE-DROP
+        inbox/outbox channel — NOT a live microphone — that does speech-to-text via an
+        OPERATOR-installed whisper.cpp binary and text-to-speech via an OPERATOR-installed piper binary,
+        both driven as external subprocesses through java.lang.ProcessBuilder. A background virtual-thread
+        worker polls $FORVUM_HOME/channels/voice/inbox/ for audio files; each file is transcribed (STT),
+        turned into a turn via the SDK ChannelTurnDriver, and the reply is synthesized (TTS) into
+        channels/voice/outbox/. The JVM links NO audio codec (whisper/piper consume/produce WAV
+        themselves) and touches no JNI/javax.sound.sampled, so the native-image surface is nil. No AI
+        library, no engine dependency.</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Layer-1 plugin SPI: the ONLY ai.forvum dependency a Layer-3 extension carries (enforced
+             below). The channel injects the SDK ChannelTurnDriver contract — it never depends on the
+             engine. Version managed by forvum-bom. A voice channel uses no langchain4j. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
+        <!-- CDI (ArC): @ApplicationScoped bean discovery. Version via Quarkus platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- Jackson binding used only to read channels/voice.json on demand (mirrors the Signal/Telegram
+             config reader). The voice channel makes no HTTP call — its transport is subprocess + java.nio
+             file IO — but quarkus-rest-client-jackson is the same lightweight way the sibling channels
+             pull Jackson onto the classpath. Version via the platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-client-jackson</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Quarkus codegen + dev/test bootstrap. No `build` goal: forvum-channel-voice is a
+                 Layer-3 library, never a runnable artifact (that is forvum-app). The absent `build` goal
+                 (no runnable app) is what makes Quarkus skip quarkus:dev on this module as a "support
+                 library" (same as forvum-engine / forvum-channel-signal / -telegram / -discord), so the
+                 Dev-UI test runner cannot attach and its @QuarkusTest *IT run under Surefire in the
+                 reactor build (CLAUDE.md §4 exception). -->
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- A @QuarkusTest *IT here boots Quarkus in-JVM (no HTTP server needed); it also
+                         runs through the reactor build under Surefire (CI `verify`). -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-plugin-layering</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- Allowlist form (consistent with the provider/web/telegram/discord/
+                                         signal modules): ban every ai.forvum module, re-allow forvum-sdk +
+                                         forvum-core. The channel injects ChannelTurnDriver (an SDK
+                                         contract carrying only forvum-core types), so it depends on
+                                         forvum-sdk + forvum-core only; forvum-engine, another extension,
+                                         and the app stay banned. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                        <include>ai.forvum:forvum-core</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>A Forvum channel (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ChannelMessage/AgentEvent in the ChannelTurnDriver SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
