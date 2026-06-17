@@ -112,6 +112,14 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-web</artifactId>
         </dependency>
+        <!-- Layer-3 Browser tool (P2-1, #26): a hand-rolled CDP client over quarkus-websockets-next
+             (CLIENT mode) attaching to an operator-launched Chrome (remote-debugging-port). Contributes
+             browser.navigate/snapshot/extract/wait (read-only) + browser.click/type (userConfirmRequired,
+             #39 approval gate) under PermissionScope.WEB_BROWSE. No Playwright, no langchain4j. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-browser</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>
