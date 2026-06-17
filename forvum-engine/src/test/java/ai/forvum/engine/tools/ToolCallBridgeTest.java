@@ -16,6 +16,8 @@ import ai.forvum.sdk.ToolProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.model.chat.request.json.JsonArraySchema;
+import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 
 import org.junit.jupiter.api.Test;
 
@@ -123,6 +125,31 @@ class ToolCallBridgeTest {
                 "the JSON-schema property becomes a model-facing parameter");
         assertTrue(spec.parameters().required().contains("path"),
                 "the required list is carried through");
+    }
+
+    @Test
+    void specificationsForCarriesAnArrayOfStringProperty() {
+        ToolCallBridge bridge = bridge(new InMemoryToolInvocationRecorder(), echoProvider());
+
+        // shell.exec's argv: an array of strings (the cross-cutting array-schema support of PR-6).
+        List<ToolSpecification> specs = bridge.specificationsFor(List.of(new ToolSpec(
+                "shell.exec", "Run a process", PermissionScope.SHELL_EXEC,
+                "{\"type\":\"object\",\"properties\":{"
+              + "\"argv\":{\"type\":\"array\",\"description\":\"the argv vector\","
+              + "\"items\":{\"type\":\"string\"}},"
+              + "\"workingDir\":{\"type\":\"string\"}},"
+              + "\"required\":[\"argv\"]}", true)));
+
+        ToolSpecification spec = specs.get(0);
+        var argv = spec.parameters().properties().get("argv");
+        assertTrue(argv instanceof JsonArraySchema,
+                "argv is offered to the model as a JSON array, got: " + argv);
+        assertTrue(((JsonArraySchema) argv).items() instanceof JsonStringSchema,
+                "the array items are strings (argv is an array of scalar strings)");
+        assertTrue(spec.parameters().properties().get("workingDir") instanceof JsonStringSchema,
+                "a sibling scalar string property is still a string schema");
+        assertTrue(spec.parameters().required().contains("argv"),
+                "the required array property is carried through");
     }
 
     @Test

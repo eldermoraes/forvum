@@ -48,4 +48,12 @@ class ForvumHomeTest {
 
         assertEquals(Path.of("/tmp/forvum-x/state"), home.state());
     }
+
+    @Test
+    void toolsResolvesUnderRoot() {
+        ForvumHome home = new ForvumHome(Path.of("/tmp/forvum-x"));
+
+        assertEquals(Path.of("/tmp/forvum-x/tools"), home.tools(),
+                "tools/ carries tool config such as shell.json (PR-6 #27)");
+    }
 }

@@ -54,7 +54,8 @@ public class ConfigWatcher {
 
     /** Subfolders under $FORVUM_HOME that carry hot-reloadable config; {@code state/} and {@code plugins/} are excluded. */
     private static final Set<String> WATCHED_SUBFOLDERS =
-            Set.of("identities", "agents", "skills", "crons", "channels", "mcp-servers", "roles", "devices");
+            Set.of("identities", "agents", "skills", "crons", "channels", "mcp-servers", "roles", "devices",
+                    "tools");
 
     private final ForvumHome home;
     private final Event<ConfigurationChangedEvent> emitter;

@@ -10,7 +10,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -81,7 +83,9 @@ public class ToolCallBridge {
      * name, description, and {@code parametersJsonSchema} — with NO reflection (the M18 tool_loop offers
      * these to the model). The JSON-schema string is parsed into a {@link JsonObjectSchema}; v0.1 handles
      * flat {@code string}/{@code integer}/{@code number}/{@code boolean} properties + {@code required}
-     * (the filesystem tools' shape). Richer schemas (nested objects, arrays, enums) are a later extension.
+     * (the filesystem tools' shape) plus a single-level {@code array}-of-scalar-{@code string} property
+     * (PR-6 #27: {@code shell.exec}'s {@code argv} is an array of strings). Richer schemas (nested objects,
+     * arrays of objects, enums) are a later extension.
      */
     public List<ToolSpecification> specificationsFor(List<ToolSpec> belt) {
         List<ToolSpecification> specifications = new ArrayList<>(belt.size());
@@ -125,7 +129,22 @@ public class ToolCallBridge {
             case "integer" -> schema.addIntegerProperty(name, description);
             case "number" -> schema.addNumberProperty(name, description);
             case "boolean" -> schema.addBooleanProperty(name, description);
+            case "array" -> schema.addProperty(name, arraySchema(property, description));
             default -> schema.addStringProperty(name, description);
         }
+    }
+
+    /**
+     * A single-level array property whose items are scalar strings (PR-6 #27 {@code argv}). v0.1 supports
+     * only {@code items.type == "string"}; the {@code items} node is optional and any non-string item type
+     * is treated as a string (the only array shape Forvum tools declare today). Arrays of objects/arrays
+     * are a later extension.
+     */
+    private static JsonArraySchema arraySchema(JsonNode property, String description) {
+        JsonArraySchema.Builder array = JsonArraySchema.builder().items(new JsonStringSchema());
+        if (description != null) {
+            array.description(description);
+        }
+        return array.build();
     }
 }
