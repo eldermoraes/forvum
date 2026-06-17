@@ -21,10 +21,16 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li><strong>Scrubbed environment.</strong> {@code environment().clear()} then re-add exactly
  *       {@code PATH}, {@code HOME}, {@code LANG} from the host environment (DP-10). A command needing
  *       another variable (e.g. {@code TERM}) fails — acceptable for v0.1.</li>
- *   <li><strong>Timeout + forced kill.</strong> The calling thread does {@code waitFor(timeout, SECONDS)};
- *       on expiry the process and its descendants are {@code destroyForcibly()}-ed and a
- *       {@link ShellExecException} is thrown. Enforcing the timeout on the calling thread (NOT inside the
- *       blocking stream read) is what makes the timeout actually fire for a long-running command.</li>
+ *   <li><strong>Closed stdin.</strong> The child's stdin is closed immediately after start (it is a
+ *       non-interactive exec), so an allowlisted command that reads stdin with no file operand sees EOF at
+ *       once instead of blocking until the timeout.</li>
+ *   <li><strong>Timeout + forced kill (bounded).</strong> The calling thread does
+ *       {@code waitFor(timeout, SECONDS)}; on expiry the process and its descendants are
+ *       {@code destroyForcibly()}-ed and a {@link ShellExecException} is thrown. Enforcing the timeout on
+ *       the calling thread (NOT inside the blocking stream read) is what makes the timeout actually fire.
+ *       The post-settle wait for the drain to publish is itself bounded ({@link #DRAIN_GRACE_MILLIS}) so an
+ *       escaped/daemonizing descendant that keeps the output pipe open cannot hang the turn past its
+ *       timeout.</li>
  *   <li><strong>Concurrent drain on a virtual thread.</strong> The merged (stdout+stderr) stream is read
  *       on a single dedicated {@link Thread#ofVirtual() virtual} thread, concurrently with the calling
  *       thread's {@code waitFor}, so a command emitting more than the OS pipe buffer cannot deadlock (a
@@ -40,6 +46,14 @@ public final class ShellExecutor {
 
     /** The maximum number of bytes of merged output captured before truncation (DP-10, fixed for v0.1). */
     static final int MAX_OUTPUT_BYTES = 64 * 1024;
+
+    /**
+     * Grace given to the drain thread to observe EOF after the process settles (natural exit or forced
+     * kill) before the calling thread gives up on it. Bounds the wait so a child that double-forked /
+     * reparented to init — escaping {@code descendants()} and keeping the merged-output write end open —
+     * cannot hang the turn past its timeout; we proceed with whatever output was captured.
+     */
+    private static final long DRAIN_GRACE_MILLIS = 2_000;
 
     private static final List<String> PASSTHROUGH_ENV = List.of("PATH", "HOME", "LANG");
 
@@ -73,6 +87,14 @@ public final class ShellExecutor {
                     "shell.exec could not start '" + argv.get(0) + "': " + e.getMessage());
         }
 
+        // Close the child's stdin immediately: it is a non-interactive exec, so a command that reads stdin
+        // (e.g. `cat`/`grep` with no file operand) must see EOF at once rather than block until the timeout.
+        try {
+            process.getOutputStream().close();
+        } catch (IOException ignored) {
+            // The child may have already exited; nothing to close.
+        }
+
         // Drain the merged stream concurrently on a virtual thread so a >pipe-buffer output cannot
         // deadlock the child; the calling thread enforces the timeout via waitFor.
         AtomicReference<Capture> captured = new AtomicReference<>(new Capture("", false));
@@ -85,8 +107,10 @@ public final class ShellExecutor {
             if (!finished) {
                 killTree(process);
             }
-            // Let the drain thread observe EOF (after natural exit or the forced kill) and publish.
-            drain.join();
+            // Let the drain thread observe EOF (after natural exit or the forced kill) and publish — but
+            // bounded, so an escaped descendant holding the merged-output write end open cannot hang the
+            // turn past its timeout. On grace expiry we proceed with whatever the drain has published.
+            drain.join(DRAIN_GRACE_MILLIS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             killTree(process);

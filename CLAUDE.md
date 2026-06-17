@@ -1339,3 +1339,37 @@ Generalizable lessons from completed milestones; append here as milestones land.
   one-time cold-start OUTSIDE every timed region, so the async approve/timeout arms run warm regardless of
   JUnit method order; (3) keep the configured timeout + poll window generous and the poll window under the
   timeout. macos-14 is the slow cell that catches this — ubuntu green is not enough confidence. [P2-14]
+- **`forvum-tools-shell` (`shell.exec`) is the filesystem-tool recipe + a ProcessBuilder LIST-form launcher,
+  and it is the FIRST `userConfirmRequired=true` tool — it consumes the merged #39 gate with ZERO new
+  approval code (the flag is the whole opt-in).** The allowlist (`ShellAllowlist`) reads `tools/shell.json`
+  on demand (the `QdrantConfig` JsonNode tree-walk, no Jackson reflection → no `@RegisterForReflection`),
+  default EMPTY = fail-closed; argv is LIST-form (never `sh -c`), env scrubbed to `{PATH,HOME,LANG}`,
+  workingDir confined by the in-place-HARDENED `WorkspaceRoot` (lexical + `toRealPath` link-resolving +
+  NOFOLLOW write — the §9.2.5/#27 obligation; NOT promoted to a shared layer, so shell + filesystem each
+  carry a same-named-but-distinct `WorkspaceRoot`, since a Layer-3 plugin can't depend on a sibling).
+  shell.exec needs argv as a JSON-schema `type:array`, so #27 OWNS the one engine seam it adds:
+  `ToolCallBridge` `objectSchema/addProperty` gains array-of-scalar-string handling (the only PR-6 tool
+  needing it — browser/web args are scalar/object). **A shell-tool-internal refusal (allowlist miss, invalid
+  argv, workspace escape) audits `error`, NOT `denied`** — it is a thrown exception the engine's generic
+  post-action catch records; `DENIED` is the engine's pre-action belt/RBAC/approval verdict, which a Layer-3
+  tool cannot emit (DP-9 reworded; consistent with the WorkspaceRoot-escape decision). **shell.exec cannot
+  be exec-tested in a headless native IT:** every non-interactive turn entry binds `NON_INTERACTIVE`, so the
+  #39 gate denies a confirm-required tool without exec'ing it — native proof = the binary native-COMPILEs +
+  boots with the module + JVM `ShellExecutorTest` launching REAL processes + the GraalVM Process substrate;
+  an auto-approving native harness is a documented fast-follow (the 6-dim review REFUTED that the IT is
+  required). [P2-2/#27]
+- **`ShellExecutor` robustness, caught by the 6-dim review:** close the child's stdin right after
+  `start()` (`process.getOutputStream().close()`) or a command that reads stdin with no operand (`cat`,
+  `grep PATTERN`) blocks until the timeout; and BOUND the post-settle `drain.join(graceMillis)` — an
+  unbounded join hangs the turn forever if a double-forked/reparented descendant escapes `descendants()`
+  and keeps the merged-output write end open (`destroyForcibly` is async + the snapshot misses orphans).
+  The drain runs on a virtual thread (no `synchronized`, result via `AtomicReference`). [P2-2/#27]
+- **A parallel build-agent Workflow MUST NOT pass `-Djacoco.skip` — the integrator pays the coverage gate.**
+  PR-6's Wave-2 build fanned out one worktree-isolated agent per module; the shell stream's `-am` build was
+  told to skip jacoco for speed, so shell + the co-built filesystem shipped BELOW the branch gate (0.738)
+  and the integrator's full `verify` failed (the [P2-OUTPUTGUARD] trap, now at fan-out scale). The other
+  agents ran `verify` and passed. LESSON: build agents run `verify` (jacoco on); the orchestrator
+  pre-checks per-module coverage from each worktree's `target/site/jacoco/jacoco.csv` BUT must compute the
+  GATED ratio (the per-module `<excludes>` for live-transport adapters), not the raw class total — a raw
+  sum over the excluded `@RestClient`/`@WebSocketClient`/`Jdk*Http` classes false-alarms a FAIL on a module
+  whose gated check passes (web/browser). [P2-2/#27]

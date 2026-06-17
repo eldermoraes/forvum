@@ -16,9 +16,12 @@ import java.util.List;
 /**
  * Unit tests for {@link ShellExecutor} — the pure ProcessBuilder LIST-form launcher. These tests launch
  * REAL child processes (POSIX coreutils), so they exercise the actual {@code java.lang.Process} substrate
- * the design relies on; the same APIs run in the GraalVM native image (the native-proof obligation is
- * additionally discharged by the forvum-app native IT — see notes). Tests skip gracefully on a platform
- * lacking the expected binaries.
+ * the design relies on. Native viability rests on: this JVM Process exercise + the GraalVM native image
+ * native-COMPILing and booting with this module on its classpath (the integrator's native build/smoke) +
+ * {@code Process}/{@code ProcessBuilder} being core GraalVM substrate. A headless native IT that actually
+ * runs shell.exec end-to-end is NOT feasible — every non-interactive turn entry binds NON_INTERACTIVE, so
+ * the #39 gate denies a confirm-required tool without exec'ing it; an auto-approving native harness is a
+ * documented fast-follow. Tests skip gracefully on a platform lacking the expected binaries.
  */
 class ShellExecutorTest {
 
@@ -72,6 +75,21 @@ class ShellExecutorTest {
         String falseBin = binaryOrSkip("/usr/bin/false", "/bin/false");
 
         assertThrows(ShellExecException.class, () -> executor.run(List.of(falseBin), dir, 10));
+    }
+
+    @Test
+    void aCommandThatReadsStdinSeesEofImmediatelyInsteadOfBlockingUntilTimeout(@TempDir Path dir) {
+        // `cat` with no file operand reads stdin. Because the child's stdin is closed right after start, it
+        // sees EOF at once, emits nothing, and exits 0 — it must NOT block until the (here 5s) timeout.
+        String cat = binaryOrSkip("/bin/cat", "/usr/bin/cat");
+
+        long start = System.nanoTime();
+        String out = executor.run(List.of(cat), dir, 5);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
+
+        assertEquals("", out, "cat with closed stdin produces no output and exits 0");
+        assertTrue(elapsedMs < 4_000,
+                "a stdin-reading command must finish at EOF, not hit the 5s timeout (elapsed=" + elapsedMs + "ms)");
     }
 
     @Test
