@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.forvum</groupId>
+        <artifactId>forvum-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forvum-tools-browser</artifactId>
+
+    <properties>
+        <!-- @Tag("live") tests (a real operator-launched Chrome on a remote-debugging port — BrowserLiveIT)
+             are off by default. Excluded via this Surefire user property (so a bare CLI -DexcludedGroups=
+             can clear it — a value hardcoded in the plugin <configuration> could NOT be overridden, the
+             forvum-app precedent). Run the live test with: -Dgroups=live -DexcludedGroups= -->
+        <excludedGroups>live</excludedGroups>
+    </properties>
+
+    <name>Forvum Tools — Browser</name>
+    <description>Layer-3 Forvum extension: browser automation (P2-1, #26). A hand-rolled Chrome DevTools
+        Protocol (CDP) client over quarkus-websockets-next (BasicWebSocketConnector dialing the full
+        discovered page-target URL — no @WebSocketClient endpoint, so no path-"/" collision with the discord
+        gateway endpoint on the assembled app classpath) attaches to an operator-launched Chrome
+        (--remote-debugging-port) and contributes browser.navigate / snapshot / extract / wait (read-only) +
+        browser.click / type (USER_CONFIRM_REQUIRED) ToolSpecs under PermissionScope.WEB_BROWSE. Discovery
+        GETs run over java.net.http (the copilot pure-JDK seam); no Playwright (Node-driver + bundled-browser
+        download + reflection/CGLib, native-broken), no langchain4j, no engine dependency.</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Layer-1 plugin SPI: the ONLY ai.forvum dependency for a Layer-3 extension (enforced below).
+             Version managed by forvum-bom. A browser tool uses no langchain4j. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
+        <!-- CDI (ArC): @ApplicationScoped bean discovery. Version via Quarkus platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- The CDP transport is a WebSocket to the operator's Chrome; quarkus-websockets-next CLIENT mode
+             is the native-clean transport the P2-CH (discord) readiness spike NATIVE-COMPILED + booted.
+             Unlike discord (a persistent, reconnecting typed @WebSocketClient endpoint), the CDP client dials
+             ONE dynamic per-page URL, so it uses BasicWebSocketConnector.create().baseUri(URI.create(fullWsUrl))
+             with NO endpoint class and NO declared path — sidestepping the @WebSocketClient(path = "/")
+             collision with the discord gateway endpoint AND the typed-connector path-concatenation trap (the
+             [M16] lesson). Version via platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-websockets-next</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Quarkus codegen + dev/test bootstrap. No `build` goal: forvum-tools-browser is a Layer-3
+                 library, never a runnable artifact (that is forvum-app). The absent `build` goal makes
+                 Quarkus skip quarkus:dev on this module as a "support library", so its @QuarkusTest *IT run
+                 under Surefire in the reactor build (CLAUDE.md §4 exception). -->
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- A @QuarkusTest *IT here boots Quarkus in-JVM (no HTTP server needed); it also
+                         runs through the reactor build under Surefire (CI `verify`). @Tag("live") tests are
+                         excluded by default via the ${excludedGroups} property (above); opt in with
+                         -DexcludedGroups= -Dgroups=live. -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-plugin-layering</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- Allowlist form (consistent with the provider/channel/tool modules):
+                                         ban every ai.forvum module, re-allow forvum-sdk + forvum-core.
+                                         forvum-core is the Layer-0 contract layer the SDK SPI re-exposes
+                                         (ToolSpec / PermissionScope in the ToolProvider SPI), so a tool
+                                         plugin unavoidably and legitimately compiles against it; what stays
+                                         banned is forvum-engine, another extension, and the app. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                        <include>ai.forvum:forvum-core</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>A Forvum extension (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ToolSpec/PermissionScope in the ToolProvider SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <excludes>
+                                <!-- CdpSession: the lazy-dial WebSocket lifecycle (the BasicWebSocketConnector
+                                     connect/send path) runs only against a live Chrome over CDP, not
+                                     unit-Surefire-coverable (no Chrome in CI), like the discord channel's
+                                     transport exclude. The pure decode/encode + command builders live in
+                                     CdpProtocol and the inbound-frame correlation in CdpFrameRouter — BOTH
+                                     socket-free and well unit-tested (NOT excluded). JdkCdpHttp is the live
+                                     java.net.http transport seam (the copilot JdkCopilotHttp precedent). -->
+                                <exclude>ai/forvum/tools/browser/CdpSession.class</exclude>
+                                <exclude>ai/forvum/tools/browser/JdkCdpHttp.class</exclude>
+                            </excludes>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.line.minimum}</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>${jacoco.branch.minimum}</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,7 @@
+{
+  "extension_id": "browser",
+  "module_name": "forvum-tools-browser",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.browser.BrowserToolProvider" }
+  ]
+}

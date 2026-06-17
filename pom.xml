@@ -36,6 +36,7 @@
         <module>forvum-tools-mcp-bridge</module>
         <module>forvum-tools-shell</module>
         <module>forvum-tools-web</module>
+        <module>forvum-tools-browser</module>
         <module>forvum-channel-web</module>
         <module>forvum-channel-tui</module>
         <module>forvum-channel-telegram</module>
