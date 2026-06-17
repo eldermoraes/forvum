@@ -1319,4 +1319,12 @@ Generalizable lessons from completed milestones; append here as milestones land.
   the engine `ApprovalStore` and drives real GET/POST — no live model. **CI runs `verify`, not `test`:** the
   new `forvum-sdk` `ApprovalContext` (an interface whose `<clinit>` runs `ScopedValue.newInstance()`) needed
   a 3-test `ApprovalContextTest` to keep the module's jacoco gate green — `./mvnw verify` locally before
-  pushing, never just `test` ([P2-OUTPUTGUARD]). [P2-14]
+  pushing, never just `test` ([P2-OUTPUTGUARD]). **And the CI concurrency-guardrails step is NOT part of
+  `verify`** — run `bash .github/concurrency-guardrails.sh` locally too. It cost a red CI here: a separator
+  char literal in `preApprovalKey` had been written as a RAW NUL byte (`'<NUL>'`) instead of the escape
+  `'\0'` — javac + every local build/test/native accepted it (char 0), but the raw NUL made `grep` treat the
+  whole file as BINARY, which DEFEATED the guardrail's comment-exclusion and falsely flagged the Javadoc's
+  `{@code synchronized}` mention as a hot-path violation. Two lessons: editor/tool round-trips can silently
+  turn an intended space into a control byte in a char literal (use the explicit escape `'\0'`, and a quick
+  `python3 -c "...count(b'\x00')"` over changed files catches it); and the guardrail grep's
+  legitimate-Javadoc-mention exclusion only works on a TEXT file. [P2-14]

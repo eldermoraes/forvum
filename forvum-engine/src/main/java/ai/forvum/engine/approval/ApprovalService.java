@@ -204,7 +204,7 @@ public class ApprovalService implements ApprovalGate {
     }
 
     private static String preApprovalKey(String sessionId, String toolName, String arguments) {
-        return sessionId + ' ' + toolName + ' ' + arguments;
+        return sessionId + '\0' + toolName + '\0' + arguments;
     }
 
     /**
