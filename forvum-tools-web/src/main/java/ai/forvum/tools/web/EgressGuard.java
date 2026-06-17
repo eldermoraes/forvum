@@ -164,10 +164,12 @@ public final class EgressGuard {
         }
         byte[] bytes = effective.getAddress();
         if (effective instanceof Inet4Address) {
-            // CGNAT 100.64.0.0/10 (RFC 6598): first byte 100, second byte 64..127.
             int b0 = bytes[0] & 0xFF;
             int b1 = bytes[1] & 0xFF;
-            return b0 == 100 && b1 >= 64 && b1 <= 127;
+            return (b0 == 100 && b1 >= 64 && b1 <= 127)  // CGNAT 100.64.0.0/10 (RFC 6598)
+                    || b0 == 0                           // "this host on this network" 0.0.0.0/8 (RFC 1122;
+                                                         // commonly routed to loopback/local on Linux)
+                    || b0 >= 240;                        // reserved 240.0.0.0/4 + limited-broadcast 255.255.255.255
         }
         // IPv6 unique-local fc00::/7 (RFC 4193): top 7 bits == 1111110 (covers fc00::/8 + fd00::/8).
         // Java's isSiteLocalAddress checks the DEPRECATED fec0::/10, not fc00::/7, so add it explicitly.
@@ -178,8 +180,11 @@ public final class EgressGuard {
      * If {@code address} is an IPv6 address embedding an IPv4 one — IPv4-mapped ({@code ::ffff:a.b.c.d}),
      * IPv4-compatible ({@code ::a.b.c.d}), or NAT64 ({@code 64:ff9b::a.b.c.d}, RFC 6052) — return the
      * embedded IPv4 address so the IPv4 predicates apply; otherwise return {@code address} unchanged. The
-     * JDK already collapses {@code ::ffff:a.b.c.d} to an {@link Inet4Address}, so this handles the
-     * compatible and NAT64 forms the parser leaves as {@link Inet6Address}.
+     * JDK usually collapses canonical {@code ::ffff:a.b.c.d} to an {@link Inet4Address}; this also catches
+     * the mapped form when the parser leaves it as {@link Inet6Address} and the non-canonical
+     * {@code ::ffff:0:a.b.c.d} variant (FFFF marker one group earlier), plus the compatible and NAT64
+     * forms. The mapped checks require all the high bytes to be zero, so a legitimate global-unicast IPv6
+     * (non-zero high bytes) is never misread as an embedding.
      */
     private static InetAddress unwrapEmbeddedIpv4(InetAddress address) {
         if (!(address instanceof Inet6Address v6)) {
@@ -191,7 +196,12 @@ public final class EgressGuard {
         boolean compatible = allZero(b, 0, 12)
                 // a real ::a.b.c.d, not :: (any-local) or ::1 (loopback, already caught above)
                 && !(b[12] == 0 && b[13] == 0 && b[14] == 0 && (b[15] == 0 || b[15] == 1));
-        if (nat64 || compatible) {
+        // IPv4-mapped ::ffff:a.b.c.d (FFFF at bytes 10-11) — defensive, normally JDK-collapsed.
+        boolean mapped = allZero(b, 0, 10) && b[10] == (byte) 0xFF && b[11] == (byte) 0xFF;
+        // Non-canonical ::ffff:0:a.b.c.d variant (FFFF at bytes 8-9, then a zero group, then the v4).
+        boolean mappedVariant = allZero(b, 0, 8) && b[8] == (byte) 0xFF && b[9] == (byte) 0xFF
+                && b[10] == 0 && b[11] == 0;
+        if (nat64 || compatible || mapped || mappedVariant) {
             byte[] v4 = { b[12], b[13], b[14], b[15] };
             try {
                 return InetAddress.getByAddress(v4);

@@ -38,8 +38,12 @@ public class JdkHttpFetcher implements HttpFetcher {
 
     static {
         // Allow setting the restricted "Host" header on the request so the HTTP IP-pin (B2) can connect to
-        // a validated literal IP while presenting the original virtual host. Must be set before the
-        // HttpClient is first initialized; set-only-if-absent leaves an operator override intact.
+        // a validated literal IP while presenting the original virtual host. This property is read ONCE,
+        // when java.net.http's internal Utils class first initializes — so on the ASSEMBLED app it must be
+        // set earlier than this lazy static block (an LLM turn builds a JDK HttpClient first); the
+        // authoritative, early set lives in ForvumApplication.main (before Quarkus boots). This block is a
+        // best-effort fallback for direct/unit use of this fetcher where it is the first java.net.http
+        // toucher. Set-only-if-absent leaves both the app's set and an operator override intact.
         if (System.getProperty("jdk.httpclient.allowRestrictedHeaders") == null) {
             System.setProperty("jdk.httpclient.allowRestrictedHeaders", "host");
         }
@@ -95,15 +99,28 @@ public class JdkHttpFetcher implements HttpFetcher {
     }
 
     /** Rewrite the URI authority to the validated literal IP, preserving the port/path/query (HTTP only). */
-    private static URI rewriteToIp(URI uri, InetAddress pin) {
+    static URI rewriteToIp(URI uri, InetAddress pin) {
         String ip = pin.getHostAddress();
         String authority = (pin instanceof Inet6Address) ? "[" + ip + "]" : ip;
         if (uri.getPort() != -1) {
             authority = authority + ":" + uri.getPort();
         }
+        // Reassemble from the RAW (already-encoded) components so a percent-encoded reserved char in the
+        // path/query is preserved verbatim — the decoded getPath()/getQuery() fed to the multi-arg URI
+        // constructor would under-escape them (e.g. `%26`→`&`, `%2F`→`/`), changing which resource is
+        // fetched. Only the authority is replaced; everything after it is carried byte-for-byte.
+        StringBuilder rebuilt = new StringBuilder(uri.getScheme()).append("://").append(authority);
+        if (uri.getRawPath() != null) {
+            rebuilt.append(uri.getRawPath());
+        }
+        if (uri.getRawQuery() != null) {
+            rebuilt.append('?').append(uri.getRawQuery());
+        }
+        if (uri.getRawFragment() != null) {
+            rebuilt.append('#').append(uri.getRawFragment());
+        }
         try {
-            // Use the multi-arg constructor with the raw query so a query string is not double-escaped.
-            return new URI(uri.getScheme(), authority, uri.getPath(), uri.getQuery(), uri.getFragment());
+            return new URI(rebuilt.toString());
         } catch (URISyntaxException e) {
             throw new UncheckedIOException(
                     new java.io.IOException("web.fetch could not pin host '" + uri.getHost() + "' to its IP."));
@@ -111,7 +128,7 @@ public class JdkHttpFetcher implements HttpFetcher {
     }
 
     /** The {@code Host} header value: the original host, with the port when non-default. */
-    private static String hostHeader(URI uri) {
+    static String hostHeader(URI uri) {
         String host = uri.getHost();
         return uri.getPort() == -1 ? host : host + ":" + uri.getPort();
     }

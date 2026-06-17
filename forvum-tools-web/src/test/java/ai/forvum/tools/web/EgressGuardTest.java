@@ -94,6 +94,29 @@ class EgressGuardTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
+            "http://0.1.2.3/x",                    // 0.0.0.0/8 "this host" (often routed to local on Linux)
+            "http://0.0.0.1/x",                    // 0.0.0.0/8 non-any-local
+            "http://240.0.0.1/x",                  // 240.0.0.0/4 reserved
+            "http://255.255.255.255/x"             // limited broadcast
+    })
+    void blocksReservedAndBroadcastIpv4(String url) {
+        assertThrows(EgressDeniedException.class, () -> guard.check(url),
+                "a reserved (0/8, 240/4) or broadcast IPv4 target must be denied: " + url);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://[::ffff:0:7f00:1]/x",          // non-canonical ::ffff:0:a.b.c.d variant of 127.0.0.1
+            "http://[::ffff:0:a9fe:a9fe]/x",       // same variant of the 169.254.169.254 metadata endpoint
+            "http://[::ffff:0:a00:1]/x"            // same variant of 10.0.0.1
+    })
+    void blocksNonCanonicalIpv4MappedVariant(String url) {
+        assertThrows(EgressDeniedException.class, () -> guard.check(url),
+                "the ::ffff:0:a.b.c.d embedding of an internal v4 must be denied: " + url);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
             "http://2130706433/x",                 // decimal IPv4 == 127.0.0.1 (the JDK parses this)
             "http://0x7f000001/x"                  // hex IPv4 form: the JDK rejects it → UnknownHost
     })

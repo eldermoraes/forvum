@@ -51,6 +51,16 @@ public class ForvumApplication implements QuarkusApplication {
                 && System.getProperty("quarkus.otel.sdk.disabled") == null) {
             System.setProperty("quarkus.otel.sdk.disabled", "true");
         }
+        // forvum-tools-web (#PR-6): the web.fetch HTTP IP-pin (B2) sets a "Host" header on the JDK
+        // HttpClient request, which is a RESTRICTED header unless jdk.httpclient.allowRestrictedHeaders
+        // names it. That property is read ONCE, when java.net.http's internal Utils class first
+        // initializes — which happens on the first JDK-HttpClient build (an Ollama/Gemini/Copilot LLM
+        // turn uses java.net.http), typically BEFORE any web.fetch. So it must be set here, before
+        // Quarkus boots and before any client is built — not in JdkHttpFetcher's (lazy) static block,
+        // which loses that race on the assembled app. Set-only-if-absent leaves an operator override.
+        if (System.getProperty("jdk.httpclient.allowRestrictedHeaders") == null) {
+            System.setProperty("jdk.httpclient.allowRestrictedHeaders", "host");
+        }
         Quarkus.run(ForvumApplication.class, args);
     }
 
