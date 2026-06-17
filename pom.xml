@@ -43,6 +43,7 @@
         <module>forvum-channel-matrix</module>
         <module>forvum-channel-signal</module>
         <module>forvum-channel-whatsapp</module>
+        <module>forvum-channel-voice</module>
         <module>forvum-app</module>
     </modules>
 

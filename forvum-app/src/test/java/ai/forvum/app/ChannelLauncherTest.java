@@ -153,6 +153,28 @@ class ChannelLauncherTest {
     }
 
     @Test
+    void voiceServesOnlyWithBothWhisperBinAndPiperBin() {
+        // Voice declares TWO required keys (whisperBin + piperBin): the allMatch gate must refuse a
+        // config carrying only one of them (or a blank one), else an enabled-but-binary-less voice.json
+        // would hang the binary in server mode serving nothing (the M17 trap at n>1; VoiceChannel.onStart
+        // warns + no-ops without both binaries).
+        assertFalse(ChannelLauncher.serves("voice", json("{}")));
+        assertFalse(ChannelLauncher.serves("voice",
+                json("{ \"whisperBin\": \"/opt/whisper\" }")), "piperBin missing");
+        assertFalse(ChannelLauncher.serves("voice",
+                json("{ \"piperBin\": \"/opt/piper\" }")), "whisperBin missing");
+        assertFalse(ChannelLauncher.serves("voice",
+                json("{ \"whisperBin\": \"/opt/whisper\", \"piperBin\": \"   \" }")),
+                "a blank piperBin is not a binary");
+        assertTrue(ChannelLauncher.serves("voice",
+                json("{ \"whisperBin\": \"/opt/whisper\", \"piperBin\": \"/opt/piper\" }")));
+        assertFalse(ChannelLauncher.serves("voice",
+                json("{ \"enabled\": false, \"whisperBin\": \"/opt/whisper\","
+                        + " \"piperBin\": \"/opt/piper\" }")),
+                "a disabled channel never serves, even fully configured");
+    }
+
+    @Test
     void whatsappServesOnlyWithAllFourWebhookAndGraphKeys() {
         // WhatsApp declares FOUR required keys (verifyToken + appSecret to receive, accessToken +
         // phoneNumberId to reply): the allMatch gate must refuse a config missing any one, else an
