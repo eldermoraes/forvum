@@ -1249,3 +1249,63 @@ Generalizable lessons from completed milestones; append here as milestones land.
   reason `CURRENT_AGENT` is re-bound in the worker), so a spawned worker's spans orphan — capture
   `Context parent = Context.current()` before the loop and submit `parent.wrap(task)`. `opentelemetry-sdk-testing`
   resolves via the OTel BOM transitive to `quarkus-opentelemetry` (no pin). [P2-15]
+- **A `USER_CONFIRM_REQUIRED` approval gate is the THIRD tool gate (belt → RBAC → approval), blocks the
+  turn's own virtual thread, and audits TWO surfaces — the queue owns the lifecycle, `tool_invocations`
+  stays append-only.** P2-14 #39: `ToolSpec` grows an additive 5th `boolean userConfirmRequired` (4-arg
+  ctor delegates `false`, so every pre-#39 call site + JSON spec is unchanged — no migration on
+  `tool_invocations`). `ToolExecutor` consults a narrow engine `ApprovalGate` (sole impl `ApprovalService`)
+  ONLY when `tool.userConfirmRequired()` AND after the two existing gates pass (no point parking a call the
+  identity may not make). On reject/timeout it audits a `denied` `tool_invocations` row + throws
+  `ApprovalDeniedException` (a `PermissionDeniedException` subtype → `SupervisorGraph.runTool` catches it
+  FIRST, before the generic arm, for a clear model-facing "you declined it" result; the turn COMPLETES,
+  same non-abort behavior as a belt miss [TEST-SEC]). **Audit decision (maintainer-ratified over the
+  ULTRAPLAN DP-9 literal):** the new `tool_approvals` queue (`V4__approvals.sql`, the `tasks`-style recipe:
+  TEXT-UUID PK, `status` pending|approved|rejected|timed_out, 2 indexes) carries the parked lifecycle;
+  `tool_invocations` records exactly ONE terminal row — NOT a parked `confirm_required` row + a resolve
+  (that would double rows and break append-only). The §14 [M5] "head bump → bump `SchemaSmokeIT`" rule
+  applies: V3→V4, + the table/indexes in EXPECTED_TABLES/INDEXES.
+- **The resolution-mode seam lives in `forvum-sdk` (interfaces, jacoco-clean), so a Layer-3 channel binds
+  it without depending on the engine; the engine reads it on the turn's one VT (like `CURRENT_AGENT`).**
+  `ApprovalContext` (an INTERFACE with two `ScopedValue` constants — no ctor → no per-module jacoco line,
+  unlike a holder class) + the `ApprovalPrompter` functional interface. Per-turn binding selects the mode:
+  `PROMPTER` bound → synchronous TTY prompt (the interactive TUI binds a console y/N prompter reading the
+  same stdin `BufferedReader`); `NON_INTERACTIVE` true → immediate deny (one-shot `forvum ask`, cron, piped
+  TUI — no surface); neither → async, the engine parks + blocks on an in-memory `CompletableFuture` the web
+  `/q/dashboard/approvals` `POST .../{id}/approve|reject` completes, timing out (`forvum.approval.timeout-seconds`,
+  default 300) to deny. `TurnService.dispatch` additionally binds `CurrentAgent.CURRENT_USER_MESSAGE`
+  (engine ScopedValue) for R1 capture. **Two ScopedValue traps:** (1) `where` is STATIC —
+  `ScopedValue.where(KEY, v).call(...)`, never `KEY.where(v)`; (2) `ScopedValue.orElse(null)` throws
+  (`requireNonNull`) — for a nullable read use `isBound() ? get() : null`, reserve `orElse(x)` for non-null x.
+- **Persist the pending row BEFORE blocking, in a separate `@Transactional` + `@ActivateRequestContext`
+  bean — never hold a connection across the wait** ([M7]/[M16]). `ApprovalStore` (not inlined into
+  `ApprovalService`, so the calls cross the CDI proxy and the interceptors fire) commits the `pending` row,
+  then `ApprovalService` blocks the VT connection-free, then a short `resolve` tx commits the outcome.
+  `@ActivateRequestContext` on the store methods makes them work on ANY thread (the turn's, a one-shot/cron
+  thread, the dashboard's blocked-turn thread) for the request-scoped `EntityManager`; each op is
+  self-contained so a nested context is harmless. `ConcurrentHashMap` + `CompletableFuture` carry the
+  cross-thread hand-off — no `synchronized` (§3.8); `CompletableFuture.get(timeout)` on a VT parks, no pin.
+- **R1 restart-recovery: a pending row SURVIVES a restart (it is NOT auto-timed-out on boot); approving the
+  orphan re-dispatches the turn — best-effort, not exact resume.** When `decide(id)` finds no live future in
+  THIS process (the row outlived its turn thread), it resolves the queue row and, on approve, marks a
+  single-use pre-approval for the exact `(session,tool,args)` and re-dispatches the turn from the stored
+  `user_message` via the SDK `ChannelTurnDriver` on a fresh VT (binding `NON_INTERACTIVE` so any OTHER
+  confirm in the replay denies; the reply is logged — the original connection is gone). `requireApproval`
+  consumes the pre-approval FIRST (auto-approve, no row), so the re-run's identical call passes without
+  re-prompting. Exact checkpoint/resume is R2, deferred — it conflicts with the M18 R6 "no checkpointer /
+  in-memory langchain4j conversation" stance, tracked in its own issue. Inject `ChannelTurnDriver` (not the
+  concrete `TurnService`) into `ApprovalService` — the @ApplicationScoped proxy cycle
+  (ApprovalService→TurnService→…→ToolExecutor→ApprovalGate→ApprovalService) is broken by CDI proxies, but
+  the SDK interface keeps the coupling clean. A same-thread `Executor` field makes re-dispatch
+  deterministically observable in a plain unit test (a `@Vetoed` `ApprovalStore` stub + a recording
+  `ChannelTurnDriver`), so the DB-backed resolution modes (interactive/non-interactive/async/timeout) are
+  the only part needing a `@QuarkusTest` IT.
+- **The web approval surface mirrors `CaprDashboardRoute` exactly (X6): a `quarkus-reactive-routes`
+  `@Route` over the already-present `vertx-http`, server-path only, ZERO cold-start impact.** GET returns a
+  value (auto-JSON) of `@RegisterForReflection` Layer-4 view records; POST uses `@Param("id")` for the path
+  var (confirmed via the Dev MCP, NOT guessed — §7) and returns `{handled, id}` with HTTP 200 even for an
+  unknown id (the client reads the flag; a 404 would need `RoutingContext`). `type = BLOCKING` for the
+  Panache work; no `@Startup`/observer so command-mode boot is untouched. The e2e seeds orphaned rows via
+  the engine `ApprovalStore` and drives real GET/POST — no live model. **CI runs `verify`, not `test`:** the
+  new `forvum-sdk` `ApprovalContext` (an interface whose `<clinit>` runs `ScopedValue.newInstance()`) needed
+  a 3-test `ApprovalContextTest` to keep the module's jacoco gate green — `./mvnw verify` locally before
+  pushing, never just `test` ([P2-OUTPUTGUARD]). [P2-14]
