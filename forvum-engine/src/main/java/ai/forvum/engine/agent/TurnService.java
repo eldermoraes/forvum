@@ -138,8 +138,13 @@ public class TurnService implements ChannelTurnDriver {
             // ToolExecutor can gate each tool's required scope. Mirrors the CURRENT_AGENT/CURRENT_TURN binds.
             Set<PermissionScope> effectiveScopes = roles.effectiveScopes(identities.rolesFor(identityId));
 
+            // P2-14 #39: bind the originating user message so a confirm-required tool parked this turn can
+            // be re-dispatched from it after a restart (R1). ScopedValue forbids a null binding, so a
+            // null/blank content (which cannot be meaningfully replayed anyway) binds the empty string.
+            String userMessage = message.content() == null ? "" : message.content();
             String reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId)
                     .where(CurrentAgent.CURRENT_TURN, turnId)
+                    .where(CurrentAgent.CURRENT_USER_MESSAGE, userMessage)
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, effectiveScopes)
                     .call(() -> agent.respond(sessionId, message.content()));
 

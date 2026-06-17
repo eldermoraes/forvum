@@ -16,6 +16,7 @@ import ai.forvum.engine.runtime.CommandMode;
 import ai.forvum.core.TaskRecord;
 import ai.forvum.core.TaskStatus;
 import ai.forvum.core.TaskType;
+import ai.forvum.sdk.ApprovalContext;
 import ai.forvum.sdk.TaskExecutor;
 
 import dev.langchain4j.model.chat.ChatModel;
@@ -158,8 +159,12 @@ public class CronScheduler {
             Agent agent = registry.getOrCreate(spec.agentId());
             ChatModel model = llmSelector.resolve(spec.primaryModel(), spec.agentId().value(), sessionId);
             Set<PermissionScope> cronScopes = roleRegistry.scopesFor(RoleRegistry.CRON);
+            // P2-14 #39: a cron turn has no human at the keyboard and no dashboard requester, so a
+            // confirm-required tool must deny immediately rather than block for an approval that will never
+            // arrive (mirrors forvum ask). The flag is read by ApprovalService via ApprovalContext.
             reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, spec.agentId())
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, cronScopes)
+                    .where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE)
                     .call(() -> agent.respond(sessionId, spec.prompt(), model));
             // Record the cron task ONLY after the turn succeeds (persist-after-success; the turn's own
             // ledger rows survive in their own transactions, and a failed turn's ERROR task is recorded

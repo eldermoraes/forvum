@@ -4,6 +4,7 @@ import ai.forvum.core.InvocationStatus;
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.approval.ApprovalGate;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.model.ToolInvocation;
 import ai.forvum.engine.model.ToolInvocationRecorder;
@@ -37,12 +38,23 @@ import java.util.function.Supplier;
  * and audited {@code denied} — the same outcome as a belt miss, a distinct message. When the scope
  * binding is absent (a caller outside a turn entry) the belt remains the sole gate; every production turn
  * entry binds the scopes, so the gate is always active in production.
+ *
+ * <p><strong>P2-14 #39 approval gate:</strong> a third gate, consulted LAST (only after belt + RBAC
+ * permit the call). A tool whose {@link ToolSpec#userConfirmRequired()} is {@code true} is parked through
+ * the {@link ApprovalGate}, which blocks the turn until the owner approves or rejects (or it times out).
+ * An approve runs the action and audits {@code ok}; a reject/timeout audits {@code denied} and throws
+ * {@link ApprovalDeniedException} (a {@link PermissionDeniedException} subtype, so the tool loop renders it
+ * back to the model and the turn completes). Ordering matters — there is no point parking a call the
+ * identity may not make at all, so belt + scope are enforced before the approval gate.
  */
 @ApplicationScoped
 public class ToolExecutor {
 
     @Inject
     ToolInvocationRecorder recorder;
+
+    @Inject
+    ApprovalGate approvals;
 
     /**
      * Run {@code toolName} on behalf of {@code agentId} if {@code belt} permits it AND the caller's
@@ -83,6 +95,16 @@ public class ToolExecutor {
                       + " grants only " + effectiveScopes + ". Grant it by adding " + tool.requiredScope()
                       + " to one of the identity's roles (roles/<role>.json).");
             }
+        }
+        // P2-14 #39 approval gate (LAST): a confirm-required tool is parked until the owner approves it. A
+        // reject/timeout audits denied and throws — the action never runs.
+        if (tool.userConfirmRequired()
+                && !approvals.requireApproval(sessionId, agentId, toolName, arguments)) {
+            recorder.record(new ToolInvocation(sessionId, agentId.value(), toolName, arguments,
+                    null, InvocationStatus.DENIED, null, createdAt));
+            throw new ApprovalDeniedException(
+                    "Tool '" + toolName + "' requires user confirmation and the request was declined or "
+                  + "timed out.");
         }
         long start = System.nanoTime();
         try {

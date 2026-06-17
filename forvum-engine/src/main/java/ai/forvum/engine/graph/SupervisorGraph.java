@@ -7,6 +7,7 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.tools.ApprovalDeniedException;
 import ai.forvum.engine.tools.PermissionDeniedException;
 import ai.forvum.engine.tools.ToolCallBridge;
 
@@ -210,6 +211,11 @@ public class SupervisorGraph {
         try {
             return toolCallBridge.dispatch(turn.sessionId, turn.agentId, turn.belt,
                     request.name(), request.arguments());
+        } catch (ApprovalDeniedException declined) {
+            // P2-14 #39: the tool was permitted (belt + scope) but the owner declined/timed out the
+            // confirmation. Feed a clear, distinct result back so the model explains it was declined — the
+            // turn still completes (this is caught BEFORE the PermissionDeniedException arm it extends).
+            return "Tool '" + request.name() + "' was not run: the user declined the confirmation request.";
         } catch (PermissionDeniedException denied) {
             return "Tool '" + request.name() + "' is not permitted for this agent.";
         } catch (RuntimeException failure) {
