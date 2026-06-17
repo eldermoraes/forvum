@@ -26,8 +26,12 @@ public final class FsReadTool {
         this.workspace = workspace;
     }
 
-    /** Return the contents of the workspace-relative {@code path}. */
+    /**
+     * Return the contents of the workspace-relative {@code path}. The path is confined through
+     * {@link WorkspaceRoot#resolveForRead(String)}, which resolves symbolic links and rejects a target
+     * whose real path escapes the workspace root.
+     */
     public String read(String path) throws IOException {
-        return Files.readString(workspace.resolve(path));
+        return Files.readString(workspace.resolveForRead(path));
     }
 }

@@ -109,6 +109,16 @@ public class ForvumHome {
     }
 
     /**
+     * {@code $FORVUM_HOME/tools} — per-tool configuration ({@code .json}, PR-6 #27, e.g.
+     * {@code shell.json}). The {@code forvum-tools-shell} plugin reads {@code tools/shell.json} on demand
+     * (engine-independent); the engine resolves this path only for {@code ConfigWatcher} eventing and
+     * {@code ConfigDoctor}.
+     */
+    public Path tools() {
+        return root.resolve("tools");
+    }
+
+    /**
      * {@code $FORVUM_HOME/plugins} — drop-in plugin JARs ({@code forvum plugin install}, P2-6). Loaded by
      * the JVM fast-jar via {@code ServiceLoader} only; the native binary fixes its plugins at build time
      * (§6.2/§6.3), so a JAR added here after a native build is ignored until a rebuild.

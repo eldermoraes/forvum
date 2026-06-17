@@ -30,9 +30,13 @@ public final class FsListTool {
         this.workspace = workspace;
     }
 
-    /** The sorted entry names of the workspace-relative directory {@code path}. */
+    /**
+     * The sorted entry names of the workspace-relative directory {@code path}. The path is confined
+     * through {@link WorkspaceRoot#resolveForRead(String)}, which resolves symbolic links and rejects a
+     * target whose real path escapes the workspace root.
+     */
     public List<String> list(String path) throws IOException {
-        try (Stream<Path> entries = Files.list(workspace.resolve(path))) {
+        try (Stream<Path> entries = Files.list(workspace.resolveForRead(path))) {
             return entries.map(entry -> entry.getFileName().toString()).sorted().toList();
         }
     }

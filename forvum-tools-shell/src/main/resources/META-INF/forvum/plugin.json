@@ -1,0 +1,7 @@
+{
+  "extension_id": "shell",
+  "module_name": "forvum-tools-shell",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.shell.ShellToolProvider" }
+  ]
+}

@@ -99,6 +99,12 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-mcp-bridge</artifactId>
         </dependency>
+        <!-- Layer-3 shell tool module (PR-6 #27): contributes shell.exec (PermissionScope.SHELL_EXEC,
+             userConfirmRequired) bounded by tools/shell.json. Pure java.lang Process, no AI library. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-shell</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>
