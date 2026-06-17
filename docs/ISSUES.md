@@ -1547,7 +1547,7 @@ acceptance — no micro-milestones. Each now has an explicit OWNING milestone, s
 | `forvum init` first-run command surface | **M20** (picocli command-mode; shipped) |
 | `~/.forvum/` on-disk layout the scaffold writes | **M4** acceptance |
 | `/q/dashboard/capr` CAPR endpoint (§3.6) | **M18** acceptance |
-`forvum-tools-web` is OUT of X7 scope (separate issue). **Acceptance.** Each item is reflected in each
+`forvum-tools-web` is OUT of X7 scope (separate issue; **LANDED in PR-6** — `web.fetch`/`WEB_FETCH` over `java.net.http` + `web.search`/`WEB_SEARCH` over the Brave Search blocking REST client, both READ-only and OUT of the #39 gate, with a self-contained `EgressGuard` SSRF policy; the shared engine egress decorator §1.1 deferred). **Acceptance.** Each item is reflected in each
 owning milestone's `Owns (X7)` annotation and the §2.4 / §3.6 references (the milestone Verify lines are
 unchanged), so no reader concludes any is a roadmap gap. This is a DOCS-ONLY decision — no code, no
 migration. **Unblocks the baseline for** P2-13 (#38, MCP registry — needs the mcp-bridge baseline owned),

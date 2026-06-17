@@ -1,0 +1,7 @@
+{
+  "extension_id": "web",
+  "module_name": "forvum-tools-web",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.web.WebToolProvider" }
+  ]
+}

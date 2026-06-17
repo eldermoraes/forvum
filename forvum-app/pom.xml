@@ -105,6 +105,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-shell</artifactId>
         </dependency>
+        <!-- Layer-3 web tool module (PR-6): contributes web.fetch (WEB_FETCH, java.net.http) and
+             web.search (WEB_SEARCH, Brave Search REST client) to the ToolRegistry. READ-only outbound
+             HTTP, INERT until an operator sets a Brave key / fetch target. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-web</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>
