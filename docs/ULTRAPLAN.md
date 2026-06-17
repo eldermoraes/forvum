@@ -96,7 +96,7 @@ All first-party extensions depend only on `forvum-sdk`. They are separate Maven 
 **Tools**
 
 - **`forvum-tools-filesystem`** — `fs.read`, `fs.write`, `fs.list`, guarded by `PermissionScope.FS_READ` / `FS_WRITE`.
-- **`forvum-tools-web`** — `web.fetch`, `web.search`, with a pluggable search backend.
+- **`forvum-tools-web`** — `web.fetch` (`WEB_FETCH`, arbitrary-URL fetch over `java.net.http`) and `web.search` (`WEB_SEARCH`, Brave Search API over a blocking REST client). Both are READ-only outbound HTTP — neither is in the #39 `USER_CONFIRM_REQUIRED` gate; both sit behind the belt + P2-11 RBAC scope gates. `web.fetch` carries a self-contained `EgressGuard` SSRF policy (block loopback/link-local/private by default, `allowPrivateNetwork` opt-in); the shared engine egress decorator (§1.1) is deferred. Brave is the single concrete search backend in v0.1 (the "pluggable search backend" is a documented fast-follow). Landed in PR-6.
 - **`forvum-tools-shell`** — `shell.exec` behind an allow-list plus a `USER_CONFIRM_REQUIRED` approval hook. Owned by M13 acceptance (X7).
 - **`forvum-tools-mcp-bridge`** — dynamic MCP client; reads `~/.forvum/mcp-servers/*.json` and surfaces remote MCP tools as native `ToolSpec` instances that any agent's `allowedTools` list can reference. Shipped flagged-OFF in v0.1 (Risk #9); baseline owned by M13 acceptance (X7).
 
@@ -677,7 +677,7 @@ public enum PermissionScope {
 | Scope (reserved name)  | Introduced in | Note |
 |------------------------|---------------|------|
 | WEB_BROWSE             | Phase 2 (§6)  | browser tool |
-| WEB_FETCH / WEB_SEARCH | bundled-web   | naming TBD in owning PR |
+| WEB_FETCH / WEB_SEARCH | PR-6 preamble | landed: `web.fetch` / `web.search` (`forvum-tools-web`, PR-6) |
 | SHELL_EXEC             | Phase 2 (§6)  | sandboxed shell |
 | MCP_REMOTE             | Phase 2 (§9.3) | remote MCP-server tools (#38) |
 
