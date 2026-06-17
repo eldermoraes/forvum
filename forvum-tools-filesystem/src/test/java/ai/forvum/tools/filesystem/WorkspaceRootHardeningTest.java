@@ -102,4 +102,18 @@ class WorkspaceRootHardeningTest {
 
         assertThrows(WorkspaceEscapeException.class, () -> workspace.resolveForWrite("../escape.txt"));
     }
+
+    @Test
+    void resolveForReadOfANonExistentTargetReturnsTheLexicalPathWithoutCanonicalizing(@TempDir Path tmp)
+            throws IOException {
+        // A not-yet-existing file has nothing to canonicalize: resolveForRead returns the lexical path
+        // (the "does not exist" arm), without touching realPath and without throwing.
+        Path root = Files.createDirectories(tmp.resolve("ws"));
+        WorkspaceRoot workspace = new WorkspaceRoot(root);
+
+        Path resolved = workspace.resolveForRead("absent.txt");
+        assertEquals(root.resolve("absent.txt"), resolved,
+                "reading a non-existent path returns the lexical path (nothing to symlink-resolve)");
+    }
+
 }
