@@ -825,6 +825,20 @@ sandbox runtime; verify. **[PLUGIN]** scaffold via the MCP. **Dependencies.** M1
 verified. **[NATIVE]** native Whisper/Piper bindings — verify or JVM-only carve-out. **[PLUGIN]**
 scaffold channel module via the MCP. **Dependencies.** M3, M7, MVP stable.
 **Commit.** `feat(channel-voice): add local Whisper/Piper voice channel`
+**Built (file-drop, P2-3).** Delivered as `forvum-channel-voice`, a **file-drop** channel (NOT live
+streaming — the acceptance's "streamed" is the deferred live-microphone follow-up): a virtual-thread
+worker polls `$FORVUM_HOME/channels/voice/inbox/` and runs each clip through `VoicePipeline`
+(whisper.cpp STT → turn via the SDK `ChannelTurnDriver` → piper TTS → reply WAV moved to the outbox),
+mirroring the Signal/Telegram poll idiom (macOS `WatchService` latency, Risk #7). The operator points
+`channels/voice.json` at OPERATOR-installed whisper.cpp (`whisperBin`+`whisperModel`) and piper
+(`piperBin`+`piperVoice`) binaries; **[NATIVE] resolved without a JVM-only carve-out** — there are NO
+native bindings (the binaries are exec'd via a `ProcessBuilder`-based `SubprocessRunner`, concurrent VT
+stdout/stderr drains + a bounded post-kill drain so an escaped descendant holding a pipe cannot hang the
+worker), so the module native-COMPILES and the no-config boot warns + no-ops gracefully. `ChannelLauncher`'s
+serve-gate requires all four binaries/models to MATCH `VoiceChannelConfig.Spec.isReady()` (an
+enabled-but-not-ready config must not hang the binary in server mode serving nothing — the M17 trap).
+Live capture/playback + barge-in (the `javax.sound.sampled`/live-capture-binary surface) is a documented
+fast-follow this v0.1 file-drop design deliberately avoids.
 
 ## P2-4 — Device pairing
 **Labels:** `phase-2`, `engine`, `native` · **Milestone:** `v0.5 Parity`

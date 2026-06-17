@@ -153,24 +153,30 @@ class ChannelLauncherTest {
     }
 
     @Test
-    void voiceServesOnlyWithBothWhisperBinAndPiperBin() {
-        // Voice declares TWO required keys (whisperBin + piperBin): the allMatch gate must refuse a
-        // config carrying only one of them (or a blank one), else an enabled-but-binary-less voice.json
-        // would hang the binary in server mode serving nothing (the M17 trap at n>1; VoiceChannel.onStart
-        // warns + no-ops without both binaries).
+    void voiceServesOnlyWithAllFourWhisperAndPiperKeys() {
+        // Voice declares FOUR required keys — whisperBin + whisperModel (STT), piperBin + piperVoice
+        // (TTS) — to MATCH VoiceChannel.onStart's Spec.isReady() gate (all four present). The two
+        // binaries alone are NOT enough: with the models missing, onStart warns + no-ops, so a config
+        // carrying only whisperBin + piperBin must NOT count as serving, else the binary would hang in
+        // server mode serving nothing (the M17 trap; the serve-gate must mirror isReady() exactly).
+        String full = "{ \"whisperBin\": \"/opt/whisper\", \"whisperModel\": \"/m/ggml.bin\","
+                + " \"piperBin\": \"/opt/piper\", \"piperVoice\": \"/v/voice.onnx\" }";
         assertFalse(ChannelLauncher.serves("voice", json("{}")));
         assertFalse(ChannelLauncher.serves("voice",
-                json("{ \"whisperBin\": \"/opt/whisper\" }")), "piperBin missing");
+                json("{ \"whisperBin\": \"/opt/whisper\", \"piperBin\": \"/opt/piper\" }")),
+                "the two binaries without the models must NOT serve — isReady() needs the models too");
         assertFalse(ChannelLauncher.serves("voice",
-                json("{ \"piperBin\": \"/opt/piper\" }")), "whisperBin missing");
+                json("{ \"whisperBin\": \"/opt/whisper\", \"whisperModel\": \"/m/ggml.bin\","
+                        + " \"piperBin\": \"/opt/piper\" }")), "piperVoice missing");
         assertFalse(ChannelLauncher.serves("voice",
-                json("{ \"whisperBin\": \"/opt/whisper\", \"piperBin\": \"   \" }")),
-                "a blank piperBin is not a binary");
-        assertTrue(ChannelLauncher.serves("voice",
-                json("{ \"whisperBin\": \"/opt/whisper\", \"piperBin\": \"/opt/piper\" }")));
+                json("{ \"whisperBin\": \"/opt/whisper\", \"whisperModel\": \"/m/ggml.bin\","
+                        + " \"piperBin\": \"/opt/piper\", \"piperVoice\": \"   \" }")),
+                "a blank piperVoice counts as missing");
+        assertTrue(ChannelLauncher.serves("voice", json(full)));
         assertFalse(ChannelLauncher.serves("voice",
                 json("{ \"enabled\": false, \"whisperBin\": \"/opt/whisper\","
-                        + " \"piperBin\": \"/opt/piper\" }")),
+                        + " \"whisperModel\": \"/m/ggml.bin\", \"piperBin\": \"/opt/piper\","
+                        + " \"piperVoice\": \"/v/voice.onnx\" }")),
                 "a disabled channel never serves, even fully configured");
     }
 

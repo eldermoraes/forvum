@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The poll worker's loop and one-scan semantics ({@link VoiceChannel#pollOnce} / {@link
@@ -38,7 +39,18 @@ class VoiceChannelPollTest {
         }
     }
 
-    private static VoiceChannel wired(Path home, RecordingPipeline pipeline) {
+    /** A VoicePipeline that always fails — to prove one bad scan cycle never kills the poll worker. */
+    private static final class ThrowingPipeline extends VoicePipeline {
+        final AtomicInteger attempts = new AtomicInteger();
+
+        @Override
+        public void process(Path audioFile, Spec spec) {
+            attempts.incrementAndGet();
+            throw new RuntimeException("simulated pipeline failure");
+        }
+    }
+
+    private static VoiceChannel wired(Path home, VoicePipeline pipeline) {
         VoiceChannel channel = new VoiceChannel();
         channel.config = new VoiceChannelConfig(home);
         channel.pipeline = pipeline;
@@ -99,5 +111,33 @@ class VoiceChannelPollTest {
 
         assertEquals(List.of("hello.wav"), pipeline.processed, "the single inbox file was processed once");
         assertFalse(channel.isPolling(), "the loop exited after the sleeper stopped it");
+    }
+
+    @Test
+    void pollLoopSurvivesAThrowingScanAndKeepsPolling(@TempDir Path home) throws IOException {
+        // A scan that throws (here: the pipeline fails on every file) must NOT kill the worker — pollLoop
+        // catches it, logs, and runs the next cycle. Stop only on the SECOND sleep so the test PROVES the
+        // loop survived the first throwing cycle and reached a second one. If pollLoop's catch were
+        // removed, the first throw would escape pollLoop() and this test would error out (the
+        // green-for-wrong-reason guard the [M4] lesson warns about).
+        writeConfig(home, readyConfig(home));
+        Path inbox = Files.createDirectories(home.resolve("inbox"));
+        Files.writeString(inbox.resolve("hello.wav"), "x"); // never deleted: the throwing pipeline re-sees it
+
+        ThrowingPipeline pipeline = new ThrowingPipeline();
+        VoiceChannel channel = wired(home, pipeline);
+        channel.running = true;
+        AtomicInteger cycles = new AtomicInteger();
+        channel.sleeper = millis -> {
+            if (cycles.incrementAndGet() >= 2) {
+                channel.running = false;
+            }
+        };
+
+        channel.pollLoop(); // must NOT propagate the pipeline failure
+
+        assertEquals(2, cycles.get(), "the loop survived the throwing first cycle and ran a second");
+        assertTrue(pipeline.attempts.get() >= 2, "each surviving cycle re-attempted the failing file");
+        assertFalse(channel.isPolling());
     }
 }

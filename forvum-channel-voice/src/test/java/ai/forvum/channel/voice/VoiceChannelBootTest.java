@@ -1,7 +1,9 @@
 package ai.forvum.channel.voice;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,6 +61,29 @@ class VoiceChannelBootTest {
 
         assertNull(channel.worker, "a half-configured channel must not start the worker");
         channel.onStop(null);
+    }
+
+    @Test
+    void aReadyConfigStartsThePollWorker(@TempDir Path home) throws IOException {
+        // The complement of the inert tests: a fully-configured (isReady) channel must actually START the
+        // worker — exercising onStart's started path (createDirectories + worker.submit) those tests never
+        // reach. The inbox stays empty so the worker's first scan finds no files and never touches the
+        // (null) pipeline; the worker is stopped in the finally.
+        Path inbox = home.resolve("box-in");
+        write(home, "{ \"whisperBin\": \"/w\", \"whisperModel\": \"/m\", \"piperBin\": \"/p\","
+                + " \"piperVoice\": \"/v\", \"inboxDir\": \"" + inbox + "\","
+                + " \"outboxDir\": \"" + home.resolve("box-out") + "\" }");
+        VoiceChannel channel = wiredChannel(home);
+
+        try {
+            channel.onStart(null);
+
+            assertNotNull(channel.worker, "a ready channel starts the poll worker");
+            assertTrue(channel.isPolling(), "the worker loop is running");
+            assertTrue(Files.isDirectory(inbox), "onStart created the inbox directory");
+        } finally {
+            channel.onStop(null); // stop the real virtual-thread worker
+        }
     }
 
     private static void write(Path home, String json) throws IOException {

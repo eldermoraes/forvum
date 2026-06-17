@@ -61,11 +61,11 @@ public class ChannelLauncher {
     static final String WHATSAPP_ID = "whatsapp";
 
     /**
-     * Channel id of the Voice channel, which requires the operator-installed {@code whisperBin} (STT)
-     * AND {@code piperBin} (TTS) binaries to serve. Mirrors {@code VoiceChannel.onStart}, which warns +
-     * no-ops without them (the channel is enabled-and-ready only with both), so an enabled-but-binary-less
-     * {@code voice.json} must not count as serving or the binary would hang in server mode serving
-     * nothing (the M17 trap).
+     * Channel id of the Voice channel, which requires the operator-installed {@code whisperBin} +
+     * {@code whisperModel} (STT) AND {@code piperBin} + {@code piperVoice} (TTS) to serve. Mirrors
+     * {@code VoiceChannel.onStart}, which gates on {@code Spec.isReady()} — all FOUR present — and warns +
+     * no-ops otherwise, so an enabled config with only the two binaries (no models) must not count as
+     * serving or the binary would hang in server mode serving nothing (the M17 trap).
      */
     static final String VOICE_ID = "voice";
 
@@ -88,7 +88,7 @@ public class ChannelLauncher {
             MATRIX_ID, Set.of("homeserver", "accessToken", "userId"),
             SIGNAL_ID, Set.of("baseUrl", "account"),
             WHATSAPP_ID, Set.of("verifyToken", "appSecret", "accessToken", "phoneNumberId"),
-            VOICE_ID, Set.of("whisperBin", "piperBin"));
+            VOICE_ID, Set.of("whisperBin", "whisperModel", "piperBin", "piperVoice"));
 
     /** Channel ids whose enablement keeps the process alive to serve. */
     static final Set<String> SERVER_CHANNELS =
