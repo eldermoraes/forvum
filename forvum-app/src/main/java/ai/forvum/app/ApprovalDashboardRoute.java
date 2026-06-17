@@ -30,6 +30,12 @@ import java.util.List;
  * directly; an approval orphaned by a restart is resolved against the SQLite queue (and an approve
  * re-dispatches its turn, R1). An unknown or already-resolved id returns {@code handled=false} with HTTP
  * 200 — the client reads the flag.
+ *
+ * <p><strong>v0.5 trust model:</strong> like {@code /q/dashboard/capr}, these endpoints are NOT
+ * authenticated — they assume a local, trusted operator and the deployment binding the HTTP listener to a
+ * trusted interface (the default host). A POST approve/reject mutates state, so do not expose the listener
+ * to an untrusted network without a reverse-proxy auth layer; dashboard authentication is a documented
+ * fast-follow.
  */
 @ApplicationScoped
 public class ApprovalDashboardRoute {

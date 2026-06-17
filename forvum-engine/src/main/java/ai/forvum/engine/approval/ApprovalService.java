@@ -25,7 +25,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * The P2-14 #39 blocking, SQLite-backed user-approval gate for {@code USER_CONFIRM_REQUIRED} tool calls
@@ -52,6 +51,22 @@ public class ApprovalService implements ApprovalGate {
 
     private static final Logger LOG = Logger.getLogger(ApprovalService.class);
 
+    /**
+     * Distinguished decision an automatic timeout completes the parked future with (compared by identity).
+     * Using {@code completeOnTimeout} rather than {@code get(timeout)} makes the timeout an atomic completion,
+     * so a late {@code decide()} sees the future already completed (its {@code complete} returns {@code false})
+     * and reports not-handled — closing the race where the dashboard claimed success after the turn denied.
+     */
+    private static final ApprovalDecision TIMEOUT_SENTINEL = new ApprovalDecision(false, "timeout");
+
+    /**
+     * The exact {@code (session,tool,args)} grants authorized for the CURRENT re-dispatched turn (R1), bound
+     * ONLY on the re-dispatch virtual thread for the duration of that turn. A turn-scoped {@link ScopedValue}
+     * — not a process-global set — so the grant can NEVER leak to a concurrent or later turn (the source of a
+     * silent confirm-gate bypass): an unrelated turn simply has no binding.
+     */
+    private static final ScopedValue<Set<String>> REDISPATCH_PREAPPROVALS = ScopedValue.newInstance();
+
     @Inject
     ApprovalStore store;
 
@@ -67,16 +82,14 @@ public class ApprovalService implements ApprovalGate {
     private final ConcurrentMap<String, CompletableFuture<ApprovalDecision>> pending =
             new ConcurrentHashMap<>();
 
-    /** Single-use {@code (session,tool,args)} grants the R1 re-dispatch path consumes (see {@link #decide}). */
-    private final Set<String> preApproved = ConcurrentHashMap.newKeySet();
-
     /** Runs an R1 re-dispatch off the decision thread; a same-thread executor in tests. */
     Executor dispatchExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     @Override
     public boolean requireApproval(String sessionId, AgentId agentId, String toolName, String arguments) {
-        // R1: a restart-orphaned request the owner approved pre-authorizes its exact re-run (single-use).
-        if (consumePreApproval(sessionId, toolName, arguments)) {
+        // R1: this exact call is pre-authorized iff we are INSIDE the re-dispatched turn that the owner
+        // approved (the binding is turn-scoped, so it cannot leak to any other turn).
+        if (isPreApprovedInScope(sessionId, toolName, arguments)) {
             return true;
         }
         String userMessage = CurrentAgent.CURRENT_USER_MESSAGE.isBound()
@@ -99,18 +112,21 @@ public class ApprovalService implements ApprovalGate {
             return false;
         }
 
-        // Async: block until the web dashboard decides via decide(), or time out to deny. No DB connection
-        // is held across the wait.
+        // Async: block until the web dashboard decides via decide(), or the timeout completes the future with
+        // the sentinel. No DB connection is held across the wait. completeOnTimeout makes the timeout an
+        // ATOMIC completion, so a late decide() sees the future already done and reports not-handled.
         CompletableFuture<ApprovalDecision> future = new CompletableFuture<>();
+        future.completeOnTimeout(TIMEOUT_SENTINEL, timeoutSeconds, TimeUnit.SECONDS);
         pending.put(id, future);
         try {
-            ApprovalDecision decision = future.get(timeoutSeconds, TimeUnit.SECONDS);
+            ApprovalDecision decision = future.get();
+            if (decision == TIMEOUT_SENTINEL) {
+                store.resolve(id, ApprovalStatus.TIMED_OUT, "timeout");
+                return false;
+            }
             store.resolve(id, decision.approved() ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED,
                     decision.reason());
             return decision.approved();
-        } catch (TimeoutException e) {
-            store.resolve(id, ApprovalStatus.TIMED_OUT, "timeout");
-            return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             store.resolve(id, ApprovalStatus.REJECTED, "interrupted");
@@ -151,8 +167,9 @@ public class ApprovalService implements ApprovalGate {
             store.resolve(id, ApprovalStatus.REJECTED, reason == null ? "rejected" : reason);
             return true;
         }
-        markPreApproved(p.sessionId(), p.toolName(), p.arguments());
         store.resolve(id, ApprovalStatus.APPROVED, reason == null ? "approved_redispatch" : reason);
+        // R1 re-dispatch pre-authorizes the exact call ONLY within the replay turn (reDispatch binds the
+        // turn-scoped grant), so it cannot leak to any other turn.
         reDispatch(p, store.userMessageFor(id).orElse(null));
         return true;
     }
@@ -171,10 +188,14 @@ public class ApprovalService implements ApprovalGate {
         String channelId = p.sessionId().substring(0, sep);
         String nativeUserId = p.sessionId().substring(sep + 1);
         ChannelMessage message = new ChannelMessage(channelId, nativeUserId, userMessage, Instant.now());
-        // NON_INTERACTIVE so any OTHER confirm-required tool in the replay denies fast (only the pre-approved
-        // one auto-approves); the original requester's connection is gone, so the reply is logged, not sent.
+        Set<String> grants = Set.of(preApprovalKey(p.sessionId(), p.toolName(), p.arguments()));
+        // Bind, FOR THIS REPLAY TURN ONLY: the exact-call grant (so its identical tool call auto-approves)
+        // and NON_INTERACTIVE (so any OTHER confirm-required tool in the replay denies fast). Both bindings
+        // are torn down when the turn returns — no cross-turn leak. The original requester's connection is
+        // gone, so the reply is logged, not sent.
         dispatchExecutor.execute(() ->
                 ScopedValue.where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE)
+                        .where(REDISPATCH_PREAPPROVALS, grants)
                         .run(() -> turns.dispatch(message, this::logReplayEvent)));
     }
 
@@ -186,13 +207,14 @@ public class ApprovalService implements ApprovalGate {
         return sessionId + ' ' + toolName + ' ' + arguments;
     }
 
-    private void markPreApproved(String sessionId, String toolName, String arguments) {
-        preApproved.add(preApprovalKey(sessionId, toolName, arguments));
-    }
-
-    /** Consume a single-use pre-approval for an exact call; package-private for the re-dispatch unit test. */
-    boolean consumePreApproval(String sessionId, String toolName, String arguments) {
-        return preApproved.remove(preApprovalKey(sessionId, toolName, arguments));
+    /**
+     * True iff the current thread is executing inside a re-dispatched turn whose owner pre-authorized this
+     * exact {@code (session,tool,args)} call. Package-private so the re-dispatch unit test can assert the
+     * grant is visible DURING the replay and absent outside it.
+     */
+    boolean isPreApprovedInScope(String sessionId, String toolName, String arguments) {
+        return REDISPATCH_PREAPPROVALS.isBound()
+                && REDISPATCH_PREAPPROVALS.get().contains(preApprovalKey(sessionId, toolName, arguments));
     }
 
     /** Every still-pending approval, for the dashboard. */

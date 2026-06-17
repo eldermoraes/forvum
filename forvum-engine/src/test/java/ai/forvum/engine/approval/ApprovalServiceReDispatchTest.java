@@ -7,14 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.event.AgentEvent;
-import ai.forvum.core.id.AgentId;
+import ai.forvum.core.event.Done;
+import ai.forvum.sdk.ApprovalContext;
 import ai.forvum.sdk.ChannelTurnDriver;
 
 import jakarta.enterprise.inject.Vetoed;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -26,9 +29,7 @@ import java.util.function.Consumer;
  */
 class ApprovalServiceReDispatchTest {
 
-    private static final AgentId AGENT = new AgentId("main");
-
-    private ApprovalService service(RecordingStore store, RecordingDriver driver) {
+    private ApprovalService service(RecordingStore store, ChannelTurnDriver driver) {
         ApprovalService service = new ApprovalService();
         service.store = store;
         service.turns = driver;
@@ -78,23 +79,25 @@ class ApprovalServiceReDispatchTest {
     }
 
     @Test
-    void approvingAnOrphanPreApprovesTheExactCallOnceForTheReDispatchedTurn() {
+    void orphanApproveGrantsTheExactCallOnlyWithinTheReplayTurnAndBindsNonInteractive() {
+        // The pre-approval grant must be visible to requireApproval DURING the re-dispatched turn, carry the
+        // NON_INTERACTIVE flag (so other confirm tools in the replay deny), and NOT leak outside the turn —
+        // the turn-scoped ScopedValue cannot become a standing auto-approve for a later unrelated call.
         RecordingStore store = new RecordingStore();
         store.pending = new PendingApproval("ap-3", "web:tab-7", "main", "shell.exec", "{\"cmd\":\"ls\"}", 10L);
         store.userMessage = "list files";
-        RecordingDriver driver = new RecordingDriver();
+        ProbingDriver driver = new ProbingDriver("web:tab-7", "shell.exec", "{\"cmd\":\"ls\"}");
         ApprovalService service = service(store, driver);
+        driver.service = service;
 
         service.decide("ap-3", true, "ok");
 
-        // The re-dispatched turn's identical tool call is auto-approved without prompting/blocking...
-        assertTrue(service.requireApproval("web:tab-7", AGENT, "shell.exec", "{\"cmd\":\"ls\"}"),
-                "the pre-approved call must be auto-approved");
-        // ...exactly once: a second identical call is no longer pre-approved (single-use). With no
-        // interactive prompter and the non-interactive flag unbound, it falls to the async path — assert
-        // the pre-approval was consumed by checking it is NOT auto-approved synchronously.
-        assertFalse(service.consumePreApproval("web:tab-7", "shell.exec", "{\"cmd\":\"ls\"}"),
-                "the pre-approval is single-use and must already be consumed");
+        assertEquals(Boolean.TRUE, driver.preApprovedDuringReplay,
+                "the exact call must be pre-approved DURING the re-dispatched turn");
+        assertTrue(driver.nonInteractiveDuringReplay,
+                "the replay must bind NON_INTERACTIVE so any OTHER confirm tool denies fast");
+        assertFalse(service.isPreApprovedInScope("web:tab-7", "shell.exec", "{\"cmd\":\"ls\"}"),
+                "the grant must NOT leak outside the replay turn (no standing auto-approve)");
     }
 
     /** A {@code @Vetoed} {@link ApprovalStore} double — overrides bypass the @Transactional interceptors. */
@@ -133,6 +136,29 @@ class ApprovalServiceReDispatchTest {
         @Override
         public void dispatch(ChannelMessage message, Consumer<AgentEvent> sink) {
             this.message.set(message);
+        }
+    }
+
+    /** Probes, DURING the replay turn, whether the exact call is pre-approved and NON_INTERACTIVE is bound. */
+    static final class ProbingDriver implements ChannelTurnDriver {
+        ApprovalService service;
+        private final String sessionId;
+        private final String tool;
+        private final String args;
+        Boolean preApprovedDuringReplay;
+        boolean nonInteractiveDuringReplay;
+
+        ProbingDriver(String sessionId, String tool, String args) {
+            this.sessionId = sessionId;
+            this.tool = tool;
+            this.args = args;
+        }
+
+        @Override
+        public void dispatch(ChannelMessage message, Consumer<AgentEvent> sink) {
+            preApprovedDuringReplay = service.isPreApprovedInScope(sessionId, tool, args);
+            nonInteractiveDuringReplay = ApprovalContext.NON_INTERACTIVE.orElse(Boolean.FALSE);
+            sink.accept(new Done(Instant.now(), UUID.randomUUID(), "ok"));
         }
     }
 }

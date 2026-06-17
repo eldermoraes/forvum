@@ -1283,16 +1283,27 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `@ActivateRequestContext` on the store methods makes them work on ANY thread (the turn's, a one-shot/cron
   thread, the dashboard's blocked-turn thread) for the request-scoped `EntityManager`; each op is
   self-contained so a nested context is harmless. `ConcurrentHashMap` + `CompletableFuture` carry the
-  cross-thread hand-off — no `synchronized` (§3.8); `CompletableFuture.get(timeout)` on a VT parks, no pin.
+  cross-thread hand-off — no `synchronized` (§3.8); a blocking `CompletableFuture` on a VT parks, no pin.
+  **Use `future.completeOnTimeout(SENTINEL, t, SECONDS)` + `future.get()`, NOT `get(timeout)`:** the timeout
+  becomes an ATOMIC completion, so a late dashboard `decide()` (which returns `future.complete(...)`'s result)
+  sees the future already done and reports not-handled — instead of `complete()` succeeding and the dashboard
+  claiming success AFTER the waiter already saw `TimeoutException` and resolved `timed_out` (the
+  timeout-vs-decide lie the 6-dim review flagged).
 - **R1 restart-recovery: a pending row SURVIVES a restart (it is NOT auto-timed-out on boot); approving the
   orphan re-dispatches the turn — best-effort, not exact resume.** When `decide(id)` finds no live future in
-  THIS process (the row outlived its turn thread), it resolves the queue row and, on approve, marks a
-  single-use pre-approval for the exact `(session,tool,args)` and re-dispatches the turn from the stored
-  `user_message` via the SDK `ChannelTurnDriver` on a fresh VT (binding `NON_INTERACTIVE` so any OTHER
-  confirm in the replay denies; the reply is logged — the original connection is gone). `requireApproval`
-  consumes the pre-approval FIRST (auto-approve, no row), so the re-run's identical call passes without
-  re-prompting. Exact checkpoint/resume is R2, deferred — it conflicts with the M18 R6 "no checkpointer /
-  in-memory langchain4j conversation" stance, tracked in its own issue. Inject `ChannelTurnDriver` (not the
+  THIS process (the row outlived its turn thread), it resolves the queue row and, on approve, re-dispatches
+  the turn from the stored `user_message` via the SDK `ChannelTurnDriver` on a fresh VT, binding two things
+  FOR THAT REPLAY TURN ONLY: `NON_INTERACTIVE` (so any OTHER confirm in the replay denies) and a turn-scoped
+  `ScopedValue` grant of the exact `(session,tool,args)` key; `requireApproval` auto-approves a call whose key
+  is in the bound grant (no row), so the re-run's identical call passes without re-prompting. The reply is
+  logged — the original connection is gone. **6-dim review caught a real MAJOR here:** an earlier cut kept the
+  grant in a PROCESS-GLOBAL set with no TTL, so a divergent replay (the model not re-emitting the exact call)
+  left it dangling and a LATER unrelated same-session identical call would silently auto-approve — a
+  confirm-gate BYPASS. The fix is the turn-scoped `ScopedValue` (bound only on the replay VT), which cannot
+  reach any other turn (an unrelated turn has no binding); pin it with a test asserting the grant is visible
+  DURING the replay and absent outside it (a process-global set would NOT have that property). Exact
+  checkpoint/resume is R2, deferred — it conflicts with the M18 R6 "no checkpointer / in-memory langchain4j
+  conversation" stance, tracked as #138. Inject `ChannelTurnDriver` (not the
   concrete `TurnService`) into `ApprovalService` — the @ApplicationScoped proxy cycle
   (ApprovalService→TurnService→…→ToolExecutor→ApprovalGate→ApprovalService) is broken by CDI proxies, but
   the SDK interface keeps the coupling clean. A same-thread `Executor` field makes re-dispatch
