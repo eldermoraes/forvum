@@ -23,6 +23,14 @@ public final class CurrentAgent {
     /** Turn correlation id, bound nested under {@link #CURRENT_AGENT} at turn start. */
     public static final ScopedValue<UUID> CURRENT_TURN = ScopedValue.newInstance();
 
+    /**
+     * The originating user message of the turn, bound at the channel turn entry (P2-14 #39). The approval
+     * machinery captures it on a parked confirm-required call so an approval orphaned by a process restart
+     * can re-dispatch the turn from it (R1). Unbound for entries with no user prompt (cron), where
+     * re-dispatch does not apply.
+     */
+    public static final ScopedValue<String> CURRENT_USER_MESSAGE = ScopedValue.newInstance();
+
     private CurrentAgent() {
     }
 }

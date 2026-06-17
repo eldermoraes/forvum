@@ -9,6 +9,7 @@ import ai.forvum.core.InvocationStatus;
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.approval.ApprovalGate;
 import ai.forvum.engine.model.InMemoryToolInvocationRecorder;
 import ai.forvum.engine.tools.ToolCallBridge;
 import ai.forvum.engine.tools.ToolTestFixtures;
@@ -144,6 +145,89 @@ class SupervisorGraphTest {
         graph.workerRunner = workerRunner;
         graph.mapper = new ObjectMapper();
         return graph;
+    }
+
+    private SupervisorGraph graphWith(InMemoryToolInvocationRecorder recorder, ApprovalGate gate,
+            ToolProvider provider) {
+        SupervisorGraph graph = new SupervisorGraph();
+        graph.toolCallBridge = ToolTestFixtures.bridge(recorder, gate, provider);
+        graph.workerRunner = workerRunner;
+        graph.mapper = new ObjectMapper();
+        return graph;
+    }
+
+    private static final ToolSpec SHELL_EXEC = new ToolSpec("shell.exec", "Run a shell command",
+            PermissionScope.FS_WRITE,
+            "{\"type\":\"object\",\"properties\":{\"cmd\":{\"type\":\"string\"}},\"required\":[\"cmd\"]}",
+            true);
+
+    private static ToolProvider confirmProvider(String cannedResult) {
+        return new AbstractToolProvider() {
+            @Override
+            public String extensionId() {
+                return "fake-confirm";
+            }
+
+            @Override
+            public List<ToolSpec> tools() {
+                return List.of(SHELL_EXEC);
+            }
+
+            @Override
+            public String invoke(String toolName, Map<String, Object> arguments) {
+                return cannedResult;
+            }
+        };
+    }
+
+    private static AiMessage shellCall() {
+        return AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("call-c").name("shell.exec").arguments("{\"cmd\":\"ls\"}").build()))
+                .build();
+    }
+
+    @Test
+    void confirmRequiredToolRunsWhenTheApprovalGateApproves() {
+        // P2-14 #39: a confirm-required tool the model requests is parked through the gate; an approve lets
+        // it run inside the turn and the result feeds back to the model exactly like a normal tool.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        ApprovalGate approve = (sessionId, agentId, tool, args) -> true;
+        SupervisorGraph graph = graphWith(recorder, approve, confirmProvider("listing done"));
+
+        ScriptedChatModel model = new ScriptedChatModel(shellCall(), AiMessage.from("Done: listing done"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("you can run shell"),
+                UserMessage.from("list the files"));
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(SHELL_EXEC), seed));
+
+        assertEquals("Done: listing done", reply);
+        assertEquals(1, recorder.invocations().size(), "the approved tool ran once");
+        assertSame(InvocationStatus.OK, recorder.invocations().get(0).status(), "and audited ok");
+        assertTrue(hasToolResult(model.seen.get(1), "listing done"),
+                "the approved tool's result must feed back to the model");
+    }
+
+    @Test
+    void confirmRequiredToolDeclinedByTheGateStillCompletesTheTurnAndIsAuditedDenied() {
+        // A reject denies the call WITHOUT running it (audited denied) and feeds a clear "declined" result
+        // back, so the model can explain — the turn still completes rather than aborting.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        ApprovalGate reject = (sessionId, agentId, tool, args) -> false;
+        SupervisorGraph graph = graphWith(recorder, reject, confirmProvider("must not run"));
+
+        ScriptedChatModel model = new ScriptedChatModel(shellCall(),
+                AiMessage.from("I could not run that — you declined it."));
+        List<ChatMessage> seed = List.of(SystemMessage.from("you can run shell"),
+                UserMessage.from("list the files"));
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(SHELL_EXEC), seed));
+
+        assertEquals("I could not run that — you declined it.", reply, "the turn completes, it does not abort");
+        assertEquals(1, recorder.invocations().size());
+        assertSame(InvocationStatus.DENIED, recorder.invocations().get(0).status(), "the declined call is audited denied");
+        assertTrue(hasToolResult(model.seen.get(1), "declined"),
+                "the model must see a clear declined result, not a generic 'not permitted'");
     }
 
     @Test

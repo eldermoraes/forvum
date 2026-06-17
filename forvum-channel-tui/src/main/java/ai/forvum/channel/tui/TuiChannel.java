@@ -8,6 +8,8 @@ import ai.forvum.core.event.FallbackTriggered;
 import ai.forvum.core.event.TokenDelta;
 import ai.forvum.core.event.ToolInvoked;
 import ai.forvum.core.event.ToolResult;
+import ai.forvum.sdk.ApprovalContext;
+import ai.forvum.sdk.ApprovalPrompter;
 import ai.forvum.sdk.ChannelTurnDriver;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -23,6 +25,7 @@ import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.function.Consumer;
 
 /**
  * The terminal (TUI) channel's inbound surface (ULTRAPLAN section 5.3, M15). A line-based stdin REPL:
@@ -119,12 +122,13 @@ public class TuiChannel {
                     }
                 }
                 ChannelMessage message = new ChannelMessage(CHANNEL_ID, user, line, Instant.now());
-                turns.dispatch(message, event -> {
+                Consumer<AgentEvent> sink = event -> {
                     String rendered = render(event);
                     if (rendered != null && !rendered.isEmpty()) {
                         out.print(view.render(rendered));
                     }
-                });
+                };
+                dispatchWithApprovalContext(message, sink, reader, out, interactive);
                 out.println();
                 out.flush();
             }
@@ -132,6 +136,44 @@ public class TuiChannel {
             throw new UncheckedIOException("Failed reading TUI stdin.", e);
         }
         return 0;
+    }
+
+    /**
+     * Drive a turn, binding the P2-14 #39 approval-resolution context for it. An interactive REPL binds a
+     * console {@link ApprovalPrompter} so a {@code USER_CONFIRM_REQUIRED} tool prompts the operator on the
+     * terminal (the TTY fallback); a piped (non-TTY) session — which cannot prompt — binds
+     * {@link ApprovalContext#NON_INTERACTIVE} so such a tool denies immediately rather than block. The
+     * binding propagates across the {@code dispatch → SupervisorGraph → ToolExecutor} chain on this thread.
+     */
+    private void dispatchWithApprovalContext(ChannelMessage message, Consumer<AgentEvent> sink,
+            BufferedReader reader, PrintStream out, boolean interactive) {
+        if (interactive) {
+            ScopedValue.where(ApprovalContext.PROMPTER, consolePrompter(reader, out))
+                    .run(() -> turns.dispatch(message, sink));
+        } else {
+            ScopedValue.where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE)
+                    .run(() -> turns.dispatch(message, sink));
+        }
+    }
+
+    /**
+     * A prompter that asks on {@code out} and reads a {@code y}/{@code N} answer from the REPL's stdin (the
+     * same {@code reader} the loop uses, so the next typed line is the decision). Only {@code y}/{@code yes}
+     * (case-insensitive) approves; anything else — including an unreadable stream — denies.
+     */
+    private static ApprovalPrompter consolePrompter(BufferedReader reader, PrintStream out) {
+        return (agentId, tool, args) -> {
+            out.println();
+            out.print("Approve tool '" + tool + "'? args=" + args + "  [y/N] ");
+            out.flush();
+            try {
+                String answer = reader.readLine();
+                return answer != null
+                        && (answer.trim().equalsIgnoreCase("y") || answer.trim().equalsIgnoreCase("yes"));
+            } catch (IOException e) {
+                return false;
+            }
+        };
     }
 
     /** The native user id stamped on each turn: the OS username, or {@code local} if unavailable. */

@@ -1249,3 +1249,93 @@ Generalizable lessons from completed milestones; append here as milestones land.
   reason `CURRENT_AGENT` is re-bound in the worker), so a spawned worker's spans orphan — capture
   `Context parent = Context.current()` before the loop and submit `parent.wrap(task)`. `opentelemetry-sdk-testing`
   resolves via the OTel BOM transitive to `quarkus-opentelemetry` (no pin). [P2-15]
+- **A `USER_CONFIRM_REQUIRED` approval gate is the THIRD tool gate (belt → RBAC → approval), blocks the
+  turn's own virtual thread, and audits TWO surfaces — the queue owns the lifecycle, `tool_invocations`
+  stays append-only.** P2-14 #39: `ToolSpec` grows an additive 5th `boolean userConfirmRequired` (4-arg
+  ctor delegates `false`, so every pre-#39 call site + JSON spec is unchanged — no migration on
+  `tool_invocations`). `ToolExecutor` consults a narrow engine `ApprovalGate` (sole impl `ApprovalService`)
+  ONLY when `tool.userConfirmRequired()` AND after the two existing gates pass (no point parking a call the
+  identity may not make). On reject/timeout it audits a `denied` `tool_invocations` row + throws
+  `ApprovalDeniedException` (a `PermissionDeniedException` subtype → `SupervisorGraph.runTool` catches it
+  FIRST, before the generic arm, for a clear model-facing "you declined it" result; the turn COMPLETES,
+  same non-abort behavior as a belt miss [TEST-SEC]). **Audit decision (maintainer-ratified over the
+  ULTRAPLAN DP-9 literal):** the new `tool_approvals` queue (`V4__approvals.sql`, the `tasks`-style recipe:
+  TEXT-UUID PK, `status` pending|approved|rejected|timed_out, 2 indexes) carries the parked lifecycle;
+  `tool_invocations` records exactly ONE terminal row — NOT a parked `confirm_required` row + a resolve
+  (that would double rows and break append-only). The §14 [M5] "head bump → bump `SchemaSmokeIT`" rule
+  applies: V3→V4, + the table/indexes in EXPECTED_TABLES/INDEXES.
+- **The resolution-mode seam lives in `forvum-sdk` (interfaces, jacoco-clean), so a Layer-3 channel binds
+  it without depending on the engine; the engine reads it on the turn's one VT (like `CURRENT_AGENT`).**
+  `ApprovalContext` (an INTERFACE with two `ScopedValue` constants — no ctor → no per-module jacoco line,
+  unlike a holder class) + the `ApprovalPrompter` functional interface. Per-turn binding selects the mode:
+  `PROMPTER` bound → synchronous TTY prompt (the interactive TUI binds a console y/N prompter reading the
+  same stdin `BufferedReader`); `NON_INTERACTIVE` true → immediate deny (one-shot `forvum ask`, cron, piped
+  TUI — no surface); neither → async, the engine parks + blocks on an in-memory `CompletableFuture` the web
+  `/q/dashboard/approvals` `POST .../{id}/approve|reject` completes, timing out (`forvum.approval.timeout-seconds`,
+  default 300) to deny. `TurnService.dispatch` additionally binds `CurrentAgent.CURRENT_USER_MESSAGE`
+  (engine ScopedValue) for R1 capture. **Two ScopedValue traps:** (1) `where` is STATIC —
+  `ScopedValue.where(KEY, v).call(...)`, never `KEY.where(v)`; (2) `ScopedValue.orElse(null)` throws
+  (`requireNonNull`) — for a nullable read use `isBound() ? get() : null`, reserve `orElse(x)` for non-null x.
+- **Persist the pending row BEFORE blocking, in a separate `@Transactional` + `@ActivateRequestContext`
+  bean — never hold a connection across the wait** ([M7]/[M16]). `ApprovalStore` (not inlined into
+  `ApprovalService`, so the calls cross the CDI proxy and the interceptors fire) commits the `pending` row,
+  then `ApprovalService` blocks the VT connection-free, then a short `resolve` tx commits the outcome.
+  `@ActivateRequestContext` on the store methods makes them work on ANY thread (the turn's, a one-shot/cron
+  thread, the dashboard's blocked-turn thread) for the request-scoped `EntityManager`; each op is
+  self-contained so a nested context is harmless. `ConcurrentHashMap` + `CompletableFuture` carry the
+  cross-thread hand-off — no `synchronized` (§3.8); a blocking `CompletableFuture` on a VT parks, no pin.
+  **Use `future.completeOnTimeout(SENTINEL, t, SECONDS)` + `future.get()`, NOT `get(timeout)`:** the timeout
+  becomes an ATOMIC completion, so a late dashboard `decide()` (which returns `future.complete(...)`'s result)
+  sees the future already done and reports not-handled — instead of `complete()` succeeding and the dashboard
+  claiming success AFTER the waiter already saw `TimeoutException` and resolved `timed_out` (the
+  timeout-vs-decide lie the 6-dim review flagged).
+- **R1 restart-recovery: a pending row SURVIVES a restart (it is NOT auto-timed-out on boot); approving the
+  orphan re-dispatches the turn — best-effort, not exact resume.** When `decide(id)` finds no live future in
+  THIS process (the row outlived its turn thread), it resolves the queue row and, on approve, re-dispatches
+  the turn from the stored `user_message` via the SDK `ChannelTurnDriver` on a fresh VT, binding two things
+  FOR THAT REPLAY TURN ONLY: `NON_INTERACTIVE` (so any OTHER confirm in the replay denies) and a turn-scoped
+  `ScopedValue` grant of the exact `(session,tool,args)` key; `requireApproval` auto-approves a call whose key
+  is in the bound grant (no row), so the re-run's identical call passes without re-prompting. The reply is
+  logged — the original connection is gone. **6-dim review caught a real MAJOR here:** an earlier cut kept the
+  grant in a PROCESS-GLOBAL set with no TTL, so a divergent replay (the model not re-emitting the exact call)
+  left it dangling and a LATER unrelated same-session identical call would silently auto-approve — a
+  confirm-gate BYPASS. The fix is the turn-scoped `ScopedValue` (bound only on the replay VT), which cannot
+  reach any other turn (an unrelated turn has no binding); pin it with a test asserting the grant is visible
+  DURING the replay and absent outside it (a process-global set would NOT have that property). Exact
+  checkpoint/resume is R2, deferred — it conflicts with the M18 R6 "no checkpointer / in-memory langchain4j
+  conversation" stance, tracked as #138. Inject `ChannelTurnDriver` (not the
+  concrete `TurnService`) into `ApprovalService` — the @ApplicationScoped proxy cycle
+  (ApprovalService→TurnService→…→ToolExecutor→ApprovalGate→ApprovalService) is broken by CDI proxies, but
+  the SDK interface keeps the coupling clean. A same-thread `Executor` field makes re-dispatch
+  deterministically observable in a plain unit test (a `@Vetoed` `ApprovalStore` stub + a recording
+  `ChannelTurnDriver`), so the DB-backed resolution modes (interactive/non-interactive/async/timeout) are
+  the only part needing a `@QuarkusTest` IT.
+- **The web approval surface mirrors `CaprDashboardRoute` exactly (X6): a `quarkus-reactive-routes`
+  `@Route` over the already-present `vertx-http`, server-path only, ZERO cold-start impact.** GET returns a
+  value (auto-JSON) of `@RegisterForReflection` Layer-4 view records; POST uses `@Param("id")` for the path
+  var (confirmed via the Dev MCP, NOT guessed — §7) and returns `{handled, id}` with HTTP 200 even for an
+  unknown id (the client reads the flag; a 404 would need `RoutingContext`). `type = BLOCKING` for the
+  Panache work; no `@Startup`/observer so command-mode boot is untouched. The e2e seeds orphaned rows via
+  the engine `ApprovalStore` and drives real GET/POST — no live model. **CI runs `verify`, not `test`:** the
+  new `forvum-sdk` `ApprovalContext` (an interface whose `<clinit>` runs `ScopedValue.newInstance()`) needed
+  a 3-test `ApprovalContextTest` to keep the module's jacoco gate green — `./mvnw verify` locally before
+  pushing, never just `test` ([P2-OUTPUTGUARD]). **And the CI concurrency-guardrails step is NOT part of
+  `verify`** — run `bash .github/concurrency-guardrails.sh` locally too. It cost a red CI here: a separator
+  char literal in `preApprovalKey` had been written as a RAW NUL byte (`'<NUL>'`) instead of the escape
+  `'\0'` — javac + every local build/test/native accepted it (char 0), but the raw NUL made `grep` treat the
+  whole file as BINARY, which DEFEATED the guardrail's comment-exclusion and falsely flagged the Javadoc's
+  `{@code synchronized}` mention as a hot-path violation. Two lessons: editor/tool round-trips can silently
+  turn an intended space into a control byte in a char literal (use the explicit escape `'\0'`, and a quick
+  `python3 -c "...count(b'\x00')"` over changed files catches it); and the guardrail grep's
+  legitimate-Javadoc-mention exclusion only works on a TEXT file.
+- **A wall-clock assertion or a fixed poll window in a `@QuarkusTest` IT is fragile on a cold/loaded CI
+  runner — assert SEMANTICS, and warm the persistence in `@BeforeEach`.** The P2-14 `ApprovalServiceIT`
+  passed locally + on ubuntu CI but failed BOTH macos-14 cells (JVM + native): the FIRST DB op pays
+  Quarkus's lazy datasource/Hibernate/Agroal init, observed at ~5 s (JVM cell) and ~13 s (native cell, the
+  box is loaded right after the native-image build) — so a `< 1000 ms` "denies immediately" assertion and a
+  2 s `awaitPendingId` poll both blew their budget on the cold first op. Fixes: (1) assert the OUTCOME that
+  distinguishes the paths (`status == "rejected"` for the immediate-deny path vs the timeout path's
+  `"timed_out"`) instead of timing; (2) a `@BeforeEach` warm-up (`service.listPending()`) pays the
+  one-time cold-start OUTSIDE every timed region, so the async approve/timeout arms run warm regardless of
+  JUnit method order; (3) keep the configured timeout + poll window generous and the poll window under the
+  timeout. macos-14 is the slow cell that catches this — ubuntu green is not enough confidence. [P2-14]

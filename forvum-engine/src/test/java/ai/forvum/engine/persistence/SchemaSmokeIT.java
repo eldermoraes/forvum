@@ -28,13 +28,13 @@ class SchemaSmokeIT {
 
     private static final List<String> EXPECTED_TABLES = List.of(
             "sessions", "messages", "episodic_memory", "semantic_memory",
-            "tool_invocations", "provider_calls", "capr_events", "tasks");
+            "tool_invocations", "provider_calls", "capr_events", "tasks", "tool_approvals");
 
     private static final List<String> EXPECTED_INDEXES = List.of(
             "idx_sessions_identity", "idx_sessions_lastseen", "idx_messages_session", "idx_messages_agent",
             "idx_episodic_agent_session", "idx_semantic_agent", "idx_tool_session", "idx_tool_agent",
             "idx_provider_session", "idx_provider_agent", "idx_provider_fallback", "idx_capr_agent",
-            "idx_tasks_agent", "idx_tasks_status");
+            "idx_tasks_agent", "idx_tasks_status", "idx_approvals_status", "idx_approvals_session");
 
     @Inject
     EntityManager em;
@@ -42,11 +42,12 @@ class SchemaSmokeIT {
     @Test
     void flywayMigratedToHeadAndAllTablesExist() {
         // V1 baseline + V2__tasks.sql (P2-TASKLEDGER, the 'tasks' table) + V3__compaction.sql (P2-COMPACT,
-        // the compaction columns), so the head version is now 3.
+        // the compaction columns) + V4__approvals.sql (P2-14 #39, the 'tool_approvals' queue), so the head
+        // version is now 4.
         Object version = em.createNativeQuery(
                 "select version from flyway_schema_history where success = 1 "
               + "order by installed_rank desc limit 1").getSingleResult();
-        assertEquals("3", String.valueOf(version), "Flyway must have migrated to the head version (V3)");
+        assertEquals("4", String.valueOf(version), "Flyway must have migrated to the head version (V4)");
 
         @SuppressWarnings("unchecked")
         List<String> tables = em.createNativeQuery(
