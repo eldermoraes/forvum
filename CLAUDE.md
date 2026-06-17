@@ -1327,4 +1327,15 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `{@code synchronized}` mention as a hot-path violation. Two lessons: editor/tool round-trips can silently
   turn an intended space into a control byte in a char literal (use the explicit escape `'\0'`, and a quick
   `python3 -c "...count(b'\x00')"` over changed files catches it); and the guardrail grep's
-  legitimate-Javadoc-mention exclusion only works on a TEXT file. [P2-14]
+  legitimate-Javadoc-mention exclusion only works on a TEXT file.
+- **A wall-clock assertion or a fixed poll window in a `@QuarkusTest` IT is fragile on a cold/loaded CI
+  runner — assert SEMANTICS, and warm the persistence in `@BeforeEach`.** The P2-14 `ApprovalServiceIT`
+  passed locally + on ubuntu CI but failed BOTH macos-14 cells (JVM + native): the FIRST DB op pays
+  Quarkus's lazy datasource/Hibernate/Agroal init, observed at ~5 s (JVM cell) and ~13 s (native cell, the
+  box is loaded right after the native-image build) — so a `< 1000 ms` "denies immediately" assertion and a
+  2 s `awaitPendingId` poll both blew their budget on the cold first op. Fixes: (1) assert the OUTCOME that
+  distinguishes the paths (`status == "rejected"` for the immediate-deny path vs the timeout path's
+  `"timed_out"`) instead of timing; (2) a `@BeforeEach` warm-up (`service.listPending()`) pays the
+  one-time cold-start OUTSIDE every timed region, so the async approve/timeout arms run warm regardless of
+  JUnit method order; (3) keep the configured timeout + poll window generous and the poll window under the
+  timeout. macos-14 is the slow cell that catches this — ubuntu green is not enough confidence. [P2-14]

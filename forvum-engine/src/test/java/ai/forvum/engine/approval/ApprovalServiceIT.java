@@ -13,6 +13,7 @@ import io.quarkus.test.junit.TestProfile;
 
 import jakarta.inject.Inject;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -41,6 +42,17 @@ class ApprovalServiceIT {
     @Inject
     ApprovalService service;
 
+    /**
+     * Warm the request context + Agroal connection + Hibernate session before any timed/timeout-sensitive
+     * assertion runs. The FIRST database op in this class pays Quarkus's lazy datasource init (observed at
+     * ~5 s cold on a loaded macOS CI runner); paying it here, OUTSIDE the timed regions, keeps the async
+     * approve/timeout tests from racing the configured timeout regardless of JUnit method order.
+     */
+    @BeforeEach
+    void warmUpPersistence() {
+        service.listPending();
+    }
+
     @Test
     void interactiveApproveRunsAndMarksApproved() throws Exception {
         String id = ScopedValue.where(ApprovalContext.PROMPTER, (agentId, tool, args) -> true)
@@ -64,17 +76,19 @@ class ApprovalServiceIT {
     }
 
     @Test
-    void nonInteractiveContextDeniesImmediately() throws Exception {
-        long start = System.nanoTime();
+    void nonInteractiveContextDeniesWithoutWaitingTheTimeout() throws Exception {
+        // The immediate-deny path resolves REJECTED; the async-timeout path would resolve TIMED_OUT. So a
+        // 'rejected' status proves the non-interactive branch was taken (it did NOT fall through to the
+        // blocking timeout path) — a semantic check, robust on a slow/cold CI runner where a wall-clock
+        // assertion is not (the first DB op alone can take seconds).
         String id = ScopedValue.where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE)
                 .call(() -> {
                     boolean approved = service.requireApproval("sess-noninteractive", AGENT, "a.danger", "{}");
                     assertFalse(approved, "a non-interactive context with no approval surface must deny");
                     return latestPendingOrResolvedId("sess-noninteractive");
                 });
-        long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
-        assertTrue(elapsedMs < 1_000, "a non-interactive deny must be immediate, not wait the timeout; took " + elapsedMs + "ms");
-        assertEquals("rejected", service.statusOf(id));
+        assertEquals("rejected", service.statusOf(id),
+                "non-interactive deny resolves 'rejected' (not 'timed_out'), proving it skipped the wait");
     }
 
     @Test
@@ -85,7 +99,7 @@ class ApprovalServiceIT {
                     () -> service.requireApproval("sess-async-ok", AGENT, "a.danger", "{}"));
             String id = awaitPendingId("sess-async-ok");
             assertTrue(service.decide(id, true, "looks fine"), "decide must complete the live future");
-            assertTrue(blocked.get(3, TimeUnit.SECONDS), "an out-of-band approve must release the blocked turn");
+            assertTrue(blocked.get(8, TimeUnit.SECONDS), "an out-of-band approve must release the blocked turn");
             assertEquals("approved", service.statusOf(id));
         } finally {
             exec.shutdownNow();
@@ -99,17 +113,21 @@ class ApprovalServiceIT {
             Future<Boolean> blocked = exec.submit(
                     () -> service.requireApproval("sess-async-timeout", AGENT, "a.danger", "{}"));
             String id = awaitPendingId("sess-async-timeout");
-            // No decision arrives → the 2s configured timeout fires and denies.
-            assertFalse(blocked.get(5, TimeUnit.SECONDS), "an unresolved confirmation must time out to deny");
+            // No decision arrives → the configured timeout (5s) fires and denies; wait past it with margin.
+            assertFalse(blocked.get(15, TimeUnit.SECONDS), "an unresolved confirmation must time out to deny");
             assertEquals("timed_out", service.statusOf(id));
         } finally {
             exec.shutdownNow();
         }
     }
 
-    /** Poll the pending queue until a row for {@code sessionId} appears (the async branch committed it). */
+    /**
+     * Poll the pending queue until a row for {@code sessionId} appears (the async branch committed it). The
+     * window (3s) stays under the configured timeout (5s) so the row is still {@code pending} when found,
+     * and the {@code warmUpPersistence} step keeps the first {@code createPending} from eating it.
+     */
     private String awaitPendingId(String sessionId) throws InterruptedException {
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 150; i++) {
             String id = service.listPending().stream()
                     .filter(p -> p.sessionId().equals(sessionId))
                     .map(PendingApproval::id)
@@ -128,7 +146,11 @@ class ApprovalServiceIT {
                 .orElseThrow(() -> new AssertionError("no approval row recorded for " + sessionId));
     }
 
-    /** A temp {@code $FORVUM_HOME} plus a 2s approval timeout so the timeout arm does not slow the suite. */
+    /**
+     * A temp {@code $FORVUM_HOME} plus a 5s approval timeout: short enough that the timeout arm does not slow
+     * the suite much, but long enough that the async-approve arm (which decides in milliseconds once the
+     * persistence is warm, see {@code warmUpPersistence}) never races it on a loaded CI runner.
+     */
     public static class ShortTimeoutProfile implements QuarkusTestProfile {
         static final Path HOME = createHome();
 
@@ -144,7 +166,7 @@ class ApprovalServiceIT {
         public Map<String, String> getConfigOverrides() {
             return Map.of(
                     "forvum.home", HOME.toString(),
-                    "forvum.approval.timeout-seconds", "2");
+                    "forvum.approval.timeout-seconds", "5");
         }
     }
 }
