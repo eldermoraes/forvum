@@ -34,6 +34,7 @@
         <module>forvum-provider-memory-qdrant</module>
         <module>forvum-tools-filesystem</module>
         <module>forvum-tools-mcp-bridge</module>
+        <module>forvum-tools-shell</module>
         <module>forvum-channel-web</module>
         <module>forvum-channel-tui</module>
         <module>forvum-channel-telegram</module>
