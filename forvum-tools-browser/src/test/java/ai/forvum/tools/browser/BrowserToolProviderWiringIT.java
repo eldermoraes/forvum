@@ -20,9 +20,11 @@ import java.util.stream.Collectors;
 
 /**
  * Verifies the browser tool WIRES under Quarkus: ArC discovers {@link BrowserToolProvider} as a
- * {@link ToolProvider} bean (the engine's ToolRegistry path), its {@code @ApplicationScoped} collaborators
- * ({@link CdpSession}/{@link BrowserConfig}) inject, and the {@code @WebSocketClient} {@link CdpEndpoint}
- * registers (the native-relevant CDI + websockets-next path the no-config smoke depends on). With no
+ * {@link ToolProvider} bean (the engine's ToolRegistry path) and its {@code @ApplicationScoped}
+ * collaborators ({@link CdpSession}/{@link BrowserConfig}) inject (the native-relevant CDI + websockets-next
+ * path the no-config smoke depends on — the CDP transport is now a {@code BasicWebSocketConnector} dialed
+ * from {@link CdpSession}, with NO {@code @WebSocketClient} endpoint, so it cannot collide with the discord
+ * gateway endpoint's {@code path = "/"} on the assembled app classpath). With no
  * {@code tools/browser.json} (the test pins {@code forvum.home} to an absent path), {@code invoke} returns
  * the graceful "disabled" error STRING — never throws and never opens a socket — the inert/graceful-absence
  * posture the CI native no-config smoke relies on ([M14]). Boots Quarkus in-JVM; runs under Surefire

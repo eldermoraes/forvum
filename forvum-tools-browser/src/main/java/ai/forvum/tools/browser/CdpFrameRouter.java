@@ -3,14 +3,6 @@ package ai.forvum.tools.browser;
 import ai.forvum.tools.browser.dto.CdpMessage;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import io.quarkus.websockets.next.OnClose;
-import io.quarkus.websockets.next.OnOpen;
-import io.quarkus.websockets.next.OnTextMessage;
-import io.quarkus.websockets.next.WebSocketClient;
-import io.quarkus.websockets.next.WebSocketClientConnection;
-import io.smallrye.common.annotation.RunOnVirtualThread;
 
 import org.jboss.logging.Logger;
 
@@ -19,40 +11,40 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
- * The CDP client endpoint over {@code quarkus-websockets-next} CLIENT mode (the native-clean transport the
- * P2-CH discord readiness spike compiled + booted). Connected by {@link CdpSession} to the page-target
- * {@code ws://localhost:9222/devtools/page/<id>} URL discovered from Chrome, it CORRELATES inbound frames:
+ * Pure (socket-free) Chrome DevTools Protocol (CDP) inbound-frame router: the response-correlation logic
+ * that previously lived in a {@code @WebSocketClient} endpoint, lifted into a plain object so it carries no
+ * declared WebSocket path (no {@code @WebSocketClient(path = "/")} to collide with the discord gateway
+ * endpoint on the assembled {@code forvum-app} classpath — the bug this refactor fixes) and is unit-testable
+ * with no live Chrome. {@link CdpSession} feeds every raw text frame from the
+ * {@link io.quarkus.websockets.next.BasicWebSocketConnector} {@code onTextMessage} callback into
+ * {@link #onFrame(String)}:
  *
  * <ul>
  *   <li>A command RESPONSE ({@code { "id": <n>, "result": {...} }} or {@code { ..., "error": {...} }}) is
- *       matched to its outbound command via {@link #pending} (keyed by the monotonic {@code CdpProtocol}
+ *       matched to its outbound command via {@link #pending} (keyed by the monotonic {@link CdpProtocol}
  *       id) and completes that command's {@link CompletableFuture}.</li>
  *   <li>An unsolicited EVENT ({@code { "method": "...", "params": {...} }}) is forwarded to the single
- *       registered {@link #eventListener} (e.g. {@code CdpSession} awaiting {@code Page.loadEventFired}).</li>
+ *       registered {@link #eventListener} (e.g. {@link CdpSession} buffering {@code Page.loadEventFired}).</li>
  * </ul>
  *
- * <p><strong>Concurrency (CLAUDE.md §3.8).</strong> Inbound frames run {@code @RunOnVirtualThread} so
- * handling blocks on a virtual thread, never the event loop. The correlation map is a
- * {@link ConcurrentHashMap} of {@link CompletableFuture} — no {@code synchronized}. {@code @WebSocketClient}
- * endpoints are CDI beans; this one is the default {@code @Singleton} (one CDP connection per process).
+ * <p><strong>Concurrency (CLAUDE.md §3.8).</strong> The correlation map is a {@link ConcurrentHashMap} of
+ * {@link CompletableFuture}; the listener is {@code volatile}. No {@code synchronized}. {@link #onFrame} is
+ * invoked on the connector's virtual-thread message callback (sending blocks on a virtual thread).
  */
-@WebSocketClient(path = "/")
-public class CdpEndpoint {
+public final class CdpFrameRouter {
 
-    private static final Logger LOG = Logger.getLogger(CdpEndpoint.class);
+    private static final Logger LOG = Logger.getLogger(CdpFrameRouter.class);
 
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final CdpProtocol protocol = new CdpProtocol(mapper);
+    private final CdpProtocol protocol;
 
-    /** Outstanding command ids → the future awaiting their response. Completed by {@link #onText}. */
+    /** Outstanding command ids → the future awaiting their response. Completed by {@link #onFrame}. */
     private final ConcurrentHashMap<Long, CompletableFuture<JsonNode>> pending = new ConcurrentHashMap<>();
 
     /** The single event listener (set by {@link CdpSession}); routed every unsolicited event. */
     private volatile Consumer<CdpMessage> eventListener;
 
-    /** The shared protocol (id allocator + builders) so {@link CdpSession} and the endpoint agree on ids. */
-    CdpProtocol protocol() {
-        return protocol;
+    public CdpFrameRouter(CdpProtocol protocol) {
+        this.protocol = protocol;
     }
 
     /** Register the (single) event listener; {@code null} clears it on close. */
@@ -61,7 +53,7 @@ public class CdpEndpoint {
     }
 
     /**
-     * Register a pending command id and return its future (resolved by {@link #onText} when the matching
+     * Register a pending command id and return its future (resolved by {@link #onFrame} when the matching
      * response arrives, or completed exceptionally on close / timeout by {@link CdpSession}).
      */
     CompletableFuture<JsonNode> awaitResponse(long id) {
@@ -75,19 +67,12 @@ public class CdpEndpoint {
         pending.remove(id);
     }
 
-    @OnOpen
-    void onOpen(WebSocketClientConnection connection) {
-        LOG.debug("CDP connection opened.");
-    }
-
     /**
-     * Handle one inbound CDP text frame on a virtual thread: parse → either complete the pending command
-     * future (a response) or forward to the event listener (an event). A parse/handle failure for one frame
-     * is logged and swallowed so a single bad frame never kills the session.
+     * Handle one inbound CDP text frame: parse → either complete the pending command future (a response) or
+     * forward to the event listener (an event). A parse/handle failure for one frame is logged and swallowed
+     * so a single bad frame never kills the session.
      */
-    @OnTextMessage
-    @RunOnVirtualThread
-    void onText(WebSocketClientConnection connection, String frame) {
+    void onFrame(String frame) {
         CdpMessage message;
         try {
             message = protocol.parse(frame);
@@ -116,8 +101,7 @@ public class CdpEndpoint {
     }
 
     /** The connection closed — fail every still-pending command so awaiting callers do not hang. */
-    @OnClose
-    void onClose(WebSocketClientConnection connection) {
+    void onClose() {
         LOG.debug("CDP connection closed; failing outstanding commands.");
         failAllPending(new CdpException("The CDP connection to Chrome closed."));
         eventListener = null;
@@ -127,5 +111,10 @@ public class CdpEndpoint {
     void failAllPending(CdpException cause) {
         pending.forEach((id, future) -> future.completeExceptionally(cause));
         pending.clear();
+    }
+
+    /** The current event listener — for tests only. */
+    Consumer<CdpMessage> eventListenerForTest() {
+        return eventListener;
     }
 }

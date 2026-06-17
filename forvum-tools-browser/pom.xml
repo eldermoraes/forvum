@@ -12,14 +12,23 @@
 
     <artifactId>forvum-tools-browser</artifactId>
 
+    <properties>
+        <!-- @Tag("live") tests (a real operator-launched Chrome on a remote-debugging port — BrowserLiveIT)
+             are off by default. Excluded via this Surefire user property (so a bare CLI -DexcludedGroups=
+             can clear it — a value hardcoded in the plugin <configuration> could NOT be overridden, the
+             forvum-app precedent). Run the live test with: -Dgroups=live -DexcludedGroups= -->
+        <excludedGroups>live</excludedGroups>
+    </properties>
+
     <name>Forvum Tools — Browser</name>
     <description>Layer-3 Forvum extension: browser automation (P2-1, #26). A hand-rolled Chrome DevTools
-        Protocol (CDP) client over quarkus-websockets-next (CLIENT mode, the discord transport) attaches to
-        an operator-launched Chrome (--remote-debugging-port) and contributes browser.navigate / snapshot /
-        extract / wait (read-only) + browser.click / type (USER_CONFIRM_REQUIRED) ToolSpecs under
-        PermissionScope.WEB_BROWSE. Discovery GETs run over java.net.http (the copilot pure-JDK seam); no
-        Playwright (Node-driver + bundled-browser download + reflection/CGLib, native-broken), no
-        langchain4j, no engine dependency.</description>
+        Protocol (CDP) client over quarkus-websockets-next (BasicWebSocketConnector dialing the full
+        discovered page-target URL — no @WebSocketClient endpoint, so no path-"/" collision with the discord
+        gateway endpoint on the assembled app classpath) attaches to an operator-launched Chrome
+        (--remote-debugging-port) and contributes browser.navigate / snapshot / extract / wait (read-only) +
+        browser.click / type (USER_CONFIRM_REQUIRED) ToolSpecs under PermissionScope.WEB_BROWSE. Discovery
+        GETs run over java.net.http (the copilot pure-JDK seam); no Playwright (Node-driver + bundled-browser
+        download + reflection/CGLib, native-broken), no langchain4j, no engine dependency.</description>
 
     <dependencyManagement>
         <dependencies>
@@ -45,10 +54,13 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>
-        <!-- The CDP transport is a persistent WebSocket to the operator's Chrome; quarkus-websockets-next
-             CLIENT mode (@WebSocketClient + Instance<WebSocketConnector>) is the native-clean transport the
-             P2-CH (discord) readiness spike NATIVE-COMPILED + booted. The per-page WS URL Chrome returns is
-             dialed via connectors.get().baseUri(URI.create(pageWsUrl)). Version via platform BOM. -->
+        <!-- The CDP transport is a WebSocket to the operator's Chrome; quarkus-websockets-next CLIENT mode
+             is the native-clean transport the P2-CH (discord) readiness spike NATIVE-COMPILED + booted.
+             Unlike discord (a persistent, reconnecting typed @WebSocketClient endpoint), the CDP client dials
+             ONE dynamic per-page URL, so it uses BasicWebSocketConnector.create().baseUri(URI.create(fullWsUrl))
+             with NO endpoint class and NO declared path — sidestepping the @WebSocketClient(path = "/")
+             collision with the discord gateway endpoint AND the typed-connector path-concatenation trap (the
+             [M16] lesson). Version via platform BOM. -->
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-websockets-next</artifactId>
@@ -92,7 +104,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <!-- A @QuarkusTest *IT here boots Quarkus in-JVM (no HTTP server needed); it also
-                         runs through the reactor build under Surefire (CI `verify`). -->
+                         runs through the reactor build under Surefire (CI `verify`). @Tag("live") tests are
+                         excluded by default via the ${excludedGroups} property (above); opt in with
+                         -DexcludedGroups= -Dgroups=live. -->
                     <includes>
                         <include>**/*Test.java</include>
                         <include>**/*IT.java</include>
@@ -149,14 +163,13 @@
                         </goals>
                         <configuration>
                             <excludes>
-                                <!-- @WebSocketClient CDP endpoint: framework-callback-coupled (onOpen/onText/
-                                     onClose are invoked by the WebSocket runtime against a live Chrome over
-                                     CDP), exercised only by the live-browser path, not unit-Surefire-coverable
-                                     (no Chrome in CI). The pure decode/encode + command builders live in
-                                     CdpProtocol (well unit-tested); the lazy-dial lifecycle in CdpSession is
-                                     IT/live-only (the @WebSocketConnector connect path runs only against a
-                                     live Chrome), like the discord channel's exclude. -->
-                                <exclude>ai/forvum/tools/browser/CdpEndpoint.class</exclude>
+                                <!-- CdpSession: the lazy-dial WebSocket lifecycle (the BasicWebSocketConnector
+                                     connect/send path) runs only against a live Chrome over CDP, not
+                                     unit-Surefire-coverable (no Chrome in CI), like the discord channel's
+                                     transport exclude. The pure decode/encode + command builders live in
+                                     CdpProtocol and the inbound-frame correlation in CdpFrameRouter — BOTH
+                                     socket-free and well unit-tested (NOT excluded). JdkCdpHttp is the live
+                                     java.net.http transport seam (the copilot JdkCopilotHttp precedent). -->
                                 <exclude>ai/forvum/tools/browser/CdpSession.class</exclude>
                                 <exclude>ai/forvum/tools/browser/JdkCdpHttp.class</exclude>
                             </excludes>
