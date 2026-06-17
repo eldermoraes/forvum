@@ -41,6 +41,27 @@ class WebToolConfigTest {
 
         assertTrue(spec.braveApiKey().isEmpty(), "no key configured");
         assertFalse(spec.allowPrivateNetwork(), "egress is strict (private blocked) by default");
+        assertTrue(spec.allowedPorts().isEmpty(),
+                "no allowedPorts → empty (EgressGuard falls back to its {80,443,default} default)");
+    }
+
+    @Test
+    void parsesAllowedPortsArray() throws Exception {
+        Spec spec = WebToolConfig.parse(MAPPER.readTree("{ \"allowedPorts\": [80, 443, 8080] }"));
+        assertEquals(java.util.Set.of(80, 443, 8080), spec.allowedPorts());
+    }
+
+    @Test
+    void ignoresNonIntegerAllowedPortEntries() throws Exception {
+        Spec spec = WebToolConfig.parse(MAPPER.readTree(
+                "{ \"allowedPorts\": [80, \"redis\", true, 8443] }"));
+        assertEquals(java.util.Set.of(80, 8443), spec.allowedPorts(), "only integer ports are kept");
+    }
+
+    @Test
+    void nonArrayAllowedPortsIsEmpty() throws Exception {
+        Spec spec = WebToolConfig.parse(MAPPER.readTree("{ \"allowedPorts\": 8080 }"));
+        assertTrue(spec.allowedPorts().isEmpty(), "a non-array allowedPorts is ignored (falls back to default)");
     }
 
     @Test

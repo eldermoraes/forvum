@@ -11,7 +11,6 @@ import ai.forvum.tools.web.dto.BraveWebResults;
 
 import org.junit.jupiter.api.Test;
 
-import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -25,11 +24,12 @@ import java.util.Map;
 class WebToolProviderTest {
 
     private static final class FakeHttpFetcher implements HttpFetcher {
-        URI lastUri;
+        EgressGuard.Approved last;
         @Override
-        public FetchResult get(URI uri) {
-            lastUri = uri;
-            return new FetchResult(200, "text/plain", "body of " + uri);
+        public FetchResult get(EgressGuard.Approved approved) {
+            last = approved;
+            return new FetchResult(200, "text/plain", "body of " + approved.uri(),
+                    java.util.Optional.empty());
         }
     }
 
@@ -69,7 +69,7 @@ class WebToolProviderTest {
     @Test
     void invokeWebFetchDispatchesThroughEgressGuard() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false));
+                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
 
         String out = provider.invoke("web.fetch", Map.of("url", "https://example.com/p"));
         assertTrue(out.contains("https://example.com/p"), out);
@@ -78,7 +78,7 @@ class WebToolProviderTest {
     @Test
     void invokeWebFetchToInternalIsRefused() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false));
+                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
 
         assertThrows(EgressDeniedException.class,
                 () -> provider.invoke("web.fetch", Map.of("url", "http://127.0.0.1/secret")),
@@ -88,7 +88,7 @@ class WebToolProviderTest {
     @Test
     void invokeWebFetchToInternalAllowedWhenOptedIn() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), true));
+                new WebToolConfig.Spec(java.util.Optional.empty(), true, java.util.Set.of()));
 
         // allowPrivateNetwork=true: the egress guard permits the loopback target (the fake fetcher answers).
         String out = provider.invoke("web.fetch", Map.of("url", "http://127.0.0.1/ok"));
@@ -98,7 +98,7 @@ class WebToolProviderTest {
     @Test
     void invokeWebSearchUsesConfiguredKey() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.of("CFG-KEY"), false));
+                new WebToolConfig.Spec(java.util.Optional.of("CFG-KEY"), false, java.util.Set.of()));
 
         String out = provider.invoke("web.search", Map.of("query", "q"));
         assertTrue(out.contains("R"), out);
@@ -108,7 +108,7 @@ class WebToolProviderTest {
     @Test
     void invokeWebSearchInertWithNoKey() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false));
+                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
 
         String out = provider.invoke("web.search", Map.of("query", "q"));
         assertTrue(out.toLowerCase().contains("not configured"), out);
@@ -117,7 +117,7 @@ class WebToolProviderTest {
     @Test
     void invokeUnknownToolThrows() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false));
+                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
 
         assertThrows(IllegalArgumentException.class,
                 () -> provider.invoke("web.crawl", Map.of("url", "x")),
@@ -127,7 +127,7 @@ class WebToolProviderTest {
     @Test
     void invokeMissingRequiredArgThrows() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false));
+                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
 
         assertThrows(IllegalArgumentException.class,
                 () -> provider.invoke("web.fetch", Map.of()),

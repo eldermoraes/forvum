@@ -57,7 +57,8 @@ public class WebToolProvider extends AbstractToolProvider {
     public String invoke(String toolName, Map<String, Object> arguments) {
         WebToolConfig.Spec spec = config.read();
         return switch (toolName) {
-            case "web.fetch" -> new WebFetchTool(fetcher, new EgressGuard(spec.allowPrivateNetwork()),
+            case "web.fetch" -> new WebFetchTool(fetcher,
+                    new EgressGuard(spec.allowPrivateNetwork(), spec.allowedPorts()),
                     FETCH_MAX_CHARS).fetch(stringArg(arguments, "url"));
             case "web.search" -> new WebSearchTool(braveApi)
                     .search(stringArg(arguments, "query"), intArg(arguments, "count", 5), spec.braveApiKey());

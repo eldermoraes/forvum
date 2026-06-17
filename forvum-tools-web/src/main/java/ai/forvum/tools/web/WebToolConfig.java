@@ -12,7 +12,9 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Reads the web tools' file-based configuration from {@code $FORVUM_HOME/tools/web.json} ("fixed code,
@@ -94,7 +96,24 @@ public class WebToolConfig {
         JsonNode egressNode = root.get("allowPrivateNetwork");
         boolean allowPrivateNetwork = egressNode != null && egressNode.asBoolean(false);
 
-        return new Spec(braveApiKey, allowPrivateNetwork);
+        return new Spec(braveApiKey, allowPrivateNetwork, parseAllowedPorts(root.get("allowedPorts")));
+    }
+
+    /**
+     * The operator-widened egress port allowlist from {@code allowedPorts} (a JSON array of ints): absent
+     * or empty means "use the {@link EgressGuard#DEFAULT_ALLOWED_PORTS default}" (the empty set is the
+     * signal {@code EgressGuard} reads as "fall back to default"). Non-numeric entries are ignored.
+     */
+    static Set<Integer> parseAllowedPorts(JsonNode node) {
+        Set<Integer> ports = new LinkedHashSet<>();
+        if (node != null && node.isArray()) {
+            for (JsonNode element : node) {
+                if (element.isInt() || element.canConvertToInt()) {
+                    ports.add(element.asInt());
+                }
+            }
+        }
+        return ports;
     }
 
     /**
@@ -102,11 +121,17 @@ public class WebToolConfig {
      *
      * @param braveApiKey         the Brave Search API key, absent when unset (web.search is then inert).
      * @param allowPrivateNetwork whether web.fetch may reach internal/private addresses (default false).
+     * @param allowedPorts        the operator-widened destination-port allowlist; empty = the
+     *                            {@link EgressGuard#DEFAULT_ALLOWED_PORTS default} {80, 443, scheme-default}.
      */
-    public record Spec(Optional<String> braveApiKey, boolean allowPrivateNetwork) {
+    public record Spec(Optional<String> braveApiKey, boolean allowPrivateNetwork, Set<Integer> allowedPorts) {
+
+        public Spec {
+            allowedPorts = allowedPorts == null ? Set.of() : Set.copyOf(allowedPorts);
+        }
 
         static Spec empty() {
-            return new Spec(Optional.empty(), false);
+            return new Spec(Optional.empty(), false, Set.of());
         }
     }
 }
