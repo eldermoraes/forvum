@@ -153,6 +153,9 @@ public class SupervisorGraph {
      */
     private List<ChatMessage> retrieveAndFrame(GraphTurnRequest request) {
         List<ChatMessage> messages = new ArrayList<>(request.messages());
+        if (ReplayContext.CURRENT_REPLAY.isBound()) {
+            return messages; // replay (#57): deterministic — never re-retrieve memory
+        }
         MemoryPolicy policy = request.memoryPolicy();
         if (policy == null || policy.strategy() == RetrievalStrategy.NONE || memorySelector == null) {
             return messages;
@@ -299,6 +302,11 @@ public class SupervisorGraph {
     }
 
     private String runTool(Turn turn, ToolExecutionRequest request) {
+        if (ReplayContext.CURRENT_REPLAY.isBound()) {
+            // Replay (#57): serve the recorded result FIFO-per-tool — never execute or audit a real tool,
+            // so a substituted-model rerun sees the SAME outputs (deterministic). A miss → synthetic marker.
+            return ReplayContext.CURRENT_REPLAY.get().next(request.name());
+        }
         try {
             return toolCallBridge.dispatch(turn.sessionId, turn.agentId, turn.belt,
                     request.name(), request.arguments());
@@ -437,9 +445,10 @@ public class SupervisorGraph {
             this.toolSpecs = toolSpecs;
             // Already a fresh mutable copy (built by retrieveAndFrame), mutated across rounds.
             this.conversation = conversation;
-            // The §5.5 reduce node compresses worker digests above this; 0 (no memory policy) disables it.
-            this.compressThreshold = request.memoryPolicy() != null
-                    ? request.memoryPolicy().compressThresholdChars() : 0;
+            // The §5.5 reduce node compresses worker digests above this; 0 disables it (no memory policy,
+            // or a replay #57 where compression must be off for determinism).
+            this.compressThreshold = ReplayContext.CURRENT_REPLAY.isBound() ? 0
+                    : (request.memoryPolicy() != null ? request.memoryPolicy().compressThresholdChars() : 0);
         }
 
         private String lastAssistantText() {

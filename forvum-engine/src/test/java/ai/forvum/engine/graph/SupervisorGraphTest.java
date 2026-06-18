@@ -613,4 +613,54 @@ class SupervisorGraphTest {
         assertFalse(hasToolResult(model.seen.get(1), "researcher result for"),
                 "the raw oversized digest does not reach the model");
     }
+
+    // ---- #57 replay mode: tool calls serve recorded outputs, no live execution ----
+
+    @Test
+    void inReplayModeAToolCallServesTheRecordedOutputAndDoesNotExecuteOrAudit() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("LIVE-MUST-NOT-RUN"));
+
+        AiMessage toolCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("call-1").name("fs.read").arguments("{\"path\":\"x.txt\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(toolCall, AiMessage.from("Summary"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("read x.txt"));
+
+        ReplayToolSource source = new ReplayToolSource(List.of(
+                new ReplayToolSource.RecordedTool("fs.read", "RECORDED-RESULT")));
+
+        String reply = ScopedValue.where(ReplayContext.CURRENT_REPLAY, source).call(() ->
+                graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(FS_READ), seed)));
+
+        assertEquals("Summary", reply);
+        assertTrue(recorder.invocations().isEmpty(),
+                "a replay must NOT execute or audit a real tool — the live provider's result never appears");
+        assertTrue(hasToolResult(model.seen.get(1), "RECORDED-RESULT"),
+                "the recorded tool output is fed back to the substituted model");
+        assertFalse(hasToolResult(model.seen.get(1), "LIVE-MUST-NOT-RUN"),
+                "the live tool provider must not have run");
+    }
+
+    @Test
+    void inReplayModeAToolWithNoRecordedOutputGetsTheSyntheticMarker() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        AiMessage toolCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("call-1").name("fs.read").arguments("{\"path\":\"x.txt\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(toolCall, AiMessage.from("done"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("read x.txt"));
+
+        ReplayToolSource empty = new ReplayToolSource(List.of()); // recording captured no fs.read output
+
+        ScopedValue.where(ReplayContext.CURRENT_REPLAY, empty).call(() ->
+                graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(FS_READ), seed)));
+
+        assertTrue(hasToolResult(model.seen.get(1), ReplayToolSource.UNAVAILABLE),
+                "a tool with no recorded output gets the synthetic 'recorded output unavailable' marker");
+    }
 }
