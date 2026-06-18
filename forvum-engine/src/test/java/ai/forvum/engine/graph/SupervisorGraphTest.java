@@ -1,6 +1,7 @@
 package ai.forvum.engine.graph;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,6 +18,7 @@ import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.approval.ApprovalGate;
 import ai.forvum.engine.model.InMemoryToolInvocationRecorder;
 import ai.forvum.engine.routing.MemorySelector;
+import ai.forvum.engine.session.compaction.Summarizer;
 import ai.forvum.engine.tools.ToolCallBridge;
 import ai.forvum.engine.tools.ToolTestFixtures;
 import ai.forvum.sdk.AbstractToolProvider;
@@ -45,6 +47,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Integration test for the M18 {@link SupervisorGraph} (ULTRAPLAN section 5.5 Verify). Covers the MVP
@@ -528,5 +531,86 @@ class SupervisorGraphTest {
         assertTrue(indexOfUserContaining(model.seen.get(0), "<retrieved_memory>") < 0,
                 "strategy NONE must not retrieve, even with an installed provider");
         assertTrue(indexOfUserContaining(model.seen.get(0), "should-not-appear") < 0);
+    }
+
+    // ---- #56 proxy-model Compress pillar: retrieved memory + worker digests above the threshold ----
+
+    private static String framedBlock(List<ChatMessage> seen) {
+        return ((UserMessage) seen.get(indexOfUserContaining(seen, "<retrieved_memory>"))).singleText();
+    }
+
+    @Test
+    void aRetrievedHitAboveTheCompressThresholdIsSummarizedBeforeFraming() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        String oversized = "x".repeat(50); // well above the 10-char threshold below
+        graph.memorySelector = selectorReturning(new MemoryHit(MemoryTier.SEMANTIC, oversized, 0.9, "m1"));
+        AtomicInteger summarizeCalls = new AtomicInteger();
+        graph.summarizer = contents -> {
+            summarizeCalls.incrementAndGet();
+            return "PROXY_SUMMARY";
+        };
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("ok"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("a question?"));
+        MemoryPolicy policy = new MemoryPolicy(RetrievalStrategy.HYBRID, EnumSet.allOf(MemoryTier.class), 8, 0.0, 10);
+
+        graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy));
+
+        assertEquals(1, summarizeCalls.get(), "the oversized hit is summarized once through the proxy model");
+        String block = framedBlock(model.seen.get(0));
+        assertTrue(block.contains("PROXY_SUMMARY"), "the framed block carries the compressed summary");
+        assertFalse(block.contains(oversized), "and not the raw oversized content");
+    }
+
+    @Test
+    void aRetrievedHitBelowTheCompressThresholdIsNotSummarized() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        graph.memorySelector = selectorReturning(new MemoryHit(MemoryTier.SEMANTIC, "short fact", 0.9, "m1"));
+        AtomicInteger summarizeCalls = new AtomicInteger();
+        graph.summarizer = contents -> {
+            summarizeCalls.incrementAndGet();
+            return "NOPE";
+        };
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("ok"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("a question?"));
+        MemoryPolicy policy = new MemoryPolicy(RetrievalStrategy.HYBRID, EnumSet.allOf(MemoryTier.class), 8, 0.0, 100);
+
+        graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy));
+
+        assertEquals(0, summarizeCalls.get(), "a hit below the threshold is not compressed");
+        assertTrue(framedBlock(model.seen.get(0)).contains("short fact"), "the raw content rides through uncompressed");
+    }
+
+    @Test
+    void aWorkerDigestAboveTheThresholdIsCompressedInTheReduceNode() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        AtomicInteger summarizeCalls = new AtomicInteger();
+        graph.summarizer = contents -> {
+            summarizeCalls.incrementAndGet();
+            return "DIGEST_SUMMARY";
+        };
+
+        AiMessage spawnCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("sp-1").name("spawn_worker")
+                        .arguments("{\"childId\":\"researcher\",\"task\":\"find the long answer\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(spawnCall, AiMessage.from("Final"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("delegate"));
+        // NONE = no retrieval, but compressThresholdChars=5 still governs the reduce node (one shared knob).
+        // The FakeWorkerRunner digest ("researcher result for: find the long answer") is far above 5.
+        MemoryPolicy policy = new MemoryPolicy(RetrievalStrategy.NONE, EnumSet.noneOf(MemoryTier.class), 8, 0.0, 5);
+
+        graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy));
+
+        assertEquals(1, summarizeCalls.get(), "the oversized worker digest is compressed once in reduce");
+        assertTrue(hasToolResult(model.seen.get(1), "DIGEST_SUMMARY"),
+                "the model sees the compressed digest fed back, not the raw worker output");
+        assertFalse(hasToolResult(model.seen.get(1), "researcher result for"),
+                "the raw oversized digest does not reach the model");
     }
 }

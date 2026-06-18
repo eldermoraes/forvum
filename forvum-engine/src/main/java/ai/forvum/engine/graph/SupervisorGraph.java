@@ -13,6 +13,7 @@ import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.routing.RetrievedMemory;
+import ai.forvum.engine.session.compaction.Summarizer;
 import ai.forvum.engine.tools.ApprovalDeniedException;
 import ai.forvum.engine.tools.PermissionDeniedException;
 import ai.forvum.engine.tools.ToolCallBridge;
@@ -76,8 +77,9 @@ import java.util.concurrent.Future;
  * lambdas (the graph is compiled per turn), so no langchain4j type is ever serialized (native-clean).
  *
  * <p>v0.1 scope: {@code route} is a deterministic direct-path classifier; a worker runs a single
- * generation (no nested tool loop or sub-spawn) via {@link WorkerRunner}; {@code reduce} passes each
- * digest through (proxy-model {@code qwen3:1.7b} compression is the documented v1+ refinement).
+ * generation (no nested tool loop or sub-spawn) via {@link WorkerRunner}; {@code reduce} compresses each
+ * worker digest exceeding {@code memoryPolicy.compressThresholdChars} through the proxy-model
+ * {@link Summarizer} (#56 — the same knob that compresses retrieved memory before it enters the window).
  */
 @ApplicationScoped
 public class SupervisorGraph {
@@ -109,6 +111,9 @@ public class SupervisorGraph {
 
     @Inject
     MemorySelector memorySelector;
+
+    @Inject
+    Summarizer summarizer;
 
     @Inject
     ObjectMapper mapper;
@@ -163,12 +168,34 @@ public class SupervisorGraph {
         }
         List<MemoryHit> hits = memorySelector.retrieve(
                 new MemoryQuery(request.agentId().value(), sessionId, queryText), policy);
-        String block = RetrievedMemory.frame(hits);
+        String block = RetrievedMemory.frame(compressHits(hits, policy.compressThresholdChars()));
         if (block != null) {
             // Insert as a user-role DATA message immediately before the user's question (context → question).
             messages.add(lastUser, UserMessage.from(block));
         }
         return messages;
+    }
+
+    /**
+     * The Context-Engineering Compress pillar (#56): summarize any retrieved hit whose content exceeds
+     * {@code threshold} chars through the small-and-fast proxy model ({@link Summarizer}) before it
+     * re-enters the window, leaving shorter hits untouched. {@code threshold <= 0} disables compression.
+     */
+    private List<MemoryHit> compressHits(List<MemoryHit> hits, int threshold) {
+        if (threshold <= 0 || hits.isEmpty()) {
+            return hits;
+        }
+        List<MemoryHit> out = new ArrayList<>(hits.size());
+        for (MemoryHit hit : hits) {
+            String content = hit.content();
+            if (content != null && content.length() > threshold) {
+                out.add(new MemoryHit(hit.tier(), summarizer.summarize(List.of(content)),
+                        hit.score(), hit.source()));
+            } else {
+                out.add(hit);
+            }
+        }
+        return out;
     }
 
     /** Index of the last {@link UserMessage} in {@code messages}, or {@code -1} if there is none. */
@@ -363,16 +390,25 @@ public class SupervisorGraph {
         for (SpawnRequest spawn : turn.spawns) {
             String digest = turn.digests.getOrDefault(spawn.request().id(), "");
             digests.add(digest);
-            turn.conversation.add(ToolExecutionResultMessage.from(spawn.request(), compress(digest)));
+            turn.conversation.add(ToolExecutionResultMessage.from(spawn.request(),
+                    compress(digest, turn.compressThreshold)));
         }
         turn.spawns.clear();
         turn.digests.clear();
         return digests.isEmpty() ? Map.of() : Map.of(GraphState.WORKER_DIGESTS, digests);
     }
 
-    /** v0.1 pass-through. Proxy-model ({@code qwen3:1.7b}) summarization is the v1+ Compress refinement. */
-    private static String compress(String digest) {
-        return digest;
+    /**
+     * The Compress pillar at the worker-digest merge (#56, the §5.5 reduce boundary): summarize a digest
+     * exceeding {@code threshold} chars through the proxy-model {@link Summarizer} ({@code qwen3:1.7b}),
+     * else pass it through. The SAME {@code compressThresholdChars} knob governs this and retrieved-memory
+     * compression (DR-5); {@code threshold <= 0} disables it (the pre-#56 pass-through behavior).
+     */
+    private String compress(String digest, int threshold) {
+        if (threshold <= 0 || digest == null || digest.length() <= threshold) {
+            return digest;
+        }
+        return summarizer.summarize(List.of(digest));
     }
 
     /** One delegated subtask: the model's {@code spawn_worker} call paired with its parsed child + task. */
@@ -387,6 +423,7 @@ public class SupervisorGraph {
         private final List<ToolSpec> belt;
         private final List<ToolSpecification> toolSpecs;
         private final List<ChatMessage> conversation;
+        private final int compressThreshold;
         private final List<SpawnRequest> spawns = new ArrayList<>();
         private final ConcurrentMap<String, String> digests = new ConcurrentHashMap<>();
         private int round;
@@ -400,6 +437,9 @@ public class SupervisorGraph {
             this.toolSpecs = toolSpecs;
             // Already a fresh mutable copy (built by retrieveAndFrame), mutated across rounds.
             this.conversation = conversation;
+            // The §5.5 reduce node compresses worker digests above this; 0 (no memory policy) disables it.
+            this.compressThreshold = request.memoryPolicy() != null
+                    ? request.memoryPolicy().compressThresholdChars() : 0;
         }
 
         private String lastAssistantText() {
