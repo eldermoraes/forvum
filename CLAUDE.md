@@ -1429,7 +1429,9 @@ Generalizable lessons from completed milestones; append here as milestones land.
   smoke flips it — re-confirm a behavior change against its original premise). The chain update is
   single-link `primaryModel` on `agents/main.json` (`fallbackModels` is UNREAD until P3 #52) edited via
   `ObjectNode` preserving unknown fields. Test the key precedence at the `effectiveApiKey()` seam (plain
-  unit, no CDI) and the command flow via `run(reader, console, out, err, interactive, Smoker)` with a
-  scripted reader + the app-test `fake` provider for the real smoke / a throwing lambda for the failure
-  branch — a `@QuarkusMainTest` has NO stdin so the interactive wizard can't be driven there [Risk#5].
+  unit, no CDI) and the command flow via `run(Prompt, out, err, Smoker)` with a scripted `Prompt` (a
+  single input seam chosen in `call()` — `ConsolePrompt` for a TTY, `ReaderPrompt` for piped, so
+  `Console`/`Reader` never mix on one stdin) + the app-test `fake` provider for the real smoke / a
+  throwing lambda for the failure branch — a `@QuarkusMainTest` has NO stdin so the interactive wizard
+  can't be driven there [Risk#5].
   Gemini's `unset` boot placeholder counts as "no key" so the file fallback applies. [P2-10]

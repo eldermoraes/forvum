@@ -37,6 +37,14 @@ class OpenAiApiKeyResolutionTest {
     }
 
     @Test
+    void whitespaceOnlyConfigKey_fallsBackToStoredFile(@TempDir Path home) {
+        // The guard is isBlank() (NOT isEmpty()) by design: a trailing-space env key is "no key" and
+        // falls back to the stored file. Red-checks the isBlank()-not-isEmpty() decision.
+        FileApiKeyStore.store(home, "openai", "sk-from-file");
+        assertEquals("sk-from-file", providerWith("   ", home).effectiveApiKey());
+    }
+
+    @Test
     void emptyWhenNeitherConfiguredNorStored(@TempDir Path home) {
         assertEquals("", providerWith("", home).effectiveApiKey());
     }

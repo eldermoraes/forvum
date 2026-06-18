@@ -38,6 +38,15 @@ class AnthropicApiKeyResolutionTest {
     }
 
     @Test
+    void whitespaceOnlyConfigKey_fallsBackToStoredFile(@TempDir Path home) {
+        // The guard is isBlank() (NOT isEmpty()) by design: a trailing-space env key (e.g.
+        // QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY="   ") is "no key" and falls back to the stored file.
+        // Red-checks the isBlank()-not-isEmpty() decision: a mutation to isEmpty() returns "   " here.
+        FileApiKeyStore.store(home, "anthropic", "sk-from-file");
+        assertEquals("sk-from-file", providerWith("   ", home).effectiveApiKey());
+    }
+
+    @Test
     void emptyWhenNeitherConfiguredNorStored(@TempDir Path home) {
         assertEquals("", providerWith("", home).effectiveApiKey());
     }

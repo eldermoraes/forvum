@@ -38,6 +38,14 @@ class GoogleApiKeyResolutionTest {
     }
 
     @Test
+    void whitespaceOnlyConfigKey_fallsBackToStoredFile(@TempDir Path home) {
+        // The guard is isBlank() (NOT isEmpty()) by design: a trailing-space env key is "no key" and
+        // falls back to the stored file. Red-checks the isBlank()-not-isEmpty() decision.
+        FileApiKeyStore.store(home, "google", "AIza-from-file");
+        assertEquals("AIza-from-file", providerWith("   ", home).effectiveApiKey());
+    }
+
+    @Test
     void treatsUnsetPlaceholderAsNoKeyAndFallsBackToFile(@TempDir Path home) {
         // application.properties seeds "unset" so the ai-gemini extension boots without a real key;
         // it must NOT be used as a literal key — the wizard's stored file wins.
