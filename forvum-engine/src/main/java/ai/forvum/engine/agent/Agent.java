@@ -100,7 +100,8 @@ public class Agent {
                 .setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
         sessions.ensureSession(sessionId, id);
 
-        Persona persona = registry.persona(id);
+        AgentSpec spec = registry.spec(id);
+        Persona persona = spec.persona();
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(SystemMessage.from(persona.systemPrompt()));
         messages.addAll(memory.messages(sessionId));   // committed prior history
@@ -110,7 +111,7 @@ public class Agent {
         List<ToolSpec> belt = toolBelt.tools();
 
         String reply = supervisorGraph.run(new GraphTurnRequest(sessionId, id, model, belt, messages,
-                persona.outputSchema(), persona.memoryPolicy()));
+                persona.outputSchema(), persona.memoryPolicy(), spec.cycle()));
 
         long turnId = memory.recordTurn(sessionId, userText, reply);
         caprRecorder.recordPassed(sessionId, id.value(), turnId);

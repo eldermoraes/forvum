@@ -126,6 +126,9 @@ public class SupervisorGraph {
                 .setAttribute("forvum.session.id", request.sessionId())
                 .setAttribute("forvum.agent.id", request.agentId().value())
                 .setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
+        if (request.cycle() != null) {
+            return runCycle(request); // #51: a declared reflection cycle compiles a different graph
+        }
         Turn turn = new Turn(request, retrieveAndFrame(request),
                 toolCallBridge.specificationsFor(request.belt()));
         String finalText;
@@ -243,6 +246,73 @@ public class SupervisorGraph {
                 "Output-schema validation failed for session " + request.sessionId()
               + ": the validated reply could not be re-serialized.", e);
         }
+    }
+
+    /**
+     * Run a turn whose agent declares a reflection cycle (DR-8 DP-7, #51): compile the declared steps into
+     * a cyclic generation graph and drive it to termination. Each step is one generation pass with the
+     * step's free-text instruction; one round is one in-order traversal of the steps; the loop exits when a
+     * pass's reply contains the {@code stopSentinel} (stripped from the answer) or after {@code maxRounds}
+     * (best-effort degrade, the M18 lesson). v0.1 scope: generation-only — a declared cycle runs no tool
+     * loop and no retrieval (those belong to the standard supervisor graph); {@code outputSchema} still
+     * validates the cycle's FINAL answer, unchanged (after the graph returns).
+     */
+    private String runCycle(GraphTurnRequest request) {
+        CycleTurn turn = new CycleTurn(request);
+        String finalText;
+        try {
+            CompiledGraph<GraphState> graph = compileCycle(turn);
+            Optional<GraphState> result = graph.invoke(Map.of());
+            finalText = result.flatMap(GraphState::finalText).orElseGet(turn::lastAssistantText);
+        } catch (SupervisorGraphException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SupervisorGraphException(
+                "Cyclic-agent graph failed for session " + request.sessionId(), e);
+        }
+        return enforceOutputSchema(request, finalText);
+    }
+
+    private CompiledGraph<GraphState> compileCycle(CycleTurn turn) throws Exception {
+        // recursionLimit must cover every step of every round (the M18 lesson: it counts each node run).
+        int limit = turn.cycle.maxRounds() * turn.cycle.steps().size() + 8;
+        return new StateGraph<>(GraphState.SCHEMA, GraphState::new)
+                .addNode("cycle", node_async(state -> cycleStep(state, turn)))
+                .addEdge(START, "cycle")
+                .addConditionalEdges("cycle", edge_async(state -> state.next().orElse("done")),
+                        Map.of("continue", "cycle", "done", END))
+                .compile(CompileConfig.builder().recursionLimit(limit).build());
+    }
+
+    private Map<String, Object> cycleStep(GraphState state, CycleTurn turn) {
+        String instruction = turn.cycle.steps().get(turn.stepIndex);
+        // The step instruction is a user-role directive appended to the running conversation, so each pass
+        // sees the prior drafts (the reflect -> critique -> revise shape).
+        turn.conversation.add(UserMessage.from(instruction));
+        AiMessage reply = turn.model.chat(ChatRequest.builder()
+                .messages(turn.conversation)
+                .build()).aiMessage();
+        turn.conversation.add(reply);
+        String text = reply.text() == null ? "" : reply.text();
+
+        String sentinel = turn.cycle.stopSentinel();
+        if (sentinel != null && text.contains(sentinel)) {
+            return Map.of(GraphState.NEXT, "done", GraphState.FINAL, stripSentinel(text, sentinel));
+        }
+        // Advance the step; completing the last step closes a round.
+        if (++turn.stepIndex >= turn.cycle.steps().size()) {
+            turn.stepIndex = 0;
+            turn.round++;
+        }
+        if (turn.round >= turn.cycle.maxRounds()) {
+            return Map.of(GraphState.NEXT, "done", GraphState.FINAL, text); // best-effort after the cap
+        }
+        return Map.of(GraphState.NEXT, "continue", GraphState.FINAL, text);
+    }
+
+    /** Remove every occurrence of the stop sentinel from the final answer, trimming surrounding blanks. */
+    private static String stripSentinel(String text, String sentinel) {
+        return text.replace(sentinel, "").strip();
     }
 
     private CompiledGraph<GraphState> compile(Turn turn) throws Exception {
@@ -449,6 +519,34 @@ public class SupervisorGraph {
             // or a replay #57 where compression must be off for determinism).
             this.compressThreshold = ReplayContext.CURRENT_REPLAY.isBound() ? 0
                     : (request.memoryPolicy() != null ? request.memoryPolicy().compressThresholdChars() : 0);
+        }
+
+        private String lastAssistantText() {
+            for (int i = conversation.size() - 1; i >= 0; i--) {
+                if (conversation.get(i) instanceof AiMessage reply && reply.text() != null) {
+                    return reply.text();
+                }
+            }
+            return "";
+        }
+    }
+
+    /**
+     * Per-turn mutable holder for a declared reflection cycle (#51): generation-only, so it carries no
+     * tool specs, spawns, or digests — only the running conversation plus the cycle cursor (step index +
+     * round). Captured by the {@code cycle} node lambda (R6 — keeps langchain4j types out of graph state).
+     */
+    private static final class CycleTurn {
+        private final ChatModel model;
+        private final CycleSpec cycle;
+        private final List<ChatMessage> conversation;
+        private int stepIndex;
+        private int round;
+
+        private CycleTurn(GraphTurnRequest request) {
+            this.model = request.model();
+            this.cycle = request.cycle();
+            this.conversation = new ArrayList<>(request.messages());
         }
 
         private String lastAssistantText() {

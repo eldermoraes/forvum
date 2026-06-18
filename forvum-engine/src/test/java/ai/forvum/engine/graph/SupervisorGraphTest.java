@@ -663,4 +663,65 @@ class SupervisorGraphTest {
         assertTrue(hasToolResult(model.seen.get(1), ReplayToolSource.UNAVAILABLE),
                 "a tool with no recorded output gets the synthetic 'recorded output unavailable' marker");
     }
+
+    // ---- #51 declarative cycles: reflect -> critique -> revise compiled into a cyclic graph ----
+
+    @Test
+    void aDeclaredCycleRunsEachStepInOrderAndReturnsTheRefinedResult() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        ScriptedChatModel model = new ScriptedChatModel(
+                AiMessage.from("draft"), AiMessage.from("critique notes"), AiMessage.from("final revision"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("write an essay"));
+        CycleSpec cycle = new CycleSpec(List.of("reflect", "critique", "revise"), 1, null);
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                List.of(), seed, null, null, cycle));
+
+        assertEquals("final revision", reply, "the cycle's last pass is the refined result");
+        assertEquals(3, model.seen.size(), "3 steps x 1 round = 3 generation passes");
+        assertTrue(indexOfUserContaining(model.seen.get(0), "reflect") >= 0,
+                "the 1st pass carries the reflect step instruction");
+        assertTrue(indexOfUserContaining(model.seen.get(1), "critique") >= 0,
+                "the 2nd pass carries the critique step instruction");
+        assertTrue(indexOfUserContaining(model.seen.get(2), "revise") >= 0,
+                "the 3rd pass carries the revise step instruction");
+    }
+
+    @Test
+    void aCycleExitsEarlyOnTheStopSentinelAndStripsItFromTheResult() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        // The 2nd pass emits the sentinel: the cycle must stop there (not run all 3 steps x 3 rounds).
+        ScriptedChatModel model = new ScriptedChatModel(
+                AiMessage.from("draft"), AiMessage.from("looks good DONE"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("write"));
+        CycleSpec cycle = new CycleSpec(List.of("reflect", "critique", "revise"), 3, "DONE");
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                List.of(), seed, null, null, cycle));
+
+        assertEquals("looks good", reply, "early exit on the sentinel, with the sentinel stripped from the answer");
+        assertEquals(2, model.seen.size(), "the cycle stopped after the 2nd pass, not all 9");
+    }
+
+    @Test
+    void aCycleTerminatesAfterMaxRoundsWhenNoSentinelFires() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        // 2 steps x 2 rounds = 4 generation passes, none emitting the sentinel.
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("r1s1"), AiMessage.from("r1s2"),
+                AiMessage.from("r2s1"), AiMessage.from("r2s2"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("iterate"));
+        CycleSpec cycle = new CycleSpec(List.of("plan", "do"), 2, "NEVER-FIRES");
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                List.of(), seed, null, null, cycle));
+
+        assertEquals("r2s2", reply, "best-effort result after maxRounds");
+        assertEquals(4, model.seen.size(), "2 steps x 2 rounds = 4 generation passes (the round cap bound)");
+    }
 }
