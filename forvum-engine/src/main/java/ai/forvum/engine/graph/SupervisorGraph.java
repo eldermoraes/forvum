@@ -276,7 +276,9 @@ public class SupervisorGraph {
         try {
             CompiledGraph<GraphState> graph = compileCycle(turn);
             Optional<GraphState> result = graph.invoke(Map.of());
-            finalText = result.flatMap(GraphState::finalText).orElseGet(turn::lastAssistantText);
+            // Every cycleStep sets FINAL (on both "done" and "continue"), so the graph always carries the
+            // latest pass as the final answer; "" is an unreachable belt-and-suspenders fallback.
+            finalText = result.flatMap(GraphState::finalText).orElse("");
         } catch (SupervisorGraphException e) {
             throw e;
         } catch (Exception e) {
@@ -567,15 +569,6 @@ public class SupervisorGraph {
             this.model = request.model();
             this.cycle = request.cycle();
             this.conversation = new ArrayList<>(request.messages());
-        }
-
-        private String lastAssistantText() {
-            for (int i = conversation.size() - 1; i >= 0; i--) {
-                if (conversation.get(i) instanceof AiMessage reply && reply.text() != null) {
-                    return reply.text();
-                }
-            }
-            return "";
         }
     }
 }

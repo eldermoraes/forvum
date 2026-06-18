@@ -798,4 +798,46 @@ class SupervisorGraphTest {
         assertTrue(hasToolResult(model.seen.get(1), "researcher result for: find the long answer"),
                 "the raw worker digest reaches the model in replay mode, not a compressed summary");
     }
+
+    @Test
+    void aWorkerDigestProxyCompressionFailureKeepsTheRawDigest() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        graph.summarizer = contents -> {
+            throw new RuntimeException("proxy model is down");
+        };
+
+        AiMessage spawnCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("sp-1").name("spawn_worker")
+                        .arguments("{\"childId\":\"researcher\",\"task\":\"find the long answer\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(spawnCall, AiMessage.from("Final"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("delegate"));
+        MemoryPolicy policy = new MemoryPolicy(RetrievalStrategy.NONE, EnumSet.noneOf(MemoryTier.class), 8, 0.0, 5);
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy));
+
+        assertEquals("Final", reply, "a worker-digest compression failure must NOT fail the turn");
+        assertTrue(hasToolResult(model.seen.get(1), "researcher result for: find the long answer"),
+                "the raw uncompressed digest is kept when the proxy summarizer throws");
+    }
+
+    @Test
+    void aNullProxySummaryKeepsTheRawRetrievedHit() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        String oversized = "y".repeat(50);
+        graph.memorySelector = selectorReturning(new MemoryHit(MemoryTier.SEMANTIC, oversized, 0.9, "m1"));
+        graph.summarizer = contents -> null; // DefaultSummarizer can return a null aiMessage().text()
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("ok"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("a question?"));
+        MemoryPolicy policy = new MemoryPolicy(RetrievalStrategy.HYBRID, EnumSet.allOf(MemoryTier.class), 8, 0.0, 10);
+
+        graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy));
+
+        assertTrue(framedBlock(model.seen.get(0)).contains(oversized),
+                "a null/blank proxy summary falls through to the raw hit (the MemoryHit ctor rejects null)");
+    }
 }
