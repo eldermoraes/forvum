@@ -6,11 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.InvocationStatus;
+import ai.forvum.core.MemoryHit;
+import ai.forvum.core.MemoryPolicy;
+import ai.forvum.core.MemoryQuery;
+import ai.forvum.core.MemoryTier;
 import ai.forvum.core.PermissionScope;
+import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.approval.ApprovalGate;
 import ai.forvum.engine.model.InMemoryToolInvocationRecorder;
+import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.tools.ToolCallBridge;
 import ai.forvum.engine.tools.ToolTestFixtures;
 import ai.forvum.sdk.AbstractToolProvider;
@@ -35,6 +41,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -456,5 +463,70 @@ class SupervisorGraphTest {
         assertTrue(workerRunner.spawned.isEmpty(), "no worker is spawned on malformed arguments");
         assertTrue(hasToolResult(model.seen.get(1), "spawn_worker"),
                 "the model sees an error tool-result for its malformed spawn call");
+    }
+
+    // ---- Memory-retrieval wiring (commit 1): the Select pillar's read step ----
+
+    /** A selector that always returns the given hit when consulted (overrides the public retrieve seam). */
+    private static MemorySelector selectorReturning(MemoryHit hit) {
+        return new MemorySelector() {
+            @Override
+            public List<MemoryHit> retrieve(MemoryQuery query, MemoryPolicy policy) {
+                return List.of(hit);
+            }
+        };
+    }
+
+    private static int indexOfUserContaining(List<ChatMessage> messages, String needle) {
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i) instanceof UserMessage user && user.singleText().contains(needle)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    @Test
+    void retrievedMemoryIsFramedAsDataAndInsertedBeforeTheUserQuestion() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        graph.memorySelector = selectorReturning(
+                new MemoryHit(MemoryTier.SEMANTIC, "the user prefers metric units", 0.9, "mem-1"));
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("Sure"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("be helpful"), UserMessage.from("how tall is it?"));
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                List.of(), seed, null, MemoryPolicy.defaults()));
+
+        assertEquals("Sure", reply);
+        List<ChatMessage> seen = model.seen.get(0);
+        int memIdx = indexOfUserContaining(seen, "<retrieved_memory>");
+        int questionIdx = indexOfUserContaining(seen, "how tall is it?");
+        assertTrue(memIdx >= 0, "the retrieved memory must be framed and reach the model's FIRST generate");
+        assertTrue(((UserMessage) seen.get(memIdx)).singleText().contains("the user prefers metric units"),
+                "the hit content rides inside the framed block");
+        assertTrue(memIdx < questionIdx,
+                "framed as DATA immediately before the user's question (never the system/instruction region)");
+    }
+
+    @Test
+    void retrievalIsSkippedWhenTheStrategyIsNoneEvenWithAProvider() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        // The selector would always return a hit — so an appearing block would prove the graph DID consult
+        // it; its absence proves the graph short-circuited on strategy NONE before any retrieval.
+        graph.memorySelector = selectorReturning(
+                new MemoryHit(MemoryTier.SEMANTIC, "should-not-appear", 1.0, "x"));
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("ok"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("hello"));
+        MemoryPolicy none = new MemoryPolicy(RetrievalStrategy.NONE, EnumSet.noneOf(MemoryTier.class), 8, 0.0, 8000);
+
+        graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, none));
+
+        assertTrue(indexOfUserContaining(model.seen.get(0), "<retrieved_memory>") < 0,
+                "strategy NONE must not retrieve, even with an installed provider");
+        assertTrue(indexOfUserContaining(model.seen.get(0), "should-not-appear") < 0);
     }
 }

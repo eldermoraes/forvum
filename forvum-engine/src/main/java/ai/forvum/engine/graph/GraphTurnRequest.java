@@ -1,5 +1,6 @@
 package ai.forvum.engine.graph;
 
+import ai.forvum.core.MemoryPolicy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
 
@@ -22,18 +23,27 @@ import java.util.List;
  * @param messages     the seeded conversation: system prompt + committed history + the new user message
  * @param outputSchema the persona's optional JSON-Schema string (P2-12); {@code null} keeps free-text
  *                     output, non-null forces the final reply to parse + validate against it
+ * @param memoryPolicy the persona's retrieval policy (DR-5 / DR-8); {@code null} or {@code strategy=NONE}
+ *                     disables retrieval, otherwise the graph retrieves and frames {@code
+ *                     <retrieved_memory>} data once at turn entry (DR-6a §9, the Select pillar)
  */
 public record GraphTurnRequest(String sessionId, AgentId agentId, ChatModel model,
-        List<ToolSpec> belt, List<ChatMessage> messages, String outputSchema) {
+        List<ToolSpec> belt, List<ChatMessage> messages, String outputSchema, MemoryPolicy memoryPolicy) {
 
     public GraphTurnRequest {
         belt = List.copyOf(belt);
         messages = List.copyOf(messages);
     }
 
-    /** Free-text turn (no per-agent output schema) — the backward-compatible default. */
+    /** Turn with an output schema but no retrieval policy — retrieval disabled (null memoryPolicy). */
+    public GraphTurnRequest(String sessionId, AgentId agentId, ChatModel model,
+            List<ToolSpec> belt, List<ChatMessage> messages, String outputSchema) {
+        this(sessionId, agentId, model, belt, messages, outputSchema, null);
+    }
+
+    /** Free-text turn (no output schema, no retrieval policy) — the backward-compatible default. */
     public GraphTurnRequest(String sessionId, AgentId agentId, ChatModel model,
             List<ToolSpec> belt, List<ChatMessage> messages) {
-        this(sessionId, agentId, model, belt, messages, null);
+        this(sessionId, agentId, model, belt, messages, null, null);
     }
 }

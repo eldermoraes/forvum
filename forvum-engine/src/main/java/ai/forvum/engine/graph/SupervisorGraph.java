@@ -5,8 +5,14 @@ import static org.bsc.langgraph4j.StateGraph.START;
 import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
 import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
+import ai.forvum.core.MemoryHit;
+import ai.forvum.core.MemoryPolicy;
+import ai.forvum.core.MemoryQuery;
+import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.routing.MemorySelector;
+import ai.forvum.engine.routing.RetrievedMemory;
 import ai.forvum.engine.tools.ApprovalDeniedException;
 import ai.forvum.engine.tools.PermissionDeniedException;
 import ai.forvum.engine.tools.ToolCallBridge;
@@ -20,6 +26,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
@@ -101,6 +108,9 @@ public class SupervisorGraph {
     WorkerRunner workerRunner;
 
     @Inject
+    MemorySelector memorySelector;
+
+    @Inject
     ObjectMapper mapper;
 
     /** Run one turn through the compiled graph, returning the final assistant text. */
@@ -111,7 +121,8 @@ public class SupervisorGraph {
                 .setAttribute("forvum.session.id", request.sessionId())
                 .setAttribute("forvum.agent.id", request.agentId().value())
                 .setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
-        Turn turn = new Turn(request, toolCallBridge.specificationsFor(request.belt()));
+        Turn turn = new Turn(request, retrieveAndFrame(request),
+                toolCallBridge.specificationsFor(request.belt()));
         String finalText;
         try {
             CompiledGraph<GraphState> graph = compile(turn);
@@ -124,6 +135,59 @@ public class SupervisorGraph {
                     + request.sessionId(), e);
         }
         return enforceOutputSchema(request, finalText);
+    }
+
+    /**
+     * The Context-Engineering Select pillar's read step (DR-5): retrieve memory relevant to the turn's
+     * user message ONCE at turn entry (not per generate round) and frame it as a {@code <retrieved_memory>}
+     * DATA block inserted just before the user's question (DR-6a §9 — never spliced into the
+     * system/instruction region). Returns the seeded messages unchanged — retrieval disabled — when the
+     * policy is null / {@code NONE}, no selector/provider is available, the session or query text is blank,
+     * or retrieval yields nothing. The returned list is always a fresh mutable copy ({@link Turn} mutates
+     * it across rounds).
+     */
+    private List<ChatMessage> retrieveAndFrame(GraphTurnRequest request) {
+        List<ChatMessage> messages = new ArrayList<>(request.messages());
+        MemoryPolicy policy = request.memoryPolicy();
+        if (policy == null || policy.strategy() == RetrievalStrategy.NONE || memorySelector == null) {
+            return messages;
+        }
+        int lastUser = lastUserIndex(messages);
+        if (lastUser < 0) {
+            return messages;
+        }
+        String queryText = userText((UserMessage) messages.get(lastUser));
+        String sessionId = request.sessionId();
+        if (queryText == null || queryText.isBlank() || sessionId == null || sessionId.isBlank()) {
+            return messages;
+        }
+        List<MemoryHit> hits = memorySelector.retrieve(
+                new MemoryQuery(request.agentId().value(), sessionId, queryText), policy);
+        String block = RetrievedMemory.frame(hits);
+        if (block != null) {
+            // Insert as a user-role DATA message immediately before the user's question (context → question).
+            messages.add(lastUser, UserMessage.from(block));
+        }
+        return messages;
+    }
+
+    /** Index of the last {@link UserMessage} in {@code messages}, or {@code -1} if there is none. */
+    private static int lastUserIndex(List<ChatMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i) instanceof UserMessage) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** The user message's text, or {@code null} for a multi-part/non-text message (skip retrieval, don't fail). */
+    private static String userText(UserMessage message) {
+        try {
+            return message.singleText();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**
@@ -327,13 +391,15 @@ public class SupervisorGraph {
         private final ConcurrentMap<String, String> digests = new ConcurrentHashMap<>();
         private int round;
 
-        private Turn(GraphTurnRequest request, List<ToolSpecification> toolSpecs) {
+        private Turn(GraphTurnRequest request, List<ChatMessage> conversation,
+                List<ToolSpecification> toolSpecs) {
             this.sessionId = request.sessionId();
             this.agentId = request.agentId();
             this.model = request.model();
             this.belt = request.belt();
             this.toolSpecs = toolSpecs;
-            this.conversation = new ArrayList<>(request.messages());
+            // Already a fresh mutable copy (built by retrieveAndFrame), mutated across rounds.
+            this.conversation = conversation;
         }
 
         private String lastAssistantText() {
