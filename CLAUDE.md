@@ -1373,3 +1373,65 @@ Generalizable lessons from completed milestones; append here as milestones land.
   GATED ratio (the per-module `<excludes>` for live-transport adapters), not the raw class total — a raw
   sum over the excluded `@RestClient`/`@WebSocketClient`/`Jdk*Http` classes false-alarms a FAIL on a module
   whose gated check passes (web/browser). [P2-2/#27]
+- **A `forvum-channel-*` `ChannelLauncher` serve-gate MUST mirror the channel's own `onStart` `isReady()`
+  gate EXACTLY, and a `ProcessBuilder` subprocess driver MUST use the `ShellExecutor` bounded-drain
+  pattern.** The voice channel (#28) shipped two latent defects the 3-agent review caught: (a) its
+  `ChannelLauncher` serve-gate required 2 keys `{whisperBin, piperBin}` while `VoiceChannel.onStart`
+  gates on `VoiceSpec.isReady()` = 4 keys — the [M17] serve-gate-vs-isReady mismatch at n=4 (a partially
+  configured voice channel would be launched-as-server then no-op). Align the launcher gate to the same
+  key set the channel's own `isReady()` checks. (b) `DefaultSubprocessRunner` drained the child's output
+  on an `ExecutorService` + unbounded `Future.get()`; its `close()` AWAITS the drain task, so an escaped
+  reparented descendant holding the output pipe hangs the worker forever. Use the `ShellExecutor`
+  recipe: drain on a `Thread.ofVirtual()`, hand the result back via an `AtomicReference`, and BOUND the
+  post-settle `join(graceMillis)`. File-drop voice (transcribe a dropped audio file, synthesize to a
+  file) also avoids the live-mic `javax.sound.sampled` native surface, so `[NATIVE]` is resolved with
+  ZERO native bindings — subprocess exec only. Reconstruct-on-clean-branch when a stacked branch carries
+  more than the one feature: cherry-pick the fix and rebase the single-purpose branch onto main so the
+  net diff is feature-only. [P2-3/#28]
+- **`web.fetch` SSRF defense is layered and the restricted-header latch is a `main()`-time set, not a
+  lazy static.** `forvum-tools-web` (resolving the epic-#4 L680 TBD) hardens egress per the
+  maintainer-chosen E-ii: redirect-`NEVER` + per-hop re-validate (a `Redirect.NORMAL` client silently
+  follows a 30x to a private IP); full IPv4+IPv6 private/reserved coverage (`fc00::/7` ULA, the
+  `::ffff:0:0/96` IPv4-mapped variant, `0.0.0.0/8`, `240.0.0.0/4`), HTTP IP-pin (connect to the
+  validated literal IP with a `Host` header), a port allowlist, and a connect-time re-resolve+re-check
+  for the DNS-rebind TOCTOU. The trap: `jdk.httpclient.allowRestrictedHeaders=host` must be set in
+  `ForvumApplication.main` (before any HttpClient is built) — a lazy static block in the fetcher LOSES
+  the latch race to an LLM turn's JDK `HttpClient`, after which the JVM caches the restricted-header set
+  and the `Host`-pin silently no-ops. Pin the `Host`-header behavior with an end-to-end test against a
+  loopback server, not just a unit assertion. Residual HTTPS-rebind (the cert validates the rebound
+  host) is documented and tracked to a shared engine egress decorator. [TOOLS-WEB]
+- **A CDP `@WebSocketClient(path="/")` endpoint COLLIDES with another fixed-path WS client on the
+  assembled app classpath — use `BasicWebSocketConnector` with the full URI.** `forvum-tools-browser`'s
+  `CdpEndpoint(path="/")` clashed with `DiscordGatewayEndpoint(path="/")` only on the combined
+  `forvum-app` classpath (a single-module build never sees it, the [M12] combined-verify lesson), and the
+  typed `WebSocketConnector` concatenates its annotated path into the dynamic CDP `baseUri` ([M16]). Dial
+  CDP via `BasicWebSocketConnector.create().baseUri(fullWsUrl)...` — no endpoint class, no path, no
+  collision. Two review bugs worth generalizing: a `clearLoadEvents()` that was authored but never wired
+  let a stale `Page.loadEventFired` satisfy a 2nd `navigate`'s wait instantly (wire the reset INTO
+  navigate); and a `CdpSession.send` that caught only checked exceptions leaked the pending-future +
+  bypassed graceful relay when Mutiny's `sendTextAndAwait` threw a raw `RuntimeException` (add a
+  `RuntimeException` arm). Live-validate against an operator Chrome (`--remote-debugging-port`); keep the
+  end-to-end Chrome run `@Tag("live")`. [#26]
+- **The provider-onboarding wizard's real work is the credential BRIDGE, not the CLI command.** No
+  "0600 file → provider api-key" bridge existed: `anthropic`/`openai`/`google` read ONLY
+  `@ConfigProperty("quarkus.langchain4j.<p>.api-key")`; only Copilot read a file (`CopilotCredentials`).
+  The chosen bridge (maintainer-ratified over a central MP-Config `ConfigSource`) is a per-provider
+  fallback mirroring #42: a Layer-1 SDK `FileApiKeyStore` (pure-JDK, native-safe, no Jackson — one opaque
+  secret per file, plain text, `0600`/dir `0700`, traversal-confined id) that each key-based provider
+  reads in `resolve()` WHEN its `@ConfigProperty` key is blank. This is robust for the same-process smoke
+  because the file is read at RESOLVE time, not bean-construction time, so a just-written key is seen — a
+  `ConfigSource` resolves `@ConfigProperty` once at bean creation and is fragile for the smoke. The file
+  read MUST be OUTSIDE `computeIfAbsent` (blocking IO in the CHM callback pins the carrier, [M7]):
+  capture `effectiveApiKey()` first, pass the String into the lambda; the config-set short-circuit keeps
+  ZERO I/O on the common path. Smoke = chat-direct via the raw `ModelProvider` (not the ledgering
+  `LlmSelector`) so no `provider_calls` row + no DB → `provider add` IS a `CommandMode` one-shot like
+  `copilot login` (the earlier "NOT one-shot" ratification assumed a turn-full smoke; the chat-direct
+  smoke flips it — re-confirm a behavior change against its original premise). The chain update is
+  single-link `primaryModel` on `agents/main.json` (`fallbackModels` is UNREAD until P3 #52) edited via
+  `ObjectNode` preserving unknown fields. Test the key precedence at the `effectiveApiKey()` seam (plain
+  unit, no CDI) and the command flow via `run(Prompt, out, err, Smoker)` with a scripted `Prompt` (a
+  single input seam chosen in `call()` — `ConsolePrompt` for a TTY, `ReaderPrompt` for piped, so
+  `Console`/`Reader` never mix on one stdin) + the app-test `fake` provider for the real smoke / a
+  throwing lambda for the failure branch — a `@QuarkusMainTest` has NO stdin so the interactive wizard
+  can't be driven there [Risk#5].
+  Gemini's `unset` boot placeholder counts as "no key" so the file fallback applies. [P2-10]

@@ -7,8 +7,8 @@ import jakarta.inject.Inject;
 
 /**
  * Detects a <em>one-shot CLI command</em> ({@code --help}/{@code --version}/{@code init}/{@code doctor}/
- * {@code plugin}/{@code skill}/{@code mcp}/{@code copilot}/{@code pair}/{@code devices}) from the process
- * arguments (M20). Such an
+ * {@code plugin}/{@code skill}/{@code mcp}/{@code copilot}/{@code pair}/{@code devices}/{@code provider})
+ * from the process arguments (M20). Such an
  * invocation prints +
  * exits without running an agent turn, so the heavy {@code @Observes StartupEvent} work — Flyway
  * migration, the config {@code WatchService}, cron scheduling, AND the {@code ToolRegistry} tool
@@ -54,12 +54,14 @@ public class CommandMode {
         for (String arg : args) {
             switch (arg) {
                 // Canonical one-shot forms only — must match RootCommand's surface (mixinStandardHelpOptions
-                // + the 'init'/'doctor'/'plugin'/'skill'/'mcp'/'copilot' subcommands). Bare 'help'/'version'
-                // are NOT registered subcommands. 'plugin' (P2-6) resolves+writes a JAR, 'skill' (P2-7)
-                // downloads+writes a .md, 'mcp' (P2-13) reads/writes mcp-servers/, and 'copilot' (#42)
-                // device-code logs in + writes a credential file — none needs the DB/watcher.
+                // + the 'init'/'doctor'/'plugin'/'skill'/'mcp'/'copilot'/'pair'/'devices'/'provider'
+                // subcommands). Bare 'help'/'version' are NOT registered subcommands. 'plugin' (P2-6)
+                // resolves+writes a JAR, 'skill' (P2-7) downloads+writes a .md, 'mcp' (P2-13) reads/writes
+                // mcp-servers/, 'copilot' (#42) device-code logs in + writes a credential file, and
+                // 'provider add' (P2-10) stores a 0600 API key + runs a direct (DB-free) smoke chat — none
+                // needs the DB/watcher.
                 case "--help", "-h", "--version", "-V", "init", "doctor", "plugin", "skill", "mcp",
-                        "copilot", "pair", "devices" -> {
+                        "copilot", "pair", "devices", "provider" -> {
                     return true;
                 }
                 default -> {

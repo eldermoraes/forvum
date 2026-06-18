@@ -33,6 +33,8 @@ class CommandModeTest {
                 "'pair' only reads/writes devices/ — it must skip the DB/watcher/cron boot (#44)");
         assertTrue(CommandMode.isOneShotCommand(new String[] {"devices"}),
                 "'devices' only lists devices/ — it must skip the DB/watcher/cron boot (#44)");
+        assertTrue(CommandMode.isOneShotCommand(new String[] {"provider", "add", "anthropic"}),
+                "'provider add' stores a 0600 key + runs a DB-free smoke chat — it must skip the DB/watcher/cron boot (P2-10)");
     }
 
     @Test
