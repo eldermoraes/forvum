@@ -1,14 +1,20 @@
 package ai.forvum.engine.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.forvum.core.MemoryPolicy;
+import ai.forvum.core.MemoryTier;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
+import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.graph.CycleSpec;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.EnumSet;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -129,5 +135,156 @@ class AgentSpecReaderTest {
         assertThrows(IllegalStateException.class,
                 () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec),
                 "a numeric outputSchema is malformed config, not a valid schema");
+    }
+
+    // ---- DR-8 fields: fallbackModels / memoryPolicy / roles / identityId / cycle ----
+
+    @Test
+    void dr8FieldsDefaultWhenAbsent() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\" }");
+
+        Persona p = new AgentSpecReader().parse(new AgentId("main"), "persona", spec);
+
+        assertEquals(List.of(), p.fallbackModels());
+        assertEquals(MemoryPolicy.defaults(), p.memoryPolicy());
+        assertEquals(List.of(), p.roles());
+        assertNull(p.identityId());
+    }
+
+    @Test
+    void parsesFallbackModels() throws Exception {
+        JsonNode spec = json("""
+            { "primaryModel": "ollama:qwen3:1.7b",
+              "fallbackModels": ["openai:gpt-4.1-mini", "anthropic:claude-3-5"] }
+            """);
+
+        Persona p = new AgentSpecReader().parse(new AgentId("main"), "persona", spec);
+
+        assertEquals(List.of(ModelRef.parse("openai:gpt-4.1-mini"), ModelRef.parse("anthropic:claude-3-5")),
+                p.fallbackModels());
+    }
+
+    @Test
+    void rejectsFallbackModelsThatIsNotAnArray() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"fallbackModels\": \"x\" }");
+
+        assertThrows(IllegalStateException.class,
+                () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec));
+    }
+
+    @Test
+    void parsesRolesAndIdentityId() throws Exception {
+        JsonNode spec = json("""
+            { "primaryModel": "ollama:qwen3:1.7b", "roles": ["research-readonly"], "identityId": "default" }
+            """);
+
+        Persona p = new AgentSpecReader().parse(new AgentId("main"), "persona", spec);
+
+        assertEquals(List.of("research-readonly"), p.roles());
+        assertEquals("default", p.identityId());
+    }
+
+    @Test
+    void memoryPolicyBlockDefaultsEachOmittedFieldFromDefaults() throws Exception {
+        // Only topK supplied — every other field defaults from MemoryPolicy.defaults() (DR-8 DP-5).
+        JsonNode spec = json("""
+            { "primaryModel": "ollama:qwen3:1.7b", "memoryPolicy": { "topK": 4 } }
+            """);
+
+        MemoryPolicy policy =
+                new AgentSpecReader().parse(new AgentId("main"), "persona", spec).memoryPolicy();
+        MemoryPolicy d = MemoryPolicy.defaults();
+
+        assertEquals(4, policy.topK());
+        assertEquals(d.strategy(), policy.strategy());
+        assertEquals(d.tiers(), policy.tiers());
+        assertEquals(d.minScore(), policy.minScore());
+        assertEquals(d.compressThresholdChars(), policy.compressThresholdChars());
+    }
+
+    @Test
+    void memoryPolicyEnumsParseCaseInsensitively() throws Exception {
+        JsonNode spec = json("""
+            { "primaryModel": "ollama:qwen3:1.7b",
+              "memoryPolicy": { "strategy": "metadata", "tiers": ["messages", "semantic"] } }
+            """);
+
+        MemoryPolicy policy =
+                new AgentSpecReader().parse(new AgentId("main"), "persona", spec).memoryPolicy();
+
+        assertEquals(RetrievalStrategy.METADATA, policy.strategy());
+        assertEquals(EnumSet.of(MemoryTier.MESSAGES, MemoryTier.SEMANTIC), policy.tiers());
+    }
+
+    @Test
+    void rejectsAnUnknownMemoryStrategy() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", "
+                + "\"memoryPolicy\": { \"strategy\": \"bogus\" } }");
+
+        assertThrows(IllegalStateException.class,
+                () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec));
+    }
+
+    @Test
+    void rejectsAnUnknownMemoryTier() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", "
+                + "\"memoryPolicy\": { \"tiers\": [\"bogus\"] } }");
+
+        assertThrows(IllegalStateException.class,
+                () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec));
+    }
+
+    @Test
+    void rejectsANonNumericTopK() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", "
+                + "\"memoryPolicy\": { \"topK\": \"abc\" } }");
+
+        assertThrows(IllegalStateException.class,
+                () -> new AgentSpecReader().parse(new AgentId("main"), "persona", spec),
+                "a non-numeric topK must be rejected, not silently coerced to 0");
+    }
+
+    @Test
+    void parseSpecDefaultsCycleToNullWhenAbsent() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\" }");
+
+        AgentSpec s = new AgentSpecReader().parseSpec(new AgentId("main"), "persona", spec);
+
+        assertNull(s.cycle(), "no cycle block = the standard supervisor graph");
+        assertEquals(new AgentId("main"), s.persona().id());
+    }
+
+    @Test
+    void parseSpecReadsTheCycleBlock() throws Exception {
+        JsonNode spec = json("""
+            { "primaryModel": "ollama:qwen3:1.7b",
+              "cycle": { "steps": ["reflect", "critique", "revise"], "maxRounds": 2, "stopSentinel": "DONE" } }
+            """);
+
+        CycleSpec c = new AgentSpecReader().parseSpec(new AgentId("main"), "persona", spec).cycle();
+
+        assertNotNull(c);
+        assertEquals(List.of("reflect", "critique", "revise"), c.steps());
+        assertEquals(2, c.maxRounds());
+        assertEquals("DONE", c.stopSentinel());
+    }
+
+    @Test
+    void parseSpecDefaultsCycleMaxRoundsToThree() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", "
+                + "\"cycle\": { \"steps\": [\"reflect\"] } }");
+
+        CycleSpec c = new AgentSpecReader().parseSpec(new AgentId("main"), "persona", spec).cycle();
+
+        assertEquals(3, c.maxRounds(), "absent cycle.maxRounds defaults to 3 (DR-8 DP-7)");
+        assertNull(c.stopSentinel());
+    }
+
+    @Test
+    void rejectsACycleWithoutSteps() throws Exception {
+        JsonNode spec = json("{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"cycle\": { \"maxRounds\": 2 } }");
+
+        assertThrows(IllegalStateException.class,
+                () -> new AgentSpecReader().parseSpec(new AgentId("main"), "persona", spec));
     }
 }

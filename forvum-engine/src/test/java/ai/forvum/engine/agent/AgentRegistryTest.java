@@ -2,6 +2,8 @@ package ai.forvum.engine.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,10 +15,12 @@ import jakarta.inject.Inject;
 
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
+import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.config.ChangeType;
 import ai.forvum.engine.config.ConfigurationChangedEvent;
 import ai.forvum.engine.context.CurrentAgent;
+import ai.forvum.engine.graph.CycleSpec;
 
 import org.junit.jupiter.api.Test;
 
@@ -145,5 +149,53 @@ class AgentRegistryTest {
     void personaThrowsForAnUnregisteredAgent() {
         assertThrows(IllegalStateException.class,
                 () -> registry.persona(new AgentId("never-loaded")));
+    }
+
+    // ---- DR-8 composition: spec(id), the non-default fields, and spawn inheritance ----
+
+    @Test
+    void specReadsTheDeclaredCycle() {
+        AgentId policied = new AgentId("policied");
+        registry.getOrCreate(policied);
+
+        CycleSpec cycle = registry.spec(policied).cycle();
+
+        assertNotNull(cycle, "the agent's declared cycle must be reachable via spec(id)");
+        assertEquals(List.of("reflect", "critique", "revise"), cycle.steps());
+        assertEquals(2, cycle.maxRounds());
+        assertEquals("DONE", cycle.stopSentinel());
+    }
+
+    @Test
+    void personaCarriesTheNonDefaultDR8Fields() {
+        AgentId policied = new AgentId("policied");
+        registry.getOrCreate(policied);
+
+        Persona p = registry.persona(policied);
+
+        assertEquals(List.of(ModelRef.parse("openai:gpt-4.1-mini")), p.fallbackModels());
+        assertEquals(List.of("research-readonly"), p.roles());
+        assertEquals("default", p.identityId());
+        assertEquals(RetrievalStrategy.METADATA, p.memoryPolicy().strategy());
+        assertEquals(4, p.memoryPolicy().topK());
+    }
+
+    @Test
+    void spawnInheritsDR8FieldsVerbatimButNotTheCycle() {
+        AgentId policied = new AgentId("policied");
+        registry.getOrCreate(policied);
+        Persona parent = registry.persona(policied);
+
+        AgentId child = registry.spawn(policied, new AgentId("policied-child"), List.of("fs.read"));
+        Persona childPersona = registry.persona(child);
+
+        // The 4 DR-8 fields inherit verbatim — non-default values, so this proves real inheritance, not a
+        // default coincidence (the [M19] override-only-if-distinct discipline).
+        assertEquals(parent.fallbackModels(), childPersona.fallbackModels());
+        assertEquals(parent.memoryPolicy(), childPersona.memoryPolicy());
+        assertEquals(parent.roles(), childPersona.roles());
+        assertEquals(parent.identityId(), childPersona.identityId());
+        // The declared cycle is NOT inherited — a worker runs a single direct generation (M18).
+        assertNull(registry.spec(child).cycle());
     }
 }

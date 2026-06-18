@@ -45,7 +45,7 @@ public class AgentRegistry {
     TaskExecutor taskExecutor;
 
     private final AgentSpecReader specReader = new AgentSpecReader();
-    private final ConcurrentMap<AgentId, Persona> specs = new ConcurrentHashMap<>();
+    private final ConcurrentMap<AgentId, AgentSpec> specs = new ConcurrentHashMap<>();
 
     /**
      * Resolve the agent, loading its spec from disk on first request. Returns the {@code @AgentScoped}
@@ -64,13 +64,22 @@ public class AgentRegistry {
 
     /** The registered persona for {@code id}; throws if {@link #getOrCreate}/{@link #spawn} did not register it. */
     public Persona persona(AgentId id) {
-        Persona persona = specs.get(id);
-        if (persona == null) {
+        return spec(id).persona();
+    }
+
+    /**
+     * The full registered {@link AgentSpec} (persona + optional declared cycle) for {@code id}; throws if
+     * {@link #getOrCreate}/{@link #spawn} did not register it. The #51 declarative-cycle compiler reads
+     * {@code spec(id).cycle()}; most callers want only {@link #persona(AgentId)}.
+     */
+    public AgentSpec spec(AgentId id) {
+        AgentSpec spec = specs.get(id);
+        if (spec == null) {
             throw new IllegalStateException(
                     "Agent '" + id.value() + "' is not registered — call getOrCreate(\""
                   + id.value() + "\") first.");
         }
-        return persona;
+        return spec;
     }
 
     /**
@@ -97,11 +106,15 @@ public class AgentRegistry {
                   + " must be a subset of parent '" + parentId.value() + "' tool belt "
                   + parent.allowedTools() + ".");
         }
-        // A worker's output is a digest merged back as a tool result (never the top-level final answer
-        // the SupervisorGraph validates), so the child does NOT inherit the parent's output schema (P2-12).
+        // The child inherits the parent's fallback chain, memory policy, role cap, and identity pointer
+        // verbatim (like its system prompt/model/budgets) — it can never gain anything the parent lacks.
+        // It does NOT inherit the parent's output schema (P2-12: a worker's output is a digest merged
+        // back as a tool result, never the top-level final answer the SupervisorGraph validates) nor a
+        // declared cycle (a worker runs a single direct generation — DefaultWorkerRunner, M18).
         Persona child = new Persona(childId, parent.systemPrompt(), allowedTools,
-                parent.primaryModel(), parentId, parent.costBudget(), parent.toolBudget(), null);
-        if (specs.putIfAbsent(childId, child) != null) {
+                parent.primaryModel(), parentId, parent.costBudget(), parent.toolBudget(), null,
+                parent.fallbackModels(), parent.memoryPolicy(), parent.roles(), parent.identityId());
+        if (specs.putIfAbsent(childId, new AgentSpec(child, null)) != null) {
             throw new IllegalStateException(
                     "spawn: agent id '" + childId.value() + "' is already registered; choose a distinct "
                   + "child id (spawn never overwrites an existing agent).");
@@ -158,10 +171,10 @@ public class AgentRegistry {
         }
     }
 
-    private Persona load(AgentId id) {
+    private AgentSpec load(AgentId id) {
         String persona = reader.persona(id.value()).orElseThrow(() -> missingFile(id, "md"));
         JsonNode spec = reader.spec(id.value()).orElseThrow(() -> missingFile(id, "json"));
-        return specReader.parse(id, persona, spec);
+        return specReader.parseSpec(id, persona, spec);
     }
 
     private static IllegalStateException missingFile(AgentId id, String ext) {

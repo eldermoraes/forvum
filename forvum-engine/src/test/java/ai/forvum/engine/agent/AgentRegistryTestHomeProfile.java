@@ -35,6 +35,19 @@ public class AgentRegistryTestHomeProfile implements QuarkusTestProfile {
             Files.writeString(agents.resolve("boomer.md"), "You are a failing test agent.");
             Files.writeString(agents.resolve("boomer.json"),
                     "{ \"primaryModel\": \"boom:test-model\", \"allowedTools\": [] }");
+            // A fourth agent carrying NON-default DR-8 fields (fallback chain, memory policy, role cap,
+            // identity pointer) + a declared cycle, so spawn-inheritance and spec(id) are proven against
+            // values that differ from the defaults (the [M19] override-only-if-distinct discipline).
+            Files.writeString(agents.resolve("policied.md"), "You are a policied agent.");
+            Files.writeString(agents.resolve("policied.json"),
+                    "{ \"primaryModel\": \"ollama:qwen3:1.7b\", "
+                  + "\"allowedTools\": [\"fs.read\", \"web.search\"], "
+                  + "\"fallbackModels\": [\"openai:gpt-4.1-mini\"], "
+                  + "\"roles\": [\"research-readonly\"], "
+                  + "\"identityId\": \"default\", "
+                  + "\"memoryPolicy\": { \"strategy\": \"METADATA\", \"tiers\": [\"MESSAGES\"], \"topK\": 4 }, "
+                  + "\"cycle\": { \"steps\": [\"reflect\", \"critique\", \"revise\"], "
+                  + "\"maxRounds\": 2, \"stopSentinel\": \"DONE\" } }");
             return home;
         } catch (IOException e) {
             throw new UncheckedIOException(e);

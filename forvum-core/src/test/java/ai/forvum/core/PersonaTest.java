@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -21,8 +22,9 @@ import ai.forvum.core.id.AgentId;
 
 /**
  * {@link Persona} structural shape (section 4.3 backfill): required id/systemPrompt/allowedTools/primaryModel;
- * nullable parent/costBudget/toolBudget; allowedTools immutable; {@code FallbackChain}/{@code MemoryPolicy}
- * deliberately absent (deferred to DR-4c/DR-5).
+ * nullable parent/costBudget/toolBudget; allowedTools immutable; the DR-8 fields
+ * (fallbackModels/memoryPolicy/roles/identityId) additive with backward-compatible defaults via the
+ * 8-argument constructor (the {@code Identity.roles} precedent).
  */
 class PersonaTest {
 
@@ -116,5 +118,73 @@ class PersonaTest {
         assertThrows(IllegalStateException.class, () -> new Persona(ID, "p", null, MODEL, null, null, null, null));
         assertThrows(IllegalStateException.class, () -> new Persona(ID, "p", List.of(), null, null, null, null, null));
         assertThrows(IllegalStateException.class, () -> new Persona(ID, "p", List.of(), MODEL, null, null, -1L, null));
+    }
+
+    // ---- DR-8 fields (fallbackModels / memoryPolicy / roles / identityId) ----
+
+    @Test
+    void theEightArgConstructorSuppliesDR8Defaults() {
+        Persona p = new Persona(ID, "p", List.of(), MODEL, null, null, null, null);
+        assertEquals(List.of(), p.fallbackModels());
+        assertEquals(MemoryPolicy.defaults(), p.memoryPolicy());
+        assertEquals(List.of(), p.roles());
+        assertNull(p.identityId());
+    }
+
+    @Test
+    void carriesTheDR8FieldsWhenSupplied() {
+        ModelRef fb = new ModelRef("openai", "gpt-4.1-mini");
+        MemoryPolicy policy = new MemoryPolicy(
+            RetrievalStrategy.METADATA, EnumSet.of(MemoryTier.MESSAGES), 4, 0.1, 2000);
+        Persona p = new Persona(ID, "p", List.of(), MODEL, null, null, null, null,
+            List.of(fb), policy, List.of("research-readonly"), "default");
+        assertEquals(List.of(fb), p.fallbackModels());
+        assertEquals(policy, p.memoryPolicy());
+        assertEquals(List.of("research-readonly"), p.roles());
+        assertEquals("default", p.identityId());
+    }
+
+    @Test
+    void normalizesNullDR8CollectionsAndPolicy() {
+        // The canonical 12-arg ctor must normalize a null fallbackModels/roles to an empty list and a
+        // null memoryPolicy to defaults() — "memory off" is the value strategy=NONE, not absence.
+        Persona p = new Persona(ID, "p", List.of(), MODEL, null, null, null, null,
+            null, null, null, null);
+        assertEquals(List.of(), p.fallbackModels());
+        assertEquals(MemoryPolicy.defaults(), p.memoryPolicy());
+        assertEquals(List.of(), p.roles());
+        assertNull(p.identityId());
+    }
+
+    @Test
+    void fallbackModelsAndRolesAreImmutable() {
+        Persona p = new Persona(ID, "p", List.of(), MODEL, null, null, null, null,
+            List.of(MODEL), MemoryPolicy.defaults(), List.of("r"), null);
+        assertThrows(UnsupportedOperationException.class, () -> p.fallbackModels().add(MODEL));
+        assertThrows(UnsupportedOperationException.class, () -> p.roles().add("x"));
+    }
+
+    @Test
+    void rejectsANullFallbackModelEntry() {
+        assertThrows(IllegalStateException.class,
+            () -> new Persona(ID, "p", List.of(), MODEL, null, null, null, null,
+                Arrays.asList(MODEL, null), MemoryPolicy.defaults(), List.of(), null));
+    }
+
+    @Test
+    void rejectsANullOrBlankRoleEntry() {
+        assertThrows(IllegalStateException.class,
+            () -> new Persona(ID, "p", List.of(), MODEL, null, null, null, null,
+                List.of(), MemoryPolicy.defaults(), Arrays.asList("ok", "  "), null));
+        assertThrows(IllegalStateException.class,
+            () -> new Persona(ID, "p", List.of(), MODEL, null, null, null, null,
+                List.of(), MemoryPolicy.defaults(), Arrays.asList("ok", (String) null), null));
+    }
+
+    @Test
+    void rejectsABlankButPresentIdentityId() {
+        assertThrows(IllegalStateException.class,
+            () -> new Persona(ID, "p", List.of(), MODEL, null, null, null, null,
+                List.of(), MemoryPolicy.defaults(), List.of(), "  "));
     }
 }
