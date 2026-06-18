@@ -103,6 +103,13 @@ public class SessionReplayCommand implements Callable<Integer> {
                     + "Session ids are channelId:nativeUserId (e.g. cli:alice); run a turn first.");
             return 1;
         }
+        if (result.failed()) {
+            System.err.println("Replay of session " + result.originalSessionId() + " under model "
+                    + result.substituteModel() + " did not complete: " + result.failureMessage()
+                    + ". Is the substituted model provider configured and reachable? "
+                    + "The partial rerun is in session " + result.newSessionId() + ".");
+            return 1;
+        }
         System.out.println("Replayed session " + result.originalSessionId() + " with model "
                 + result.substituteModel() + " substituted -> new session " + result.newSessionId()
                 + " (" + result.turnCount() + " turn(s) re-run).");

@@ -82,4 +82,43 @@ class SessionSubstitutionReplayerIT {
             assertTrue(session.metadataJson.contains(original), "metadata records the replayOf source session");
         });
     }
+
+    @Test
+    void aFailingRerunTurnIsReportedAsPartialNotPropagated() {
+        AgentId faker = new AgentId("faker");
+        Agent agent = registry.getOrCreate(faker);
+        String original = "cli:replay-fail-it";
+
+        // 1. A successful original turn (faker persona model -> "pong") seeds the session.
+        ScopedValue.where(CurrentAgent.CURRENT_AGENT, faker)
+                .call(() -> agent.respond(original, "the original question"));
+
+        // 2. Replay substituting the always-throwing boom model: the rerun turn must fail CLEANLY (partial),
+        //    NOT propagate an uncaught exception out of replay() (the headline --model risk: an unreachable /
+        //    unconfigured substitute provider).
+        SubstitutionResult result = replayer.replay(original, ModelRef.parse("boom:test-model"));
+
+        assertTrue(result.found());
+        assertTrue(result.failed(), "a failing rerun turn is reported as partial, not propagated as a crash");
+        assertEquals(0, result.turnCount(), "no turn completed under the throwing substitute model");
+        assertNotNull(result.failureMessage(), "the failure names the turn that failed + its cause");
+    }
+
+    @Test
+    void anUnresolvableSubstituteModelIsReportedAsFailedNotPropagated() {
+        AgentId faker = new AgentId("faker");
+        Agent agent = registry.getOrCreate(faker);
+        String original = "cli:replay-resolve-fail-it";
+        ScopedValue.where(CurrentAgent.CURRENT_AGENT, faker)
+                .call(() -> agent.respond(original, "the original question"));
+
+        // An unknown provider fails at resolve time (before any turn) — it must be caught and reported as a
+        // failed rerun, not propagate an uncaught exception out of replay().
+        SubstitutionResult result = replayer.replay(original, ModelRef.parse("nonexistent:model"));
+
+        assertTrue(result.found());
+        assertTrue(result.failed(), "an unresolvable substitute provider is reported, not propagated");
+        assertEquals(0, result.turnCount());
+        assertNotNull(result.failureMessage(), "the failure explains the model could not be resolved");
+    }
 }

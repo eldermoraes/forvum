@@ -21,8 +21,10 @@ public final class RetrievedMemory {
     private static final String OPEN = "<retrieved_memory>";
     private static final String CLOSE = "</retrieved_memory>";
 
-    /** Matches a closing tag in any whitespace/case form, so untrusted content cannot end the block early. */
-    private static final Pattern CLOSE_TAG = Pattern.compile("</\\s*retrieved_memory\\s*>", Pattern.CASE_INSENSITIVE);
+    /** Matches a closing tag in any whitespace/case form (incl. space between {@code <} and {@code /}), so
+     * untrusted content cannot end the block early. */
+    private static final Pattern CLOSE_TAG =
+            Pattern.compile("<\\s*/\\s*retrieved_memory\\s*>", Pattern.CASE_INSENSITIVE);
 
     private RetrievedMemory() {
     }

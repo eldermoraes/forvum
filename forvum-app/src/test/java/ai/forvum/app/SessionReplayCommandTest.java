@@ -78,6 +78,20 @@ class SessionReplayCommandTest {
     }
 
     @Test
+    void replayWithAnUnresolvableSubstituteModelReportsPartialAndExitsNonZero(QuarkusMainLauncher launcher) {
+        LaunchResult ask = launcher.launch("ask", "What is two plus two?");
+        assertEquals(0, ask.exitCode(), () -> "ask must seed the session; stderr: " + ask.getErrorOutput());
+
+        // A syntactically-valid but UNKNOWN provider: resolve fails inside the replayer and is reported as a
+        // failed (partial) rerun — exit 1 with an actionable message, NOT an uncaught stack trace.
+        LaunchResult replay = launcher.launch("replay", cliSession(), "--model", "nonexistent:model");
+        assertEquals(1, replay.exitCode(),
+                () -> "an unresolvable substitute model must exit 1 cleanly; stdout: " + replay.getOutput());
+        assertTrue(replay.getErrorOutput().contains("did not complete"),
+                () -> "the error must explain the rerun did not complete; got: " + replay.getErrorOutput());
+    }
+
+    @Test
     void replayWithAnInvalidSubstituteModelRefExitsNonZero(QuarkusMainLauncher launcher) {
         LaunchResult replay = launcher.launch("replay", cliSession(), "--model", "no-colon-here");
         assertEquals(1, replay.exitCode(),

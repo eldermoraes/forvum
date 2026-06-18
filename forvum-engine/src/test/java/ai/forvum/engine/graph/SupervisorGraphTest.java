@@ -724,4 +724,78 @@ class SupervisorGraphTest {
         assertEquals("r2s2", reply, "best-effort result after maxRounds");
         assertEquals(4, model.seen.size(), "2 steps x 2 rounds = 4 generation passes (the round cap bound)");
     }
+
+    // ---- review fixes: graceful compression failure (#4) + replay-mode determinism red-checks (#6) ----
+
+    @Test
+    void aProxyCompressionFailureDegradesGracefullyKeepingTheRawHit() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        String oversized = "x".repeat(50);
+        graph.memorySelector = selectorReturning(new MemoryHit(MemoryTier.SEMANTIC, oversized, 0.9, "m1"));
+        graph.summarizer = contents -> {
+            throw new RuntimeException("proxy model is down");
+        };
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("ok"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("a question?"));
+        MemoryPolicy policy = new MemoryPolicy(RetrievalStrategy.HYBRID, EnumSet.allOf(MemoryTier.class), 8, 0.0, 10);
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy));
+
+        assertEquals("ok", reply, "a proxy-compression failure must NOT fail the turn (graceful degradation)");
+        assertTrue(framedBlock(model.seen.get(0)).contains(oversized),
+                "the raw uncompressed hit is kept when the proxy summarizer throws");
+    }
+
+    @Test
+    void inReplayModeRetrievalIsSkippedEvenWithANonNonePolicyAndProvider() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        // A selector that WOULD return a hit if consulted — proves the REPLAY guard (not the policy) suppresses it.
+        graph.memorySelector = selectorReturning(new MemoryHit(MemoryTier.SEMANTIC, "should-not-retrieve", 1.0, "x"));
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("ok"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("hello"));
+        ReplayToolSource source = new ReplayToolSource(List.of());
+
+        // MemoryPolicy.defaults() (HYBRID) WOULD retrieve outside replay mode; the replay binding must suppress it.
+        ScopedValue.where(ReplayContext.CURRENT_REPLAY, source).call(() ->
+                graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed,
+                        null, MemoryPolicy.defaults())));
+
+        assertTrue(indexOfUserContaining(model.seen.get(0), "<retrieved_memory>") < 0,
+                "replay mode skips retrieval despite a non-NONE policy + an installed provider (determinism)");
+        assertTrue(indexOfUserContaining(model.seen.get(0), "should-not-retrieve") < 0);
+    }
+
+    @Test
+    void inReplayModeWorkerDigestCompressionIsDisabledEvenBelowThreshold() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        AtomicInteger summarizeCalls = new AtomicInteger();
+        graph.summarizer = contents -> {
+            summarizeCalls.incrementAndGet();
+            return "COMPRESSED";
+        };
+
+        AiMessage spawnCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("sp-1").name("spawn_worker")
+                        .arguments("{\"childId\":\"researcher\",\"task\":\"find the long answer\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(spawnCall, AiMessage.from("Final"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("delegate"));
+        // threshold 5 WOULD compress the digest outside replay; the replay binding forces threshold 0.
+        MemoryPolicy policy = new MemoryPolicy(RetrievalStrategy.NONE, EnumSet.noneOf(MemoryTier.class), 8, 0.0, 5);
+        ReplayToolSource source = new ReplayToolSource(List.of());
+
+        ScopedValue.where(ReplayContext.CURRENT_REPLAY, source).call(() ->
+                graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy)));
+
+        assertEquals(0, summarizeCalls.get(),
+                "replay mode disables proxy compression for determinism, even below the threshold");
+        assertTrue(hasToolResult(model.seen.get(1), "researcher result for: find the long answer"),
+                "the raw worker digest reaches the model in replay mode, not a compressed summary");
+    }
 }

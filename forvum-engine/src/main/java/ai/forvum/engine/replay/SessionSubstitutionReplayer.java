@@ -98,17 +98,50 @@ public class SessionSubstitutionReplayer {
         // One FIFO source shared across all turns: the Nth call to a tool across the whole rerun consumes
         // the Nth recorded result for that tool (turn-spanning FIFO-per-tool).
         ReplayToolSource toolSource = new ReplayToolSource(recorded);
-        ChatModel model = llmSelector.resolve(substituteModel, agentId.value(), newSessionId);
-        registry.getOrCreate(agentId); // ensure the persona is registered for the @AgentScoped respond
-
-        for (String userText : userTexts) {
-            ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId)
-                    .where(CurrentAgent.CURRENT_TURN, UUID.randomUUID())
-                    .where(ReplayContext.CURRENT_REPLAY, toolSource)
-                    .where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE) // no human in a replay
-                    .call(() -> agent.respond(newSessionId, userText, model));
+        ChatModel model;
+        try {
+            // Resolving an UNKNOWN substitute provider throws here (before any turn) — keep it inside the
+            // safety net so replay() never propagates an uncaught exception to the CLI.
+            model = llmSelector.resolve(substituteModel, agentId.value(), newSessionId);
+            registry.getOrCreate(agentId); // ensure the persona is registered for the @AgentScoped respond
+        } catch (RuntimeException e) {
+            String cause = deepestMessage(e);
+            LOG.warnf("Replay of '%s' could not resolve substitute model %s: %s",
+                    originalSessionId, substituteModel, cause);
+            return SubstitutionResult.partial(originalSessionId, newSessionId, 0, substituteModel,
+                    "could not resolve substitute model " + substituteModel + ": " + cause);
         }
-        return SubstitutionResult.replayed(originalSessionId, newSessionId, userTexts.size(), substituteModel);
+
+        int completed = 0;
+        for (String userText : userTexts) {
+            try {
+                ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId)
+                        .where(CurrentAgent.CURRENT_TURN, UUID.randomUUID())
+                        .where(ReplayContext.CURRENT_REPLAY, toolSource)
+                        .where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE) // no human in a replay
+                        .call(() -> agent.respond(newSessionId, userText, model));
+                completed++;
+            } catch (RuntimeException e) {
+                // A rerun turn failed (e.g. a substituted provider that is unreachable/unconfigured — the
+                // headline --model risk). Unlike a channel turn, there is no TurnService to convert this to
+                // a terminal ErrorEvent, so surface it cleanly: stop, and report which turn failed + its
+                // root cause. Turns 1..completed are already persisted in the new (partial) session.
+                String cause = deepestMessage(e);
+                LOG.warnf("Replay of '%s' stopped at turn %d: %s", originalSessionId, completed + 1, cause);
+                return SubstitutionResult.partial(originalSessionId, newSessionId, completed, substituteModel,
+                        "turn " + (completed + 1) + " failed: " + cause);
+            }
+        }
+        return SubstitutionResult.replayed(originalSessionId, newSessionId, completed, substituteModel);
+    }
+
+    /** Walk to the deepest cause's message (hop-capped against a cause cycle), for an actionable diagnostic. */
+    private static String deepestMessage(Throwable t) {
+        Throwable cause = t;
+        for (int i = 0; i < 20 && cause.getCause() != null && cause.getCause() != cause; i++) {
+            cause = cause.getCause();
+        }
+        return cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
     }
 
     /** Record {@code {replayOf, substitution:{model}}} on the new session's metadata_json (best-effort). */

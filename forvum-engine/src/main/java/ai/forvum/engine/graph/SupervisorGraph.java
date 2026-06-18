@@ -39,6 +39,8 @@ import io.opentelemetry.instrumentation.annotations.WithSpan;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import org.jboss.logging.Logger;
+
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.StateGraph;
@@ -83,6 +85,8 @@ import java.util.concurrent.Future;
  */
 @ApplicationScoped
 public class SupervisorGraph {
+
+    private static final Logger LOG = Logger.getLogger(SupervisorGraph.class);
 
     /** Safety cap on {@code generate ⇄ (tool_loop|workers)} rounds, independent of any per-agent budget. */
     private static final int MAX_ROUNDS = 8;
@@ -194,10 +198,19 @@ public class SupervisorGraph {
         List<MemoryHit> out = new ArrayList<>(hits.size());
         for (MemoryHit hit : hits) {
             String content = hit.content();
-            if (content != null && content.length() > threshold) {
-                out.add(new MemoryHit(hit.tier(), summarizer.summarize(List.of(content)),
-                        hit.score(), hit.source()));
-            } else {
+            if (content == null || content.length() <= threshold) {
+                out.add(hit);
+                continue;
+            }
+            // Best-effort (graceful degradation, mirroring MemorySelector.retrieve): a proxy-model failure
+            // — a throw, or a null/blank summary the MemoryHit ctor would reject — must NOT fail the turn;
+            // keep the raw hit and proceed. retrieveAndFrame runs OUTSIDE run()'s try/catch.
+            try {
+                String summary = summarizer.summarize(List.of(content));
+                out.add(summary == null || summary.isBlank()
+                        ? hit : new MemoryHit(hit.tier(), summary, hit.score(), hit.source()));
+            } catch (RuntimeException e) {
+                LOG.warnf(e, "Proxy compression of a retrieved hit failed; keeping it uncompressed.");
                 out.add(hit);
             }
         }
@@ -486,7 +499,14 @@ public class SupervisorGraph {
         if (threshold <= 0 || digest == null || digest.length() <= threshold) {
             return digest;
         }
-        return summarizer.summarize(List.of(digest));
+        // Best-effort like compressHits: a proxy-model failure keeps the raw digest rather than failing the turn.
+        try {
+            String summary = summarizer.summarize(List.of(digest));
+            return summary == null || summary.isBlank() ? digest : summary;
+        } catch (RuntimeException e) {
+            LOG.warnf(e, "Proxy compression of a worker digest failed; keeping it uncompressed.");
+            return digest;
+        }
     }
 
     /** One delegated subtask: the model's {@code spawn_worker} call paired with its parsed child + task. */
