@@ -2,6 +2,7 @@ package ai.forvum.provider.google;
 
 import ai.forvum.core.ModelRef;
 import ai.forvum.sdk.AbstractModelProvider;
+import ai.forvum.sdk.FileApiKeyStore;
 import ai.forvum.sdk.ForvumExtension;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
@@ -10,6 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.time.Duration;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -29,7 +31,10 @@ import java.util.concurrent.ConcurrentMap;
  * {@code defaultValue=""} on the field is only the last-resort fallback if the property is entirely
  * absent; in {@code forvum-app} the property is always present (a {@code unset} placeholder the
  * ai-gemini extension needs to boot — see {@code application.properties}), so the bean starts cleanly
- * with no live key and the key is required only when {@code chat()} is called.
+ * with no live key and the key is required only when {@code chat()} is called. When the config key is
+ * blank (or the {@code unset} placeholder) the provider falls back to the file the {@code forvum
+ * provider add} wizard stored under {@code state/credentials/google} (P2-10 #35, see
+ * {@link #effectiveApiKey()}).
  *
  * <p>GoogleAiGeminiChatModel construction is lazy — the underlying Quarkus Reactive REST Client is
  * built when the first {@link #resolve} call is made, not at bean startup — so this bean starts
@@ -65,9 +70,24 @@ import java.util.concurrent.ConcurrentMap;
 @ApplicationScoped
 public class GoogleModelProvider extends AbstractModelProvider {
 
+    /**
+     * The {@code unset} placeholder the {@code ai-gemini} extension needs to boot with no real key
+     * ({@code application.properties}); treated as "no key" so the file-backed fallback applies.
+     */
+    private static final String GEMINI_PLACEHOLDER = "unset";
+
     /** Google Gemini API key; package-private for ArC field injection. */
     @ConfigProperty(name = "quarkus.langchain4j.ai.gemini.api-key", defaultValue = "")
     String apiKey;
+
+    /**
+     * {@code $FORVUM_HOME} for the file-backed key fallback (P2-10 #35): when {@link #apiKey} is blank
+     * (or the {@code unset} placeholder) the provider reads {@code state/credentials/google} — the
+     * {@code 0600} file the {@code forvum provider add} wizard writes. Package-private for ArC field
+     * injection; an absent value resolves to {@code ~/.forvum}.
+     */
+    @ConfigProperty(name = "forvum.home")
+    Optional<String> forvumHome;
 
     /**
      * HTTP request timeout for programmatic model construction; package-private for ArC field
@@ -91,13 +111,31 @@ public class GoogleModelProvider extends AbstractModelProvider {
     public ChatModel resolve(ModelRef ref) {
         // GeminiService resolves its HTTP client via HttpClientBuilderLoader; the ambiguous-factory
         // conflict on the forvum-app classpath is disambiguated app-wide by HttpClientFactorySelector
-        // (see the class Javadoc). The CHM computeIfAbsent callback is synchronous and short (no I/O at
-        // build time), so it does not pin the carrier thread.
+        // (see the class Javadoc). Resolve the key OUTSIDE computeIfAbsent: effectiveApiKey() may read a
+        // file (the wizard's 0600 fallback), and blocking I/O inside the CHM callback would pin the
+        // carrier thread (CLAUDE.md §3.8 / [M7]). The callback itself stays I/O-free.
+        String key = effectiveApiKey();
         return modelsByName.computeIfAbsent(ref.model(), modelName -> GoogleAiGeminiChatModel.builder()
-                .apiKey(apiKey)
+                .apiKey(key)
                 .modelName(modelName)
                 .timeout(timeout)
                 .httpClientBuilder(new JdkHttpClientBuilder()) // explicit: native ServiceLoader is empty (see class javadoc)
                 .build());
+    }
+
+    /**
+     * The API key to use: the configured {@code quarkus.langchain4j.ai.gemini.api-key} when set to a
+     * real value (env / {@code -D} / {@code application.properties} keep precedence), otherwise the key
+     * the {@code forvum provider add} wizard stored under {@code state/credentials/google} (P2-10 #35).
+     * The {@code unset} boot placeholder counts as "no key" so the file fallback applies. Read at
+     * resolve time so a just-written key is seen without a restart; the empty string when neither is
+     * present (the missing-key error then surfaces at {@code chat()} time as before). Package-private
+     * for unit testing.
+     */
+    String effectiveApiKey() {
+        if (apiKey != null && !apiKey.isBlank() && !apiKey.equals(GEMINI_PLACEHOLDER)) {
+            return apiKey;
+        }
+        return FileApiKeyStore.read(FileApiKeyStore.resolveHome(forvumHome), extensionId()).orElse("");
     }
 }

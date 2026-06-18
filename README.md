@@ -71,8 +71,12 @@ java -jar "$JAR"                # interactive session (the same `forvum> ` REPL 
 ```
 
 Configuration lives in `~/.forvum` (override with the `FORVUM_HOME` env var). Cloud providers
-(Anthropic, OpenAI, Google) need an API key (env var / `~/.forvum`); point an agent at one by editing
-its model in `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`). GitHub Copilot uses a
+(Anthropic, OpenAI, Google) need an API key. The quickest path is `forvum provider add <provider>`
+(e.g. `forvum provider add anthropic`): it prompts for the key (no echo), stores it owner-only (`0600`)
+under `~/.forvum/state/credentials/`, runs a smoke test, and offers to make `<provider>:<model>` agent
+`main`'s default. You can still export the key as an env var
+(`QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY`, which takes precedence) and point an agent at a model by
+editing `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`). GitHub Copilot uses a
 device-code login instead of an API key: run `forvum copilot login`, authorize in the browser, then point
 an agent at a `copilot:<model>` ModelRef (e.g. `copilot:gpt-4o`). If a turn fails with
 `Is the model provider running?`, start Ollama (`ollama serve`) and pull the model named in the error.
