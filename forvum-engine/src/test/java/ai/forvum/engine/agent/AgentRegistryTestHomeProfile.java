@@ -48,6 +48,12 @@ public class AgentRegistryTestHomeProfile implements QuarkusTestProfile {
                   + "\"memoryPolicy\": { \"strategy\": \"METADATA\", \"tiers\": [\"MESSAGES\"], \"topK\": 4 }, "
                   + "\"cycle\": { \"steps\": [\"reflect\", \"critique\", \"revise\"], "
                   + "\"maxRounds\": 2, \"stopSentinel\": \"DONE\" } }");
+            // A fifth agent with a TWO-link fallback chain, both on the in-process FakeModelProvider, so a
+            // real turn exercises CAPR-driven routing (P3-4 #52): the primary is down-ranked when it sags.
+            Files.writeString(agents.resolve("routed.md"), "You are a routed test agent.");
+            Files.writeString(agents.resolve("routed.json"),
+                    "{ \"primaryModel\": \"fake:sag-model\", \"allowedTools\": [], "
+                  + "\"fallbackModels\": [\"fake:healthy-model\"] }");
             return home;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
