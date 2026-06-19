@@ -5,7 +5,9 @@ import ai.forvum.sdk.AbstractModelProvider;
 import ai.forvum.sdk.ForvumExtension;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -49,6 +51,8 @@ public class OllamaModelProvider extends AbstractModelProvider {
 
     private final ConcurrentMap<String, ChatModel> modelsByName = new ConcurrentHashMap<>();
 
+    private final ConcurrentMap<String, EmbeddingModel> embeddingModelsByName = new ConcurrentHashMap<>();
+
     @Override
     public String extensionId() {
         return "ollama";
@@ -58,6 +62,17 @@ public class OllamaModelProvider extends AbstractModelProvider {
     public ChatModel resolve(ModelRef ref) {
         // build() is lazy (allocates no connection), so this never blocks the CHM bin on I/O.
         return modelsByName.computeIfAbsent(ref.model(), modelName -> OllamaChatModel.builder()
+                .baseUrl(baseUrl)
+                .modelName(modelName)
+                .httpClientBuilder(new JdkHttpClientBuilder()) // explicit: native ServiceLoader is empty (see class javadoc)
+                .build());
+    }
+
+    @Override
+    public EmbeddingModel resolveEmbedding(ModelRef ref) {
+        // Same HTTP-client + caching discipline as resolve(): OllamaEmbeddingModel.builder() is the raw
+        // LangChain4j builder (empty native ServiceLoader), so pin the JDK client builder; build() is lazy.
+        return embeddingModelsByName.computeIfAbsent(ref.model(), modelName -> OllamaEmbeddingModel.builder()
                 .baseUrl(baseUrl)
                 .modelName(modelName)
                 .httpClientBuilder(new JdkHttpClientBuilder()) // explicit: native ServiceLoader is empty (see class javadoc)

@@ -3,10 +3,14 @@ package ai.forvum.app;
 import ai.forvum.core.ModelRef;
 import ai.forvum.sdk.AbstractModelProvider;
 
+import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.output.Response;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -14,8 +18,10 @@ import jakarta.enterprise.context.ApplicationScoped;
  * A deterministic in-process {@link ai.forvum.sdk.ModelProvider} (extension id {@code fake}) on the
  * forvum-app test classpath, so {@code WebScriptedTurnE2E} can drive a real turn end-to-end without a
  * live LLM. Mirrors the engine-side test fake; its {@code resolve} returns a {@link ChatModel} that
- * always replies {@code "pong"}. The provider-resolve guards inject providers by concrete type, so this
- * extra bean does not perturb them.
+ * always replies {@code "pong"}, and {@code resolveEmbedding} returns a deterministic 8-dim
+ * {@link EmbeddingModel} so the {@code forvum memory search}/{@code reindex} CLI can be driven without a
+ * live embedding model. The provider-resolve guards inject providers by concrete type, so this extra bean
+ * does not perturb them.
  */
 @ApplicationScoped
 public class FakeModelProvider extends AbstractModelProvider {
@@ -33,5 +39,20 @@ public class FakeModelProvider extends AbstractModelProvider {
                 return ChatResponse.builder().aiMessage(AiMessage.from("pong")).build();
             }
         };
+    }
+
+    @Override
+    public EmbeddingModel resolveEmbedding(ModelRef ref) {
+        // embedAll is the SAM of EmbeddingModel; embed(String) defaults onto it. Deterministic 8-dim vector.
+        return segments -> Response.from(segments.stream().map(TextSegment::text)
+                .map(FakeModelProvider::embed).toList());
+    }
+
+    private static Embedding embed(String text) {
+        float[] vector = new float[8];
+        for (int i = 0; i < text.length(); i++) {
+            vector[i % 8] += text.charAt(i);
+        }
+        return Embedding.from(vector);
     }
 }

@@ -413,7 +413,7 @@ The `provider_calls` table is deliberately denormalized — it stores the model 
 
 The three memory tiers — `messages` (short-term conversational), `episodic_memory` (procedural: observation/decision/reflection), and `semantic_memory` (long-term facts) — are the Write pillar's tiered scratchpad surface: reasoning state never depends solely on the prompt window, and each tier is read back on the next turn with its own retrieval scope governed by the agent's `MemoryPolicy` (§4.3.6).
 
-The `semantic_memory.embedding` column stores a raw `float32` vector as a BLOB. For the MVP we scan linearly (row counts in a single-user deployment are small); when the row count justifies it, we add a `vec0` virtual table via the `sqlite-vec` extension in a later Flyway migration (V3 or later) without changing the surrounding schema. The engine never rewrites history — Flyway is locked forward-only and a CI check fails the build if any existing migration file is modified.
+The `semantic_memory.embedding` column stores a raw `float32` vector as a BLOB (a flat little-endian array; its dimension is `bytes.length / 4`, so the BLOB is self-describing and needs no separate dimension column). We scan linearly over those BLOBs with a pure-Java cosine — the queryable-memory CLI (`forvum memory query/search/reindex`, P3-2 #50) ships this path; row counts in a single-user deployment are small and the scan is benchmarked sub-100 ms at 100k rows. The `sqlite-vec` `vec0` virtual table is DEFERRED (it has no Maven artifact and would load a second runtime native C library — see Risk #2 RESOLVED); when a native-buildable binding exists it can be added in a later forward-only Flyway migration without changing the surrounding schema. The engine never rewrites history — Flyway is locked forward-only and a CI check fails the build if any existing migration file is modified.
 
 ### 4.3 Contract Specifications
 
@@ -1682,6 +1682,7 @@ Each item below is either a technical risk to validate early or a decision defer
    - **Context:** `sqlite-vec` is a C extension loaded as a shared library. Native-image static linking varies by platform.
    - **Mitigation:** v0.1 uses linear scan; `sqlite-vec` is a v1.0+ dependency only. This keeps the MVP decoupled from the risk.
    - **Decision trigger:** at v1.0+ scoping, benchmark linear scan at realistic row counts (10k, 100k, 1M). If linear is acceptable at 100k, defer indefinitely.
+   - **RESOLVED (P3-2, #50): LINEAR scan ships; `vec0` deferred.** `sqlite-vec` has NO published Maven artifact (the official Java distribution is a loadable `.dylib`/`.so`/`.dll` from GitHub/npm, not a jar), so it cannot be managed in `forvum-bom`, and using it would require loading a SECOND runtime native C library into SQLite (`load_extension`) — a new native surface the native-first mandate forbids (§5: SQLite JNI is the only allowed native pin). The pure-Java linear cosine scan over the stored `float32` BLOBs adds zero native surface and is fast enough: benchmarked ~9 ms/query at 10k rows and ~93 ms/query at 100k rows (768-dim, top-K 10). `vec0` stays a documented v1.0+ option (revisit only with a native-buildable binding).
 
 3. **Sealed interfaces and CDI bean discovery.**
    - **Context:** ArC's bean discovery historically matches concrete classes; sealed hierarchies with `non-sealed` leaves are unusual.

@@ -1191,13 +1191,18 @@ binary; no runtime/Docker/Node. **Scope.** Install script + release pipeline (ex
 native installer`
 
 ## P3-2 — Queryable semantic memory
-**Labels:** `phase-3`, `engine`, `persistence`, `native` · **Milestone:** `v1.0+`
-**Context.** `forvum memory query 'SELECT ...'` over SQLite + `sqlite-vec`. Highest native-risk Phase-3
-item (Risk #2). **Scope.** engine CLI + Flyway V3 (`sqlite-vec` vec0 virtual table). **Acceptance.** A
-SQL query over `semantic_memory` returns rows; vector search returns nearest neighbors. **[NATIVE]**
-Risk #2: `sqlite-vec` is a C extension; native static-linking varies by platform — benchmark linear scan
-at 10k/100k/1M; defer vec0 if linear is acceptable at 100k. **[PLUGIN]** `quarkus/searchDocs` for SQLite
-extension loading. **Dependencies.** M5, P2-5, the Risk #2 decision.
+**Labels:** `phase-3`, `engine`, `persistence`, `native` · **Milestone:** `v1.0+` · **Status: DONE (#50).**
+**Context.** `forvum memory query 'SELECT ...'` over SQLite. Highest native-risk Phase-3 item (Risk #2).
+**Scope.** `forvum memory query/search/reindex` (engine `MemoryQueryService` + app CLI); `ModelProvider`
+gains the `resolveEmbedding` SPI prelude (implemented for Ollama). **Acceptance.** A read-only SQL query
+over `semantic_memory` returns rows; vector search embeds the query text and returns nearest neighbors.
+**[NATIVE] Risk #2 RESOLVED — LINEAR scan, `vec0` deferred.** `sqlite-vec` has no Maven artifact and would
+load a second runtime native C library into SQLite (`load_extension`) — a new native surface the native
+mandate forbids (§5: SQLite JNI is the only pin). The pure-Java linear cosine scan over the stored
+`float32` BLOBs adds zero native surface and is fast enough (benchmarked ~9 ms/query @10k, ~93 ms/query
+@100k, 768-dim, top-K 10). NO Flyway migration — the `semantic_memory.embedding` BLOB column already
+exists (V1/V5), self-describing (dim = `bytes.length/4`); write-time embedding is not automatic, an
+explicit `forvum memory reindex` pass populates it. **Dependencies.** M5, P2-5, the Risk #2 decision.
 **Commit.** `feat(app): add queryable semantic memory CLI over sqlite-vec`
 
 ## P3-3 — LangGraph4j cyclic agents as a first-class primitive

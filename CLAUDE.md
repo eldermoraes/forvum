@@ -1483,6 +1483,48 @@ Generalizable lessons from completed milestones; append here as milestones land.
   own `generate↔tool_loop` self-loop pattern (a `cycle` node + a conditional self-edge),
   `recursionLimit = maxRounds×steps+margin` (the M18 counts-every-node lesson); generation-only by DP-7 (no
   tools/retrieval inside a cycle). [PR-8]
+- **Risk #2 (`sqlite-vec`) RESOLVED = LINEAR scan, NOT `vec0` — the C extension has no Maven artifact AND
+  would breach the native mandate.** P3-2 (#50) `forvum memory query/search/reindex`: `sqlite-vec` (the
+  `vec0` virtual table) has NO published Maven coordinate (its Java distribution is a loadable
+  `.dylib`/`.so` from GitHub/npm, so it can't be managed in `forvum-bom`), and using it would `load_extension`
+  a SECOND runtime native C library into SQLite — a new native surface §5 forbids (SQLite JNI is the only
+  allowed pin). Ship the pure-Java linear cosine scan over the stored `float32` BLOBs: zero native surface,
+  benchmarked ~9 ms/query @10k and ~93 ms/query @100k (768-dim, top-K 10), and the issue sanctions it
+  ("defer vec0 if linear is acceptable at 100k"). NO Flyway migration — `semantic_memory.embedding` BLOB
+  already exists (V1/V5), self-describing (dim = `bytes.length/4` little-endian float32), so SchemaSmokeIT
+  is untouched. The embedding SPI is the M7/M13 prelude-in-consumer pattern: `ModelProvider.resolveEmbedding(
+  ModelRef)→EmbeddingModel` lands on `forvum-sdk` defaulted-to-throw (SDK already deps langchain4j-core, no
+  new dep), implemented for Ollama (`OllamaEmbeddingModel` + the same `JdkHttpClientBuilder` empty-native-
+  ServiceLoader pin as the chat model). Write-time embedding is deliberately NOT automatic (it would put a
+  blocking model call on the turn's critical path) — an explicit `forvum memory reindex` pass populates the
+  BLOBs. `memory` is NOT a `CommandMode` one-shot (it reads/writes the DB → full Flyway/Panache boot, like
+  `ask`/`replay`). TRAPS the IT caught: (1) **xerial SQLite rejects `Connection.setReadOnly` on a pooled
+  Agroal connection** ("Cannot change read-only flag after establishing a connection") — the `SqlGuard`
+  (single-SELECT-only) is the authoritative read-only gate; `executeQuery` on a guarded SELECT cannot
+  mutate. (2) **A reindex's `requiringNew()` write commits in its own EM, but a subsequent Hibernate/Panache
+  read on the ambient request EM returns the rows STALE (`embedding == null`) from the L1 cache** — observed
+  live as search finding zero embedded rows right after a successful reindex (raw JDBC saw the BLOBs). Read
+  the search/plan rows via raw JDBC (the same `AgroalDataSource` path `query()` uses), L1-cache-immune; the
+  write stays Panache. (3) **The store ops must live in a SEPARATE `@ApplicationScoped` bean** so the
+  reindex write crosses the CDI proxy and `@Transactional`/`@ActivateRequestContext` fire — a self-
+  invocation bypasses them (the [P2-15] trap), silently dropping the write. The deterministic native IT is
+  the `replay` two-launch JDBC-seed dance (untagged, default native leg, proves the SQLite/BLOB stack);
+  the live reindex+search against a real Ollama embedding model (`all-minilm`) is a `@Tag("live")` native
+  IT the `native-turn` CI job runs (pull the embedding model alongside the chat model). **NATIVE-ONLY TRAP
+  that ONLY the live native IT caught (Risk #5, mirroring [M20]):** the native binary's `forvum memory
+  reindex` died with `Reindex failed: {"error":"model '' not found"}` — Ollama got `{"model":""}`. The
+  `quarkus-langchain4j-ollama` extension's `nativeSupport` build step registers reflection for ONLY the CHAT
+  DTOs (`OllamaChatRequest`/`OllamaChatResponse`) — because Forvum builds the embedding model
+  PROGRAMMATICALLY (`OllamaEmbeddingModel.builder()`), the langchain4j Ollama `EmbeddingRequest`/`EmbeddingResponse`
+  (package-private, `@JsonInclude`/`@JsonNaming` Jackson DTOs) are NEVER registered, so in native Jackson
+  serializes an empty request (the `model` field is dropped) → `model ''`. The chat path works ONLY because
+  the extension registered ITS request DTOs. Fix = a `forvum-provider-ollama` reflection holder
+  (`OllamaEmbeddingReflectionConfig`, the `GraphNativeSerializationConfig` precedent) with the REAL Quarkus
+  `@RegisterForReflection(classNames={…EmbeddingRequest, …EmbeddingResponse})` — `classNames` not `targets`
+  (the DTOs are package-private, unreferenceable via `.class`), `serialization=false` (JSON via Jackson, not
+  `ObjectOutputStream`), `methods`/`fields` default `true` (Jackson needs both halves). The provider module
+  already deps `quarkus-arc` and its enforcer bans only `ai.forvum:*`, so the real annotation is allowed; the
+  JVM tests can't catch this (no native reflection) — the live native IT is the sole gate. [P3-2/Risk#5]
 - **The Dev UI live config editor is a dev-build-gated `@Route`, NOT a Dev UI card — a card needs a
   `*-deployment` module that breaks the headless-library setup ([M6]).** P3-6 (#54): a true Dev UI card
   (`CardPageBuildItem` + a Lit web component) requires a `@BuildStep` in a `*-deployment` artifact, which would

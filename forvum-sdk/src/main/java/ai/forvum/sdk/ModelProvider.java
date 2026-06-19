@@ -2,6 +2,7 @@ package ai.forvum.sdk;
 
 import ai.forvum.core.ModelRef;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.embedding.EmbeddingModel;
 
 /**
  * SPI a model plugin implements to supply an LLM binding to the routing layer (ULTRAPLAN
@@ -24,4 +25,20 @@ public sealed interface ModelProvider permits AbstractModelProvider {
      * section 4.3.5.1).
      */
     ChatModel resolve(ModelRef ref);
+
+    /**
+     * Resolve a {@link ModelRef} this provider handles to a LangChain4j {@link EmbeddingModel}, used by the
+     * queryable semantic-memory search (P3-2, #50). Not every provider supplies embeddings, so this is a
+     * defaulted prelude method (added in its first consumer's milestone, like {@link #resolve}): the
+     * engine's memory-query path calls it only for the provider an operator names as the embedding model,
+     * and the default throws {@link UnsupportedOperationException} so existing providers need no change.
+     *
+     * <p>Implementations build/return the concrete embedding model for {@code ref.model()} (e.g. an Ollama
+     * {@code nomic-embed-text}); the engine owns the linear cosine search over the stored vectors. Like
+     * {@link #resolve}, implementations do not touch the ledger.
+     */
+    default EmbeddingModel resolveEmbedding(ModelRef ref) {
+        throw new UnsupportedOperationException(
+                "Provider '" + extensionId() + "' does not supply an embedding model (ref: " + ref + ")");
+    }
 }
