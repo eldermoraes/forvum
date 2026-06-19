@@ -3,20 +3,23 @@
     {
       "id": "cli-exact-greeting",
       "channel": "cli",
-      "input": "hello",
-      "expect": { "match": "exact", "value": "echo: hello" }
+      "prompt": "hello",
+      "expect": "echo: hello",
+      "match": "exact"
     },
     {
       "id": "cli-contains-keyword",
       "channel": "cli",
-      "input": "the quick brown fox",
-      "expect": { "match": "contains", "value": "brown fox" }
+      "prompt": "the quick brown fox",
+      "expect": "brown fox",
+      "match": "contains"
     },
     {
       "id": "cli-regex-prefixed",
       "channel": "cli",
-      "input": "ping",
-      "expect": { "match": "regex", "value": "^echo: \\w+$" }
+      "prompt": "ping",
+      "expect": "^echo: \\w+$",
+      "match": "regex"
     }
   ]
 }

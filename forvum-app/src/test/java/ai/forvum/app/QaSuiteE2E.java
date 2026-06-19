@@ -67,8 +67,8 @@ class QaSuiteE2E {
         // Red-check: a wrong expectation MUST drive exit 1. If the runner were green-by-default this stays 0.
         Path pack = dir.resolve("failing.json");
         Files.writeString(pack, "{ \"scenarios\": [ { \"id\": \"wrong\", \"channel\": \"cli\", "
-                + "\"input\": \"hello\", "
-                + "\"expect\": { \"match\": \"exact\", \"value\": \"NOT THE ECHO\" } } ] }");
+                + "\"prompt\": \"hello\", "
+                + "\"expect\": \"NOT THE ECHO\", \"match\": \"exact\" } ] }");
         Captured c = run("suite", pack);
         assertEquals(1, c.exit, "a scenario whose expectation does not match must fail the suite");
         assertTrue(c.out.contains("FAIL wrong"), () -> "expected a FAIL line for the bad scenario; got: "
@@ -81,8 +81,8 @@ class QaSuiteE2E {
         // not the harness (the harness is identical; only the expected value changed).
         Path pack = dir.resolve("passing.json");
         Files.writeString(pack, "{ \"scenarios\": [ { \"id\": \"right\", \"channel\": \"cli\", "
-                + "\"input\": \"hello\", "
-                + "\"expect\": { \"match\": \"exact\", \"value\": \"echo: hello\" } } ] }");
+                + "\"prompt\": \"hello\", "
+                + "\"expect\": \"echo: hello\", \"match\": \"exact\" } ] }");
         Captured c = run("suite", pack);
         assertEquals(0, c.exit, () -> "a correct override pack must pass; stdout: " + c.out + "; stderr: "
                 + c.err);
