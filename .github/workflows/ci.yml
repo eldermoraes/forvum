@@ -61,9 +61,9 @@ jobs:
       # fails this job. Per-module HTML/XML/CSV reports land under each module's target/site/jacoco/.
       #
       # `verify` also runs the X4 (#70) per-channel first-token latency gate (ChannelLatencyGateTest, a
-      # forvum-app @QuarkusTest): TUI ≤ 200 ms / Web ≤ 300 ms / Telegram ≤ 500 ms p95, excluding inference
-      # via the in-process FakeModelProvider. It is a regression alarm on the shared ChannelTurnDriver turn
-      # (warm p95 is sub-millisecond), so no separate CI step is needed.
+      # forvum-app @QuarkusTest): median ≤ TUI 200 / Web 300 / Telegram 500 ms + a p95 ≤ budget×3 CI ceiling,
+      # excluding inference via the in-process FakeModelProvider. A regression alarm on the shared
+      # ChannelTurnDriver turn (the warm median is ~80-110 ms, DB-bound), so no separate CI step is needed.
       - name: Build + test reactor (JVM) + coverage gate (JaCoCo 80% line / 75% branch)
         run: ./mvnw -B verify
       - name: Smoke-test fast-jar (must start and exit 0)
