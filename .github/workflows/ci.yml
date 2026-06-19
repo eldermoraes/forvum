@@ -141,25 +141,30 @@ jobs:
           java-version: '25'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: maven
-      # OllamaNativeTurnIT pins the main agent to ollama:qwen2.5:0.5b. Wait for the service, then pull the
-      # model via the HTTP API (retried). The launched binary reaches it at the default base url
+      # OllamaNativeTurnIT pins the main agent to ollama:qwen2.5:0.5b, and MemorySearchNativeIT (P3-2 #50)
+      # reindexes/searches with ollama:all-minilm (a small embedding model). Wait for the service, then pull
+      # both via the HTTP API (retried). The launched binary reaches them at the default base url
       # http://localhost:11434 (the mapped service port) — no -D plumbing needed (a -D on mvnw would not
-      # reach the out-of-process binary anyway). The model is pulled fresh each run (~400 MB, not cached).
-      - name: Pull the Ollama model (qwen2.5:0.5b)
+      # reach the out-of-process binary anyway). The models are pulled fresh each run (not cached).
+      - name: Pull the Ollama models (qwen2.5:0.5b chat + all-minilm embedding)
         run: |
           for i in $(seq 1 20); do
             curl -sf http://localhost:11434/api/version >/dev/null && break
             echo "waiting for the ollama service... ($i)"; sleep 3
           done
-          ok=
-          for i in 1 2 3; do
-            if curl -sf --max-time 600 http://localhost:11434/api/pull \
-                 -d '{"name":"qwen2.5:0.5b","stream":false}'; then ok=1; break; fi
-            echo "pull attempt $i failed; retrying"; sleep 5
-          done
-          [ "$ok" = 1 ] || { echo "::error::failed to pull qwen2.5:0.5b"; exit 1; }
-          curl -sf http://localhost:11434/api/tags | grep -q 'qwen2.5:0.5b' \
-            || { echo "::error::qwen2.5:0.5b not present after pull"; exit 1; }
+          pull() {
+            ok=
+            for i in 1 2 3; do
+              if curl -sf --max-time 600 http://localhost:11434/api/pull \
+                   -d "{\"name\":\"$1\",\"stream\":false}"; then ok=1; break; fi
+              echo "pull attempt $i for $1 failed; retrying"; sleep 5
+            done
+            [ "$ok" = 1 ] || { echo "::error::failed to pull $1"; exit 1; }
+            curl -sf http://localhost:11434/api/tags | grep -q "$1" \
+              || { echo "::error::$1 not present after pull"; exit 1; }
+          }
+          pull "qwen2.5:0.5b"
+          pull "all-minilm"
       # Build the native binary and drive the real-provider turn (OllamaNativeTurnIT, @Tag("live")).
       # itExcludedGroups MUST be a non-empty no-op (none) — a blank one makes JUnit discover zero ITs
       # (see forvum-app/pom.xml). The two-cell `native` job above (boot smoke + 200 ms cold-start) stays
