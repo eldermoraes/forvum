@@ -221,6 +221,12 @@ I am Forvum, a personal AI assistant running on the JVM via Quarkus and LangChai
 forvum> /exit
 ```
 
+## Dev mode: the live config editor
+
+While developing Forvum itself in dev mode (`./mvnw -f forvum-app quarkus:dev`), a browser-based live editor for the `~/.forvum/` config is available at [http://localhost:8080/q/dev-ui/config-editor](http://localhost:8080/q/dev-ui/config-editor) (alongside the Quarkus Dev UI at `/q/dev/`). It lists the editable config files (agents, channels, crons, roles, devices, MCP servers, skills, tools, and `config.json`), validates an edit through the same loader/`forvum doctor` machinery the engine loads with — so a saved config is exactly one the engine can load — and fires the hot-reload event so the running engine re-reads the edited agent/cron **without a restart**. A malformed edit (or a model ref naming an uninstalled provider) is rejected with inline findings and the file is left unchanged.
+
+This editor is **dev-mode only** — an explicit, documented native carve-out. The Quarkus Dev UI is a fast-jar dev feature and is not part of the GraalVM native binary; the editor route is build-time-gated off in production, so it adds no native surface and no cold-start cost.
+
 ## Architecture
 
 Forvum is organized as a four-layer Maven reactor (foundation → SDK → engine → first-party channel/provider/tool extensions, assembled by `forvum-app`), structured to match the architectural vision. The `main` branch now implements the full v0.1 feature set; the five core modules below are the architectural backbone, with Layer-3 channel/provider/tool extensions added milestone by milestone.
