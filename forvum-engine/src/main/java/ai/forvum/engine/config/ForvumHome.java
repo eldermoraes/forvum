@@ -109,6 +109,15 @@ public class ForvumHome {
     }
 
     /**
+     * {@code $FORVUM_HOME/eval} — evaluation-suite definitions ({@code .json}, P3-10 #58). Each
+     * {@code <name>.json} is a CAPR-gated eval suite read on demand by {@code forvum eval <name>}; the
+     * harness is a quality gate, not a hot-reloaded runtime surface, so this folder is NOT watched.
+     */
+    public Path eval() {
+        return root.resolve("eval");
+    }
+
+    /**
      * {@code $FORVUM_HOME/tools} — per-tool configuration ({@code .json}, PR-6 #27, e.g.
      * {@code shell.json}). The {@code forvum-tools-shell} plugin reads {@code tools/shell.json} on demand
      * (engine-independent); the engine resolves this path only for {@code ConfigWatcher} eventing and

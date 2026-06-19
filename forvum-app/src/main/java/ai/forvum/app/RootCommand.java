@@ -30,7 +30,8 @@ import java.util.concurrent.Callable;
  * {@code pair approve}/{@code pair reject} govern a paired device's requested scopes and {@code devices}
  * lists them; {@code provider add} onboards an LLM provider (stores its API key {@code 0600} + smoke-tests it);
  * {@code qa suite}/{@code qa <channel>} runs the packaged QA scenario pack and fails by default on a
- * missing/failed scenario.
+ * missing/failed scenario; {@code eval} runs a CAPR-gated evaluation suite and exits non-zero on a
+ * regression below its floor.
  */
 @CommandLine.Command(
         name = "forvum",
@@ -39,7 +40,8 @@ import java.util.concurrent.Callable;
         description = "Forvum - local-first, open-source personal AI agents on the JVM.",
         subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class, SessionReplayCommand.class,
                 PluginCommand.class, SkillCommand.class, McpCommand.class, CopilotCommand.class,
-                PairCommand.class, DevicesCommand.class, ProviderCommand.class, QaCommand.class })
+                PairCommand.class, DevicesCommand.class, ProviderCommand.class, QaCommand.class,
+                EvalCommand.class })
 public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";
