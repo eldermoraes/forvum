@@ -153,7 +153,7 @@ public class TurnService implements ChannelTurnDriver {
             String userMessage = message.content() == null ? "" : message.content();
             // #53: bind the multi-user tenant key — the resolved identity when multi-user is on, else the
             // shared "default" namespace (single-user, byte-identical). AgentMemory scopes facts by it.
-            String tenantIdentity = multiUserEnabled ? identityId : CurrentIdentity.DEFAULT_IDENTITY;
+            String tenantIdentity = tenantIdentity(identityId);
             String reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId)
                     .where(CurrentAgent.CURRENT_TURN, turnId)
                     .where(CurrentAgent.CURRENT_USER_MESSAGE, userMessage)
@@ -187,6 +187,15 @@ public class TurnService implements ChannelTurnDriver {
             sink.accept(ErrorEvent.from(Instant.now(), turnId, "turn_failed",
                     describeFailure(agentId, e), e));
         }
+    }
+
+    /**
+     * The multi-user tenant key to bind for this turn (#53): the resolved identity when multi-user is on,
+     * the shared {@code "default"} namespace when off (single-user, byte-identical). Package-private so the
+     * toggle ternary is red-checkable without booting a turn.
+     */
+    String tenantIdentity(String resolvedIdentity) {
+        return multiUserEnabled ? resolvedIdentity : CurrentIdentity.DEFAULT_IDENTITY;
     }
 
     /**

@@ -206,13 +206,36 @@ class SchemaSmokeIT {
         // its own tx rollback-only, so it must not poison a surrounding test transaction.
         QuarkusTransaction.requiringNew().run(() -> {
             SemanticMemoryEntity.deleteAll();
-            persistSemantic(now);
+            persistSemantic("default", now);
         });
 
         RuntimeException ex = assertThrows(RuntimeException.class,
-                () -> QuarkusTransaction.requiringNew().run(() -> persistSemantic(now)));
+                () -> QuarkusTransaction.requiringNew().run(() -> persistSemantic("default", now)));
         assertTrue(mentionsUniqueViolation(ex),
                 "expected a UNIQUE(identity_id, agent_id, key) violation, got: " + ex);
+    }
+
+    @Test
+    void twoIdentitiesShareAnAgentKeyButOneIdentityCannotDuplicateIt() {
+        long now = System.currentTimeMillis();
+        // Same (agent_id, key) under two DIFFERENT identities must BOTH insert — proving identity_id is part
+        // of the UNIQUE (#53). Under the old UNIQUE(agent_id, key) the second insert would have violated, so
+        // this block fails if V5 ever loses identity_id from the constraint.
+        // Count inside the SAME transaction as the inserts: a read OUTSIDE a tx leaks a connection from the
+        // single-writer SQLite pool and times out the next requiringNew block.
+        QuarkusTransaction.requiringNew().run(() -> {
+            SemanticMemoryEntity.deleteAll();
+            persistSemantic("default", now);
+            persistSemantic("other", now);
+            assertEquals(2, SemanticMemoryEntity.count("agentId = ?1", "dup-agent"),
+                    "two identities hold the same (agent, key) — identity_id is part of the UNIQUE");
+        });
+
+        // A duplicate WITHIN one identity still violates the 3-column UNIQUE.
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> QuarkusTransaction.requiringNew().run(() -> persistSemantic("default", now)));
+        assertTrue(mentionsUniqueViolation(ex),
+                "a same-identity duplicate still violates UNIQUE(identity_id, agent_id, key), got: " + ex);
     }
 
     private static boolean mentionsUniqueViolation(Throwable t) {
@@ -224,9 +247,9 @@ class SchemaSmokeIT {
         return false;
     }
 
-    private static void persistSemantic(long now) {
+    private static void persistSemantic(String identityId, long now) {
         SemanticMemoryEntity e = new SemanticMemoryEntity();
-        e.identityId = "default";
+        e.identityId = identityId;
         e.agentId = "dup-agent";
         e.key = "dup-key";
         e.value = "v";
