@@ -82,4 +82,23 @@ class SqlGuardTest {
         String sql = "SELECT value FROM semantic_memory WHERE value = 'please DROP by later'";
         assertEquals(sql, SqlGuard.requireReadOnlySelect(sql));
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "SELECT * FROM update_log",        // identifier CONTAINS 'update' — must NOT be rejected
+            "SELECT delete_flag FROM messages", // column contains 'delete'
+            "SELECT * FROM create_audit",       // table contains 'create'
+    })
+    void acceptsIdentifiersThatMerelyContainAForbiddenKeyword(String sql) {
+        // Identifier-aware tokenization: a forbidden keyword embedded in an identifier (split by '_') is fine;
+        // only a standalone keyword is rejected.
+        org.junit.jupiter.api.Assertions.assertEquals(sql, SqlGuard.requireReadOnlySelect(sql));
+    }
+
+    @Test
+    void stillRejectsAStandaloneForbiddenKeyword() {
+        // The standalone keyword (delimited by whitespace) is still caught.
+        assertThrows(IllegalArgumentException.class,
+                () -> SqlGuard.requireReadOnlySelect("SELECT 1 UNION SELECT 1; DELETE FROM messages"));
+    }
 }

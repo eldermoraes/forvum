@@ -60,7 +60,10 @@ public final class SqlGuard {
                             + "... SELECT). Got: " + firstWord(withoutTrailingSemicolon));
         }
 
-        for (String token : upper.split("[^A-Z]+")) {
+        // Tokenize on non-identifier characters (an SQL identifier char is [A-Za-z0-9_]), so a forbidden
+        // keyword is only flagged when it stands alone — a legitimate identifier that merely CONTAINS one
+        // (e.g. a table named update_log → token UPDATE_LOG, or a column delete_flag) is NOT rejected.
+        for (String token : upper.split("[^A-Z0-9_]+")) {
             if (FORBIDDEN_KEYWORDS.contains(token)) {
                 throw new IllegalArgumentException(
                         "Only read-only queries are allowed: the statement contains the forbidden keyword '"
