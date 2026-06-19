@@ -1,0 +1,52 @@
+name: Eval
+
+# CAPR-gated evaluation harness (P3-10 #58). `forvum eval <suite>` runs an eval suite, computes a CAPR
+# pass-rate, and FAILS on a regression below the suite's floor — a CI quality gate on par with coverage.
+#
+# This workflow runs the OFFLINE, DETERMINISTIC eval gate (no live model): the in-process `fake` provider
+# replies `pong`, the default `matcher` judge scores exact/contains/regex with NO inference, and the gate is
+# asserted in BOTH directions (a suite at its floor exits 0; a seeded regression below its floor exits 1).
+# It is the per-PR + nightly eval signal, separate from ci.yml (which another owner maintains).
+#
+# The LLM-judge nightly path (Risk #10 — an opt-in cheap local Ollama judge, NEVER forced into a normal
+# turn) is the `@Tag("live")` native IT `EvalLlmJudgeIT`, which runs beside the real-provider turn in
+# ci.yml's `native-turn` job (`-DitGroups=live -DitExcludedGroups=none`, a live Ollama service). It is not
+# duplicated here so this workflow stays fast and service-free; a regression in the live-judge MACHINERY
+# (suite load -> real turn -> real judge call -> aggregate -> exit code) surfaces there.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly at 04:30 UTC — a recurring eval signal independent of pushes (the offline gate; the live-judge
+    # path runs in ci.yml's native-turn job).
+    - cron: '30 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-eval-gate:
+    name: Offline CAPR eval gate (deterministic, no live model)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      # Build the reactor modules `forvum-app` depends on (the eval harness lives in forvum-engine), skipping
+      # their tests so this stays a fast eval-only signal.
+      - name: Build reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-app -am install -DskipTests
+      # The deterministic eval gate: EvalCommandTest drives `forvum eval` end-to-end via the in-process
+      # `fake` provider (replies `pong`) + the offline matcher judge, asserting a floor-meeting suite exits 0
+      # AND a seeded below-floor suite exits 1 (the regression the gate must catch). No native build, no model.
+      - name: Run the offline CAPR eval gate (EvalCommandTest)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-app test -Dtest=EvalCommandTest -DfailIfNoTests=true
