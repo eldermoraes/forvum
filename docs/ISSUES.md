@@ -1004,10 +1004,23 @@ pure-Java `OutputSchemaValidator` and re-serializes the validated `JsonNode` as 
 (not-valid-JSON / missing-required / wrong-typed property) throws a `SupervisorGraphException` NAMING the
 schema + the field/cause, which `TurnService` already renders as a terminal `ErrorEvent` — NO retry.
 **Decision (locked):** JSON-Schema → `JsonNode`, NOT a typed POJO (no per-agent class loading / reflection
-— native-clean, config-driven). The validator covers the v0.5-parity subset (root `type`, `required`, and
-each declared property's primitive `type`); full JSON-Schema-draft validation (nested schemas, `enum`,
-`allOf`/`anyOf`, `format`) is a documented fast-follow. A spawned worker child does NOT inherit the
-schema (its output is a digest merged as a tool result, never the validated top-level final answer).
+— native-clean, config-driven). A spawned worker child does NOT inherit the schema (its output is a digest
+merged as a tool result, never the validated top-level final answer).
+**Fast-follow CLOSED (#124).** `OutputSchemaValidator` now delegates to `com.networknt:json-schema-validator`
+(default dialect draft 2020-12), replacing the hand-rolled v0.5 subset with full draft coverage (`enum`,
+nested object/array schemas, numeric bounds, string length, `pattern`/`format`, `allOf`/`anyOf`/`oneOf`).
+The library is GraalVM-native-clean: its bundled `META-INF/native-image/reflect-config.json` is EMPTY (zero
+runtime reflection) + a `resource-config.json` for its draft meta-schemas, no `META-INF/services`; the
+optional ECMA-262 regex engines (GraalJS/Joni) are `optional=true` and stay off the classpath (JDK regex
+backs `pattern`). PROVEN by a deterministic, offline native IT (`OutputSchemaDoctorNativeIT`, default native
+leg — `forvum doctor` over a home whose agent declares a valid `outputSchema` runs the library's factory
+init + bundled-meta-schema resource load + schema compile in the native binary, no live LLM). `ConfigDoctor`
+now validates a declared `outputSchema` through the SAME `OutputSchemaValidator` (a malformed schema becomes
+a doctor ERROR — reader-as-oracle, no parallel schema). The P2-9 config-loader half is otherwise NOT migrated:
+the loader-as-oracle is the no-drift design, and any schema generated-from / tested-against the loaders is
+still a parallel definition that can drift — so the library is adopted ONLY for the value-side `outputSchema`
+check, where there is no loader to drift from. Version managed by `forvum-bom`
+(`json-schema-validator.version=1.5.8`).
 
 ## P2-13 — MCP server registry enrichments
 **Labels:** `phase-2`, `tool`, `native` · **Milestone:** `v0.5 Parity`
