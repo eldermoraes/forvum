@@ -162,12 +162,19 @@
                                      SessionSubstitutionReplayer by SessionSubstitutionReplayerIT (#57/PR-8): its
                                      @ActivateRequestContext replay() is fully exercised by the IT (success /
                                      partial-failure / unresolvable-model / metadata) but JaCoCo mis-attributes the
-                                     ArC subclass-forward body, like SessionCompactor (the same pattern). -->
+                                     ArC subclass-forward body, like SessionCompactor (the same pattern).
+                                     EvalRunner by forvum-app EvalCommandTest/EvalNativeIT (P3-10 #58): it drives a
+                                     turn through ChannelTurnDriver, so it only runs end-to-end under the app's
+                                     @QuarkusMainTest/native ITs — never engine Surefire. Its pure collaborators
+                                     (EvalSuiteReader, MatcherJudge, LlmJudge, MatchMode, the value records) ARE
+                                     unit-tested here and stay counted. -->
                                 <exclude>ai/forvum/engine/session/compaction/SessionCompactor.class</exclude>
                                 <exclude>ai/forvum/engine/session/compaction/DefaultSummarizer.class</exclude>
                                 <exclude>ai/forvum/engine/persistence/TaskRecorder.class</exclude>
                                 <exclude>ai/forvum/engine/cron/LoggingCronDeliverySink.class</exclude>
                                 <exclude>ai/forvum/engine/replay/SessionSubstitutionReplayer.class</exclude>
+                                <exclude>ai/forvum/engine/eval/EvalRunner.class</exclude>
+                                <exclude>ai/forvum/engine/eval/EvalRunner$TurnCapture.class</exclude>
                             </excludes>
                             <rules>
                                 <rule>
