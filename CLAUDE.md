@@ -1553,3 +1553,43 @@ Generalizable lessons from completed milestones; append here as milestones land.
   bad-suffix rejected) since it writes user files. Test the service as a plain JUnit unit (no Quarkus boot, a
   `@TempDir` home + a recording change-notifier, mirroring `ConfigDoctorTest`) and the HTTP wiring as an app E2E
   (`%test`-enabled route, seed a `fake:`-pinned agent so no live model). [P3-6]
+- **A "native-clean JSON-Schema library" claim is only true once a real validate call runs in the binary —
+  and the library is adopted ONLY where there is no loader to drift from.** #124 evaluated
+  `com.networknt:json-schema-validator` for the two ratified pragmatic divergences (P2-9 doctor, P2-12
+  `outputSchema`). VERDICT: the library is native-clean — 1.5.8 ships its OWN `META-INF/native-image/`
+  metadata that is an EMPTY `reflect-config.json` + a `resource-config.json` for its bundled draft
+  meta-schemas (zero runtime reflection, NO `META-INF/services` ServiceLoader), and the optional ECMA-262
+  regex engines (`org.graalvm.js:js` ~50MB / `org.jruby.joni`) are `optional=true` upstream so they DON'T
+  transitively pull in (the JDK regex path backs `pattern`). Inspect the jar's bundled native metadata FIRST
+  (`unzip -l … | grep native-image`, read `reflect-config.json`) — an empty reflect-config is the strongest
+  paper signal — but the only PROOF is a deterministic native IT that runs the validator's RESOURCE-load +
+  compile path through the binary, the [M20]/[Risk#5] "native-COMPILEs + boots never proved it could run"
+  rule (the value-side `validate` shares `JsonSchemaFactory.getInstance(V202012)` + `getSchema(...)` — the
+  draft-2020-12 meta-schema RESOURCE load is the real native risk, covered by the lib's `resource-config.json`).
+  **TRAP (cost a wasted native build): an `@QuarkusMainIntegrationTest` launches the PRODUCTION binary
+  out-of-process, so a `src/test` `@ApplicationScoped` fake `ModelProvider` is NOT in the image** — a first
+  cut drove a `forvum ask` turn against an in-test `schemafake` provider and the native turn died with
+  "No model provider for 'schemafake'" (exit 1), nothing to do with networknt. A test-scope bean only works
+  for the in-JVM `@QuarkusMainTest`, never the native IT. The deterministic, OFFLINE native driver that needs
+  NO provider in the image is `OutputSchemaDoctorNativeIT`: `forvum doctor` over a home whose `main` declares
+  a valid `outputSchema` — `ConfigDoctor` now compiles that schema through the same `OutputSchemaValidator`,
+  exercising factory init + resource load + compile in the native binary (default leg, no `@Tag("live")`, no
+  live LLM). SCOPE DECISION (the load-bearing call, NOT "force the lib everywhere"): adopt it ONLY in
+  `OutputSchemaValidator` (the schema is user config validated against a model reply — no loader to drift
+  from), giving full draft-2020-12 coverage (`enum`, nested objects, arrays, numeric bounds, length,
+  `pattern`/`format`, `allOf`/`anyOf`/`oneOf`). The P2-9 config-loader half STAYS loader-as-oracle: a formal
+  schema generated-from OR tested-against the loaders is still a parallel definition that drifts (the whole
+  P2-9 point), so generating `agents`/`crons`/etc. schemas would REGRESS the no-drift property — "evaluate a
+  lib" is not "adopt it for every config surface". (Doctor's new `outputSchema` check is itself reader-as-
+  oracle: it reuses the engine's own validator, not a parallel schema.) The networknt API is classic +
+  reflection-free (`JsonSchemaFactory.getInstance(VersionFlag.V202012)` → `getSchema(String, InputFormat.JSON)`
+  → `schema.validate(JsonNode) → Set<ValidationMessage>`, `ValidationMessage.getMessage()` = `$.field: integer
+  found, string expected`); KEEP `validateSchema`'s explicit structural guards (object / `required` array /
+  `properties` object) AHEAD of the compile so `SkillReader`'s existing precise config-read messages survive,
+  and UPDATE the value-side tests whose assertions pinned the old hand-rolled wording (the bare-value test's
+  "(root)"/"declares it as object" → networknt's "object expected") — the validator's message text is an
+  implementation detail, only the turn-abort + schema-named-in-`SupervisorGraphException` behavior is the
+  contract. networknt LOGS an ERROR via its own `JsonSchemaFactory` logger when handed a malformed schema
+  (the `validateSchema`/unusable-schema test paths) — noisy but harmless; in production a malformed schema is
+  caught at config-read by `validateSchema`, never reaching `validate`. Manage the version in `forvum-bom`
+  (`json-schema-validator.version`), never pinned in a module. [#124]
