@@ -28,7 +28,9 @@ import java.util.concurrent.Callable;
  * {@code skill install} downloads a skill {@code .md} into {@code ~/.forvum/skills/}; {@code mcp add}/
  * {@code mcp list} manage the remote MCP-server registry under {@code ~/.forvum/mcp-servers/};
  * {@code pair approve}/{@code pair reject} govern a paired device's requested scopes and {@code devices}
- * lists them; {@code provider add} onboards an LLM provider (stores its API key {@code 0600} + smoke-tests it).
+ * lists them; {@code provider add} onboards an LLM provider (stores its API key {@code 0600} + smoke-tests it);
+ * {@code qa suite}/{@code qa <channel>} runs the packaged QA scenario pack and fails by default on a
+ * missing/failed scenario.
  */
 @CommandLine.Command(
         name = "forvum",
@@ -37,7 +39,7 @@ import java.util.concurrent.Callable;
         description = "Forvum - local-first, open-source personal AI agents on the JVM.",
         subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class, SessionReplayCommand.class,
                 PluginCommand.class, SkillCommand.class, McpCommand.class, CopilotCommand.class,
-                PairCommand.class, DevicesCommand.class, ProviderCommand.class })
+                PairCommand.class, DevicesCommand.class, ProviderCommand.class, QaCommand.class })
 public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";

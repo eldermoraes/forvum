@@ -1,0 +1,79 @@
+name: QA
+
+# P2-QA (#43, ULTRAPLAN §7.2 item 18): the QA scenario suite CI gate. `forvum qa suite` runs the packaged
+# scenario pack (qa/scenarios.json) through the real turn path and FAILS BY DEFAULT on any missing/failed
+# scenario, so a regression in the turn path or a missing scenario red-bars the merge. The suite needs NO
+# live inference: the seeded home pins `main` to the deterministic, network-free `echo` provider that ships
+# in the binary, so the gate is hermetic.
+#
+# This is a SEPARATE workflow from ci.yml (which another stream owns). It runs the gate two ways:
+#   - jvm: a fast per-PR signal — `forvum qa suite` against the fast-jar.
+#   - native: the [NATIVE] acceptance — `forvum qa suite` against the produced single binary (the primary
+#     target). Linux-only (the native build is the gate; the two-cell native matrix lives in ci.yml).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qa-jvm:
+    name: QA suite (JVM fast-jar)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      # Build the fast-jar only (skip tests — the unit/E2E suite is ci.yml's job; here we drive the binary).
+      - name: Build fast-jar
+        run: ./mvnw -B -DskipTests -pl forvum-app -am package
+      # Seed a throwaway FORVUM_HOME whose main agent is pinned to the bundled, network-free echo provider,
+      # then run the QA suite. Exit 0 is the gate: a failed/missing scenario exits 1 and fails this step.
+      - name: Run `forvum qa suite` (fast-jar)
+        run: |
+          export FORVUM_HOME="$RUNNER_TEMP/forvum-qa-home-jvm"
+          mkdir -p "$FORVUM_HOME/agents"
+          printf 'You are the main agent.' > "$FORVUM_HOME/agents/main.md"
+          printf '{ "primaryModel": "echo:qa-model", "allowedTools": [] }' > "$FORVUM_HOME/agents/main.json"
+          java -jar forvum-app/target/quarkus-app/quarkus-run.jar qa suite
+
+  qa-native:
+    name: QA suite (native binary, [NATIVE] gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Mandrel
+        uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: mandrel
+          version: mandrel-25.0.3.0-Final
+          java-version: '25'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      # Build the native single binary (skip the native *IT smoke here — this workflow's gate is the qa run
+      # below; the QaSuiteNativeIT also runs in ci.yml's default native leg, so this is the explicit
+      # binary-level gate the task mandates).
+      - name: Build native binary
+        run: ./mvnw -B -Pnative -DskipITs=true -pl forvum-app -am package
+      - name: Run `forvum qa suite` against the native binary (the gate)
+        run: |
+          BIN=$(ls forvum-app/target/forvum-app-*-runner)
+          test -x "$BIN"
+          export FORVUM_HOME="$RUNNER_TEMP/forvum-qa-home-native"
+          mkdir -p "$FORVUM_HOME/agents"
+          printf 'You are the main agent.' > "$FORVUM_HOME/agents/main.md"
+          printf '{ "primaryModel": "echo:qa-model", "allowedTools": [] }' > "$FORVUM_HOME/agents/main.json"
+          # Exit 0 is the gate: the bundled qa/scenarios.json must be reachable in the image AND every
+          # scenario must pass against the echo provider. A missing resource hint, a native-only turn-path
+          # regression, or a failed scenario exits 1 and red-bars the merge.
+          "$BIN" qa suite
