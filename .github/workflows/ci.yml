@@ -43,10 +43,27 @@ jobs:
       # Wiring that JFR-based gate is a tracked follow-up; the static scan below is the enforced check.
       - name: Concurrency guardrails (no synchronized / no Mutiny in engine + channels)
         run: bash .github/concurrency-guardrails.sh
+      # Native-first discipline (X1 / CLAUDE.md section 5/12): static scan of every module's src/main for
+      # constructs that break the GraalVM native binary — sun.misc.Unsafe, CGLib / runtime Javassist,
+      # dynamic class loading outside the JVM-only ~/.forvum/plugins/ drop-in (allowlists at repo root).
+      # The native build catches these late and slowly; this fails the fast JVM job early with a file:line.
+      - name: Native-first discipline (no Unsafe / CGLib / runtime Javassist / dynamic class loading)
+        run: bash .github/native-discipline.sh
+      # Reflection-registration (X1 / CLAUDE.md section 5/6.3): every wire DTO (a record in a `.dto.`
+      # package of a Quarkus-bearing module) MUST carry @RegisterForReflection or Jackson cannot bind it
+      # in native. A full Maven-enforcer over every record false-positives on JsonNode-tree-walk config
+      # records, so this is the scoped, green-today grep gate (the full enforcer is documented-deferred).
+      - name: Reflection-registration (DTO records carry @RegisterForReflection)
+        run: bash .github/reflection-registration.sh
       # `verify` runs JaCoCo (X3 / ULTRAPLAN section 10): prepare-agent instruments the Surefire unit
       # run, then per-module `report` + `check` enforce the 80% LINE / 75% BRANCH coverage gate (the
       # native-profile Failsafe *IT smoke is deliberately not counted). A module below its threshold
       # fails this job. Per-module HTML/XML/CSV reports land under each module's target/site/jacoco/.
+      #
+      # `verify` also runs the X4 (#70) per-channel first-token latency gate (ChannelLatencyGateTest, a
+      # forvum-app @QuarkusTest): TUI ≤ 200 ms / Web ≤ 300 ms / Telegram ≤ 500 ms p95, excluding inference
+      # via the in-process FakeModelProvider. It is a regression alarm on the shared ChannelTurnDriver turn
+      # (warm p95 is sub-millisecond), so no separate CI step is needed.
       - name: Build + test reactor (JVM) + coverage gate (JaCoCo 80% line / 75% branch)
         run: ./mvnw -B verify
       - name: Smoke-test fast-jar (must start and exit 0)
