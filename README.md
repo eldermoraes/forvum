@@ -31,20 +31,62 @@ The result is not an orchestrator that commands silently from the center. It is 
 
 Phase-1 MVP feature-complete. `main` ships milestones **M1–M20 (EPIC-1 / v0.1)** — the multi-module reactor, core domain contracts, plugin SDK, and config loader (M1–M4); SQLite persistence, `@AgentScoped` isolation, `AgentRegistry`, and fallback chains (M5–M8); the provider fleet — Ollama, Anthropic, OpenAI, Google (M9–M12); the tool registry, permission scopes, and filesystem tools (M13–M14); the TUI, Web, and Telegram channels (M15–M17); the LangGraph4j supervisor graph that wires tool execution into the turn (M18); file-driven crons (M19); and the GraalVM native single-binary with a picocli command-mode/lazy-DB **&lt;200 ms cold-start gate** (M20) — plus the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. v0.1 is feature-complete; not yet hardened for production.
 
-### Install (provisional: build from source)
+## Install
 
-> **There is no packaged installer yet.** Until a one-command native installer ships
-> ([#49](https://github.com/eldermoraes/forvum/issues/49), planned), building from source is the
-> provisional install path. v0.1 is feature-complete but not yet hardened for production.
+The fastest path is the one-command installer. It downloads the single-binary GraalVM native build
+(~40 MB — one executable, no JVM, no Docker, no Node) for your platform from the latest
+[GitHub Release](https://github.com/eldermoraes/forvum/releases), verifies its `sha256`, and installs
+it to `$HOME/.local/bin`:
 
-**Prerequisites:** Java 25 (the bundled `./mvnw` provides Maven); for the native binary, GraalVM CE 25 /
-Mandrel 25.0.x-Final. For a real conversation you need a model provider — the zero-config default is a local
+```bash
+curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh | sh
+```
+
+Supported platforms: **linux-x64** and **macos-arm64**. Override the target directory or pin a
+version with `FORVUM_INSTALL_DIR` / `FORVUM_VERSION`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh \
+  | FORVUM_INSTALL_DIR=/usr/local/bin FORVUM_VERSION=v0.1.0 sh
+```
+
+**Manual download.** Grab the native binary for your platform from the
+[latest release](https://github.com/eldermoraes/forvum/releases/latest), verify it against the
+`.sha256` shipped alongside, then make it executable:
+
+```bash
+# linux-x64 (use forvum-macos-arm64 on Apple silicon)
+curl -fsSLO https://github.com/eldermoraes/forvum/releases/latest/download/forvum-linux-x64
+curl -fsSLO https://github.com/eldermoraes/forvum/releases/latest/download/forvum-linux-x64.sha256
+shasum -a 256 -c forvum-linux-x64.sha256       # or: sha256sum -c
+chmod +x forvum-linux-x64 && sudo mv forvum-linux-x64 /usr/local/bin/forvum
+```
+
+Then scaffold your home and start a session:
+
+```bash
+forvum init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
+forvum doctor                   # validate ~/.forvum config (exits non-zero on problems)
+forvum                          # interactive session: banner + `forvum> ` prompt; /exit or Ctrl+D quits
+forvum ask "who are you?"       # one non-interactive turn (stdout is just the reply)
+forvum --help                   # also --version
+```
+
+For a real conversation you need a model provider — the zero-config default is a local
 [Ollama](https://ollama.com):
 
 ```bash
 ollama serve &            # local model server, no API key
 ollama pull qwen3:1.7b    # the model the default agent is pinned to
 ```
+
+### Build from source
+
+> v0.1 is feature-complete but not yet hardened for production. Building from source is the path for
+> platforms without a published binary, or for development.
+
+**Prerequisites:** Java 25 (the bundled `./mvnw` provides Maven); for the native binary, GraalVM CE 25 /
+Mandrel 25.0.x-Final.
 
 **Native single binary** (the primary target — one executable, no JVM, &lt;200 ms cold start):
 
@@ -113,6 +155,27 @@ its JSON-RPC endpoint (`POST /api/v1/rpc`). Direct text messages only in this re
 typing notifications, sync messages, edited messages, and group messages are ignored (group and edit
 support are documented limitations), and the bot never replies to its own account (self-echo). An
 empty `allowedUserIds` allows any sender; a non-empty list restricts to those phone numbers/UUIDs.
+
+### Kubernetes (team-assistant mode)
+
+A Helm chart under [`deploy/helm/forvum`](deploy/helm/forvum) deploys Forvum as a **per-namespace team
+assistant**: each Helm release is one isolated instance with its own persistent SQLite state, so a
+namespace gets a private assistant whose memory no other namespace can read (the isolation is structural
+— Kubernetes namespacing plus a per-release `PersistentVolumeClaim`). The chart runs the native
+single-binary container image (published to GHCR by the release pipeline) as a long-lived Web-channel
+HTTP server.
+
+```bash
+# Give each team its own isolated assistant:
+helm install forvum deploy/helm/forvum --namespace team-a --create-namespace
+helm install forvum deploy/helm/forvum --namespace team-b --create-namespace
+kubectl -n team-a port-forward svc/forvum 8080:8080
+```
+
+Configuration (`agents/`, `channels/`, …) comes from values and is projected into `$FORVUM_HOME` from a
+ConfigMap; provider API keys are wired from Kubernetes Secrets. There is no Kubernetes operator (out of
+scope for v0.1). See [`deploy/helm/README.md`](deploy/helm/README.md) for the full isolation model and
+configuration reference.
 
 ## Quick demo
 

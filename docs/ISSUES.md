@@ -1562,8 +1562,9 @@ a behavior change. **Scope.** Cross-link each Critical File to its owning milest
 `ChannelProvider`→M3, `AgentContext`→M6, `AgentRegistry`→M7, `FallbackChatModel`→M8, `SupervisorGraph`→
 M18, `ConfigLoader`→M4, `V1__baseline.sql`→M5, `application.properties`→M5/M20, `ci.yml`→M20.
 **Acceptance.** Every Critical File is mapped to a milestone in the issue tracker; each compiles when its
-milestone closes. **Dependencies.** the listed milestones. **Commit.** `docs: cross-link Critical Files
-to owning milestones`
+milestone closes. The mapping is materialized as the **Owning milestone (issue)** column of the
+`docs/ULTRAPLAN.md` § Critical Files table (`Mn → #(n+5)`). **Dependencies.** the listed milestones.
+**Commit.** `docs: cross-link Critical Files to owning milestones`
 
 ---
 

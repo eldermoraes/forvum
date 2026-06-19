@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "forvum.fullname" . }}
+  labels:
+    {{- include "forvum.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # The SQLite state store is single-writer, so a rolling update must not run two pods against one
+  # ReadWriteOnce volume; Recreate tears the old pod down before the new one binds the PVC.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "forvum.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Restart the pod when the projected config changes (helm upgrade picks up edited agents/channels).
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "forvum.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "forvum.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: forvum
+          image: {{ include "forvum.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          env:
+            # $FORVUM_HOME — the config + state root. The state PVC is mounted here; the SQLite DB lands
+            # at $FORVUM_HOME/state/forvum.sqlite (this release's isolated memory).
+            - name: FORVUM_HOME
+              value: {{ .Values.forvumHome | quote }}
+            # Bind the Web channel HTTP listener to all interfaces inside the pod.
+            - name: QUARKUS_HTTP_HOST
+              value: "0.0.0.0"
+            - name: QUARKUS_HTTP_PORT
+              value: {{ .Values.containerPort | quote }}
+            {{- if .Values.otelExporterOtlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otelExporterOtlpEndpoint | quote }}
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            # Writable $FORVUM_HOME (state/forvum.sqlite + runtime files) backed by the per-namespace PVC.
+            - name: forvum-home
+              mountPath: {{ .Values.forvumHome | quote }}
+            # readOnlyRootFilesystem is true, so give the runtime a writable tmp.
+            - name: tmp
+              mountPath: /tmp
+            # Project each config file over the writable home via subPath (read-only declarative config).
+            {{- if .Values.config.configJson }}
+            - name: forvum-config
+              mountPath: {{ printf "%s/config.json" .Values.forvumHome | quote }}
+              subPath: config.json
+              readOnly: true
+            {{- end }}
+            {{- range $name := keys .Values.config.agents }}
+            - name: forvum-config
+              mountPath: {{ printf "%s/agents/%s" $.Values.forvumHome $name | quote }}
+              subPath: {{ printf "agents/%s" $name | replace "/" "__" }}
+              readOnly: true
+            {{- end }}
+            {{- range $name := keys .Values.config.channels }}
+            - name: forvum-config
+              mountPath: {{ printf "%s/channels/%s" $.Values.forvumHome $name | quote }}
+              subPath: {{ printf "channels/%s" $name | replace "/" "__" }}
+              readOnly: true
+            {{- end }}
+            {{- range $path := keys .Values.config.extraFiles }}
+            - name: forvum-config
+              mountPath: {{ printf "%s/%s" $.Values.forvumHome $path | quote }}
+              subPath: {{ $path | replace "/" "__" }}
+              readOnly: true
+            {{- end }}
+          {{- if .Values.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.livenessProbe.httpGet.path }}
+              port: {{ .Values.livenessProbe.httpGet.port }}
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+          {{- end }}
+          {{- if .Values.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.readinessProbe.httpGet.path }}
+              port: {{ .Values.readinessProbe.httpGet.port }}
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: forvum-home
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "forvum.pvcName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        - name: forvum-config
+          configMap:
+            name: {{ include "forvum.fullname" . }}-config
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

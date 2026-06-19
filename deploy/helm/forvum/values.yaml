@@ -1,0 +1,163 @@
+# Default values for the Forvum Helm chart (team-assistant mode).
+#
+# PER-NAMESPACE MEMORY ISOLATION (the headline property of this chart):
+# Forvum's operational state — the SQLite ledger at $FORVUM_HOME/state/forvum.sqlite (memory,
+# conversations, metrics) — lives on a PersistentVolumeClaim created by THIS release. Helm installs are
+# namespace-scoped, so installing the chart into namespace `team-a` and again into `team-b` produces two
+# entirely separate Deployments, each bound to its own PVC and its own state/forvum.sqlite. Namespace
+# `team-a` cannot read namespace `team-b`'s memory: there is no shared volume and no cross-namespace
+# mount. Run one release per team/namespace to give each team a private, isolated assistant.
+
+# -- Number of Forvum pods. KEEP THIS AT 1. The SQLite state store is a single ReadWriteOnce volume and
+# is not designed for concurrent writers across pods; scaling out would corrupt or contend on the DB.
+replicaCount: 1
+
+image:
+  # -- Container image repository. The native single-binary OCI image is published to GHCR by the
+  # release pipeline (see docs/ULTRAPLAN.md section 6.4 distribution). The `-native` tag is the
+  # scratch/distroless native binary; a `-jvm` tag (fast-jar) is also published.
+  repository: ghcr.io/eldermoraes/forvum
+  # -- Image tag. Empty string falls back to `<chart .appVersion>-native` (e.g. "0.1.0-native").
+  # Pin an explicit immutable tag (or a digest via image.digest) in production.
+  tag: ""
+  # -- Optional image digest (e.g. "sha256:..."). When set it takes precedence over tag for immutability.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets for a private GHCR image (referenced by name; create the secret separately).
+imagePullSecrets: []
+  # - name: ghcr-pull-secret
+
+# -- Override the chart name used in resource names / labels.
+nameOverride: ""
+# -- Override the full release-qualified resource name.
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a dedicated ServiceAccount for the Forvum pod.
+  create: true
+  # -- Annotations to add to the ServiceAccount (e.g. IRSA / Workload Identity bindings).
+  annotations: {}
+  # -- ServiceAccount name. Empty string => a generated name from the fullname template.
+  name: ""
+  # -- Auto-mount the ServiceAccount API token into the pod (Forvum needs no Kubernetes API access).
+  automountServiceAccountToken: false
+
+# -- The HTTP server port the Forvum Web channel listens on inside the container.
+# Forvum's bundled Web channel binds vertx-http (default 8080) when a `channels/web.json` is present.
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  # -- The Service port (clients connect here).
+  port: 8080
+  annotations: {}
+
+# Forvum configuration mounted into $FORVUM_HOME from a ConfigMap (the human-editable ~/.forvum/ tree:
+# config.json + agents/, channels/, etc.). These are projected read-only over the writable state PVC, so
+# config is declarative/GitOps-friendly while state stays persistent. Edit, `helm upgrade`, and the pod
+# picks the new config up on restart (Forvum also hot-reloads files at runtime via its WatchService).
+config:
+  # -- $FORVUM_HOME/config.json — global runtime config. Rendered verbatim; empty string omits the file.
+  configJson: |
+    {}
+
+  # -- $FORVUM_HOME/agents/<name>.json — agent specs (ModelRef, persona, tool belt). Map of filename to
+  # file contents. The default `main` agent points at a local Ollama model; change the model or add a
+  # cloud provider (and a credential via `secrets` below) for real use.
+  agents:
+    main.json: |
+      {
+        "primaryModel": "ollama:qwen3:1.7b",
+        "persona": "You are Forvum, a local-first team assistant.",
+        "allowedTools": []
+      }
+
+  # -- $FORVUM_HOME/channels/<name>.json — channel configuration. A `web.json` makes the Web channel
+  # serve as a long-lived HTTP server (what this chart's Service/Deployment expose). Remove it (and set
+  # this map empty) for a non-serving deployment.
+  channels:
+    web.json: |
+      {}
+
+  # -- Extra arbitrary files keyed by their path under $FORVUM_HOME (e.g. "roles/default.json",
+  # "crons/digest.json", "mcp-servers/github.json"). Subdirectories are created via the mount subPath.
+  extraFiles: {}
+    # roles/admin.json: |
+    #   { "scopes": ["FS_READ", "FS_WRITE"] }
+
+# Provider credentials / secrets surfaced as environment variables. Forvum reads cloud-provider API keys
+# from QUARKUS_LANGCHAIN4J_<PROVIDER>_API_KEY env vars (highest precedence). For real secrets, reference
+# an existing Kubernetes Secret rather than inlining values here.
+env: []
+  # - name: QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: forvum-provider-keys
+  #       key: anthropic-api-key
+
+# -- Telemetry: when set, Forvum enables its OpenTelemetry OTLP exporter (otherwise the OTel SDK is off,
+# zero overhead). Point at an in-cluster collector endpoint.
+otelExporterOtlpEndpoint: ""
+
+persistence:
+  # -- Create a PersistentVolumeClaim for $FORVUM_HOME (holds state/forvum.sqlite — the isolated memory).
+  # Disabling it uses an emptyDir (memory is lost on pod restart) — only for ephemeral/demo installs.
+  enabled: true
+  # -- Reuse an existing PVC instead of creating one (its name; skips the PVC template).
+  existingClaim: ""
+  # -- StorageClass for the PVC. "" uses the cluster default; "-" disables dynamic provisioning.
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 2Gi
+  annotations: {}
+
+# -- $FORVUM_HOME inside the container. The state PVC mounts here; the SQLite DB lands at
+# <forvumHome>/state/forvum.sqlite. Forvum reads $FORVUM_HOME from the env var of the same name.
+forvumHome: /forvum
+
+# Probes hit the Web channel's HTTP listener. Disable if you deploy a non-serving (no web.json) variant.
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 15
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 10
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# -- Pod-level security context. The native binary runs unprivileged; the state dir must be writable by
+# the runtime user, so fsGroup lets the mounted volume be group-owned.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+# -- Container-level security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

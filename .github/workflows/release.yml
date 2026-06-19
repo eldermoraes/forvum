@@ -1,0 +1,113 @@
+name: Release
+
+# Builds the single-binary GraalVM native artifact per platform on a tag push and
+# publishes them (with sha256 checksums) plus install.sh to the GitHub Release.
+# The installer (install.sh) downloads `forvum-<os>-<arch>` from the latest release
+# and verifies the matching `<asset>.sha256` — keep the asset names in sync with it.
+#
+# Tag-push only: this never runs on a PR (correct-by-inspection until the first v* tag).
+# The native build steps mirror .github/workflows/ci.yml's `native` job exactly
+# (Mandrel on Linux, GraalVM CE on macOS, the macOS getLocalHost /etc/hosts fix).
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # required to create/upload the GitHub Release
+
+jobs:
+  build:
+    name: Native binary (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest   # linux-amd64
+            platform: linux-x64
+          - os: macos-14        # macos-arm64
+            platform: macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      # GitHub macOS runners have no resolvable hostname, so InetAddress.getLocalHost()
+      # stalls ~5 s at startup (OpenTelemetry host-resource detector + Vert.x resolver).
+      # Map the hostname to loopback so it resolves instantly. Linux resolves fine.
+      - name: Ensure hostname resolves (macOS runner getLocalHost stall)
+        if: runner.os == 'macOS'
+        run: |
+          echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts
+          echo "::1 $(hostname)" | sudo tee -a /etc/hosts
+
+      # linux-amd64 uses Mandrel 25.0.x-Final (the named native-image distribution).
+      - name: Set up Mandrel (Linux)
+        if: runner.os == 'Linux'
+        uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: mandrel
+          version: mandrel-25.0.3.0-Final
+          java-version: '25'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+
+      # macos-arm64: Mandrel publishes no darwin-aarch64 build, so use GraalVM CE 25.
+      - name: Set up GraalVM CE (macOS)
+        if: runner.os == 'macOS'
+        uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: graalvm-community
+          java-version: '25'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+
+      - name: Build native binary
+        run: ./mvnw -B -Pnative -pl forvum-app -am package -DskipTests
+
+      # Rename the version-stamped runner to the stable per-platform asset name the
+      # installer expects (forvum-<platform>), and generate a sha256 alongside it.
+      - name: Package asset + checksum
+        run: |
+          BIN=$(ls forvum-app/target/forvum-app-*-runner)
+          ASSET="forvum-${{ matrix.platform }}"
+          mkdir -p dist
+          cp "$BIN" "dist/$ASSET"
+          chmod +x "dist/$ASSET"
+          ( cd dist && shasum -a 256 "$ASSET" > "$ASSET.sha256" )
+          ls -lh dist
+
+      - name: Upload platform asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: forvum-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all platform assets
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Flatten the per-platform artifact dirs into one upload set, and include the
+      # installer so `curl | sh` always fetches the script that matches the release.
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name 'forvum-*' \) -exec cp {} release/ \;
+          cp install.sh release/
+          ls -lh release
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
