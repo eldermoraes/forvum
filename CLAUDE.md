@@ -181,7 +181,10 @@ contribution as if native is the only target; CI enforces it.
   fast-jar-only fallback, not exercised in native. The `~/.forvum/plugins/` drop-in path is
   JVM-fast-jar-only **by design** (native users rebuild) — a documented property, not a carve-out.
 - **Vetoed dependencies:** `sun.misc.Unsafe`, runtime bytecode generation (CGLib, runtime Javassist),
-  and un-hinted reflection are excluded via `forvum-bom` and banned by a CI import grep.
+  and un-hinted reflection are excluded via `forvum-bom` and banned by a CI import grep
+  (`.github/native-discipline.sh`, X1) that also bans dynamic class loading outside the JVM-only
+  `~/.forvum/plugins/` drop-in; a companion grep (`.github/reflection-registration.sh`) enforces
+  `@RegisterForReflection` on every `.dto.`-package record in a Quarkus-bearing module.
 - **LangGraph4j native:** graph-state types are records carrying `@RegisterForReflection` with
   hand-authored reachability metadata under `forvum-engine/src/main/resources/META-INF/native-image/`.
 - **CI parity is MANDATORY:** every PR builds JVM + native on `linux-amd64` and `macos-arm64`; every
@@ -316,7 +319,11 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **Native-mode parity — MANDATORY** (§5). Parser/record (M2), provider HTTP (M9–M12), TUI (M15), web
   (M16), Telegram (M17), and the M20 cold-start gate run native.
 - **Per-turn performance gates** (excluding inference, via `FakeProvider`): TUI ≤200 ms, Web ≤300 ms,
-  Telegram ≤500 ms — baselined at M5/M6.
+  Telegram ≤500 ms — ENFORCED (X4/#68→#70) by `ChannelLatencyGateTest` (a `forvum-app` `@QuarkusTest` in
+  `./mvnw verify`): it drives the real turn through the shared SDK `ChannelTurnDriver` with the in-process
+  `FakeModelProvider`, warms persistence in `@BeforeEach`, and asserts the p95 over 60 dispatches/channel.
+  A regression alarm on the shared engine turn (warm p95 is sub-millisecond), not a per-channel transport
+  micro-benchmark.
 - **Flaky-test quarantine:** `*-LiveTest` `@Tag("live")`, default-off, nightly with retry budget 1 —
   except `OllamaNativeTurnIT` (the Risk #5 native turn), which the per-PR `native-turn` job gates on, also
   retry budget 1.
@@ -333,8 +340,12 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
   a stderr `Thread pinned` grep is a vacuous always-pass gate and is NOT used). JEP 491 (JDK 24) also
   stopped `synchronized` from pinning, leaving only native-code pins (e.g. SQLite JNI); runtime detection
   is via the JFR `jdk.VirtualThreadPinned` event — the `quarkus-junit-virtual-threads` extension's
-  `@ShouldNotPin` — and wiring that gate is a tracked follow-up. The enforced concurrency checks today are
-  the static `synchronized`/Mutiny greps (`pinning-allowlist.txt` / `vt-allowlist.txt`).
+  `@VirtualThreadUnit` + `@ShouldNotPin` — and wiring that gate is a tracked follow-up (X2/#68), deferred
+  deliberately: any real engine-turn test boots through SQLite, whose JNI pins the carrier (the one
+  documented non-first-party pin), so a bare `@ShouldNotPin` on a turn fails by design — the gate first
+  needs the `@ShouldPin`/allowlist machinery + the `org.sqlite` stack fingerprint (`pinning-allowlist.txt`
+  already names it). The enforced concurrency checks today are the static `synchronized`/Mutiny greps
+  (`.github/concurrency-guardrails.sh`; allowlists `pinning-allowlist.txt` / `vt-allowlist.txt`).
 
 ---
 
