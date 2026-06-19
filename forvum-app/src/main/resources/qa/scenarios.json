@@ -1,0 +1,22 @@
+{
+  "scenarios": [
+    {
+      "id": "cli-exact-greeting",
+      "channel": "cli",
+      "input": "hello",
+      "expect": { "match": "exact", "value": "echo: hello" }
+    },
+    {
+      "id": "cli-contains-keyword",
+      "channel": "cli",
+      "input": "the quick brown fox",
+      "expect": { "match": "contains", "value": "brown fox" }
+    },
+    {
+      "id": "cli-regex-prefixed",
+      "channel": "cli",
+      "input": "ping",
+      "expect": { "match": "regex", "value": "^echo: \\w+$" }
+    }
+  ]
+}
