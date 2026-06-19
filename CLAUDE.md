@@ -1468,3 +1468,31 @@ Generalizable lessons from completed milestones; append here as milestones land.
   own `generate↔tool_loop` self-loop pattern (a `cycle` node + a conditional self-edge),
   `recursionLimit = maxRounds×steps+margin` (the M18 counts-every-node lesson); generation-only by DP-7 (no
   tools/retrieval inside a cycle). [PR-8]
+- **The Dev UI live config editor is a dev-build-gated `@Route`, NOT a Dev UI card — a card needs a
+  `*-deployment` module that breaks the headless-library setup ([M6]).** P3-6 (#54): a true Dev UI card
+  (`CardPageBuildItem` + a Lit web component) requires a `@BuildStep` in a `*-deployment` artifact, which would
+  force `forvum-engine` into the runtime+deployment split that ArC's custom-context path already showed breaks
+  its no-`build`-goal library structure ([M6]); `forvum-app` (Layer 4, the runnable app) is not a library
+  extension either, so neither layer can host one without the restructuring this issue forbids. The sanctioned
+  fallback is a `quarkus-reactive-routes` `@Route` surface (`DevConfigEditorRoute` in `forvum-app`) over the Web
+  channel's already-present `vertx-http` — the same mechanism as `CaprDashboardRoute`/`ApprovalDashboardRoute`
+  (X6) — serving a self-contained editor page + JSON list/read/validate/save APIs at `/q/dev-ui/config-editor`,
+  reachable in `quarkus:dev`. **Dev-only carve-out via a BUILD-TIME property, not `@IfBuildProfile`:** gate the
+  bean with `@IfBuildProperty(name="forvum.devui.config-editor.enabled", stringValue="true")`, set `true` only in
+  `%dev`/`%test` (absent → false in prod). `@IfBuildProperty` is evaluated at AUGMENTATION, so the bean — and its
+  `@Route` handlers — are removed entirely from the prod/native image (zero native surface, zero cold-start
+  cost), the native carve-out the issue mandates. Choosing the build-property gate over `@IfBuildProfile("dev")`
+  is what makes the route TESTABLE: a `@QuarkusTest` runs in the `test` build profile (not `dev`), so
+  `@IfBuildProfile("dev")` would remove the route from the test build and leave the HTTP wiring unexercised; the
+  `%test`-enabled property keeps it built for the E2E while still off in prod. **Validation reuses the P2-9
+  oracle, never a second schema:** the engine `ConfigEditorService` (plain final class constructed per request,
+  mirroring `ConfigDoctor`; the app supplies `knownProviders` from `Instance<ModelProvider>` like `DoctorCommand`)
+  validates a candidate through `ConfigDoctor` and SAVES validate-then-write-then-rollback — write the candidate,
+  run doctor, and if the findings for THAT file carry an ERROR restore the previous content (a new file is
+  deleted) and fire no event, so a bad edit can never reach the engine's hot-reload; on success fire the same
+  `ConfigurationChangedEvent` the `WatchService` emits so the running engine re-reads the spec without a restart.
+  `validate` is the dry run (stage the candidate into a throwaway copy of the home so cross-file refs still
+  resolve, run doctor, touch nothing on disk). The editable surface is path-confined (traversal/unknown-folder/
+  bad-suffix rejected) since it writes user files. Test the service as a plain JUnit unit (no Quarkus boot, a
+  `@TempDir` home + a recording change-notifier, mirroring `ConfigDoctorTest`) and the HTTP wiring as an app E2E
+  (`%test`-enabled route, seed a `fake:`-pinned agent so no live model). [P3-6]
