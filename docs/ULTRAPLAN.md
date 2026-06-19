@@ -1980,20 +1980,20 @@ Each of these ten scenarios is also an integration test under `forvum-app/src/te
 
 The table below lists the files a new contributor should read first to orient themselves, ranked by architectural importance. Reading these ten files end-to-end is sufficient to understand Forvum's shape without exploring the whole tree.
 
-| File | Responsibility |
-|------|----------------|
-| `forvum-core/src/main/java/ai/forvum/core/id/AgentId.java` (and siblings) | The domain records that flow through every boundary. |
-| `forvum-sdk/src/main/java/ai/forvum/sdk/ChannelProvider.java` | The sealed-interface SDK contract that plugins implement. |
-| `forvum-engine/src/main/java/ai/forvum/engine/context/AgentContext.java` | The `InjectableContext` implementation backing `@AgentScoped`. |
-| `forvum-engine/src/main/java/ai/forvum/engine/agent/AgentRegistry.java` | File-driven agent creation and sub-agent spawn. |
-| `forvum-engine/src/main/java/ai/forvum/engine/model/FallbackChatModel.java` | Per-agent and per-cron LLM chain semantics. |
-| `forvum-engine/src/main/java/ai/forvum/engine/graph/SupervisorGraph.java` | LangGraph4j orchestration. |
-| `forvum-engine/src/main/java/ai/forvum/engine/config/ConfigLoader.java` | Hot-reloadable config surface. |
-| `forvum-engine/src/main/resources/db/migration/V1__baseline.sql` | The SQLite schema. |
-| `forvum-app/src/main/resources/application.properties` | Runtime configuration, native-image flags. |
-| `.github/workflows/ci.yml` | CI matrix, native smoke test, quality gates. |
+| File | Responsibility | Owning milestone (issue) |
+|------|----------------|--------------------------|
+| `forvum-core/src/main/java/ai/forvum/core/id/AgentId.java` (and siblings) | The domain records that flow through every boundary. | M2 (#7) |
+| `forvum-sdk/src/main/java/ai/forvum/sdk/ChannelProvider.java` | The sealed-interface SDK contract that plugins implement. | M3 (#8) |
+| `forvum-engine/src/main/java/ai/forvum/engine/context/AgentContext.java` | The `InjectableContext` implementation backing `@AgentScoped`. | M6 (#11) |
+| `forvum-engine/src/main/java/ai/forvum/engine/agent/AgentRegistry.java` | File-driven agent creation and sub-agent spawn. | M7 (#12) |
+| `forvum-engine/src/main/java/ai/forvum/engine/model/FallbackChatModel.java` | Per-agent and per-cron LLM chain semantics. | M8 (#13) |
+| `forvum-engine/src/main/java/ai/forvum/engine/graph/SupervisorGraph.java` | LangGraph4j orchestration. | M18 (#23) |
+| `forvum-engine/src/main/java/ai/forvum/engine/config/ConfigLoader.java` | Hot-reloadable config surface. | M4 (#9) |
+| `forvum-engine/src/main/resources/db/migration/V1__baseline.sql` | The SQLite schema. | M5 (#10) |
+| `forvum-app/src/main/resources/application.properties` | Runtime configuration, native-image flags. | M5 (#10) / M20 (#25) |
+| `.github/workflows/ci.yml` | CI matrix, native smoke test, quality gates. | M20 (#25) |
 
-Once these ten files compile and their associated milestones pass, Forvum has a defensible shape; everything else — new channels, providers, tools, skills — is a pattern repeat against the `forvum-sdk` surface.
+Each Critical File is present at the path above and compiles, because its owning milestone is closed (Phase-1 / EPIC-1 #1 is complete — M1–M20 landed). The milestone → issue map is `Mn → #(n+5)` (see §7.1 / `docs/ISSUES.md`); `application.properties` is shared, established at M5 and extended with the native-image / command-mode flags at M20. Once these ten files compile and their associated milestones pass, Forvum has a defensible shape; everything else — new channels, providers, tools, skills — is a pattern repeat against the `forvum-sdk` surface.
 
 ---
 
