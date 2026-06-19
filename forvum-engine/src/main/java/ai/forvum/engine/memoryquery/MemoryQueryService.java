@@ -1,7 +1,9 @@
 package ai.forvum.engine.memoryquery;
 
 import ai.forvum.core.ModelRef;
-import ai.forvum.engine.persistence.SemanticMemoryEntity;
+import ai.forvum.engine.memoryquery.SemanticMemoryStore.EmbeddedFact;
+import ai.forvum.engine.memoryquery.SemanticMemoryStore.EmbeddedRow;
+import ai.forvum.engine.memoryquery.SemanticMemoryStore.RowToEmbed;
 
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -9,9 +11,7 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import io.agroal.api.AgroalDataSource;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -26,8 +26,7 @@ import java.util.List;
  * Queryable semantic memory over the SQLite store (P3-2, #50, Risk #2). Three operations behind the
  * {@code forvum memory} CLI:
  * <ul>
- *   <li>{@link #query(String, int)} — run a read-only {@code SELECT} (guarded by {@link SqlGuard}, on a
- *       {@code read-only} JDBC connection) and return the rows;</li>
+ *   <li>{@link #query(String, int)} — run a guarded read-only {@code SELECT} and return the rows;</li>
  *   <li>{@link #search(ModelRef, String, String, String, int)} — embed the query text and return the
  *       nearest {@code semantic_memory} rows by a pure-Java linear cosine scan over the stored vectors;</li>
  *   <li>{@link #reindex(ModelRef, String, String)} — populate the {@code embedding} BLOB for rows that
@@ -43,6 +42,10 @@ import java.util.List;
  * {@code forvum memory reindex} pass — cheap, native-safe, and decoupled from the turn (CLAUDE.md §14
  * "wire a write-time embedding hook ONLY if cheap and native-safe — otherwise provide an explicit
  * reindex path").
+ *
+ * <p>The DB read/write methods live in the separate {@link SemanticMemoryStore} bean so their
+ * {@code @Transactional}/{@code @ActivateRequestContext} interceptors fire across the CDI proxy (a
+ * self-invocation would bypass them — the [P2-15] trap).
  */
 @ApplicationScoped
 public class MemoryQueryService {
@@ -56,27 +59,33 @@ public class MemoryQueryService {
     @Inject
     EmbeddingSelector embeddings;
 
+    @Inject
+    SemanticMemoryStore store;
+
     /**
      * Run a guarded read-only {@code SELECT} and return at most {@code limit} rows. The SQL is validated by
-     * {@link SqlGuard#requireReadOnlySelect} and the connection is opened {@code read-only}, so a write or
-     * schema change is refused at two layers. Cell values are stringified ({@code null} preserved).
+     * {@link SqlGuard#requireReadOnlySelect} (single SELECT only — no write/DDL/PRAGMA), then executed via
+     * {@link PreparedStatement#executeQuery()}, which cannot run a write. Cell values are stringified
+     * ({@code null} preserved).
+     *
+     * <p>The xerial SQLite driver does not honor {@link Connection#setReadOnly} on an already-pooled Agroal
+     * connection ("Cannot change read-only flag after establishing a connection"), so the SQL guard is the
+     * authoritative protection here; {@code executeQuery} on a guarded single SELECT is incapable of mutating
+     * state regardless.
      *
      * @throws IllegalArgumentException if the SQL is not a single read-only SELECT
-     * @throws java.io.UncheckedIOException never; SQL errors surface as {@link IllegalStateException}
      */
     public QueryResult query(String sql, int limit) {
         String safeSql = SqlGuard.requireReadOnlySelect(sql);
         if (limit <= 0) {
             throw new IllegalArgumentException("Row limit must be positive, got " + limit + ".");
         }
-        try (Connection connection = dataSource.getConnection()) {
-            connection.setReadOnly(true);
-            try (PreparedStatement statement = connection.prepareStatement(safeSql)) {
-                // Fetch one beyond the limit so we can report truncation honestly.
-                statement.setMaxRows(limit + 1);
-                try (ResultSet rs = statement.executeQuery()) {
-                    return readResult(rs, limit);
-                }
+        try (Connection connection = dataSource.getConnection();
+                PreparedStatement statement = connection.prepareStatement(safeSql)) {
+            // Fetch one beyond the limit so we can report truncation honestly.
+            statement.setMaxRows(limit + 1);
+            try (ResultSet rs = statement.executeQuery()) {
+                return readResult(rs, limit);
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Query failed: " + e.getMessage(), e);
@@ -111,11 +120,8 @@ public class MemoryQueryService {
      * Embed {@code queryText} with the {@code embeddingRef} model and return the {@code topK} nearest
      * {@code semantic_memory} rows (most similar first) for the given identity/agent, by a linear cosine
      * scan over the stored embedding BLOBs. Rows with no embedding (never reindexed) are skipped — run
-     * {@code reindex} first. {@code @ActivateRequestContext} so the Panache read has a request-scoped
-     * {@code EntityManager} off the CLI thread (mirrors {@code SessionReplayer}); the read needs no
-     * transaction.
+     * {@code reindex} first.
      */
-    @ActivateRequestContext
     public List<SearchHit> search(ModelRef embeddingRef, String queryText, String identityId,
             String agentId, int topK) {
         if (topK <= 0) {
@@ -124,18 +130,16 @@ public class MemoryQueryService {
         EmbeddingModel model = embeddings.resolve(embeddingRef);
         float[] queryVector = embed(model, queryText);
 
-        List<SemanticMemoryEntity> rows = SemanticMemoryEntity.list(
-                "identityId = ?1 and agentId = ?2 and embedding is not null", identityId, agentId);
-
-        List<SearchHit> hits = new ArrayList<>(rows.size());
-        for (SemanticMemoryEntity row : rows) {
-            float[] vector = VectorCodec.decode(row.embedding);
+        List<EmbeddedFact> facts = store.embeddedFacts(identityId, agentId);
+        List<SearchHit> hits = new ArrayList<>(facts.size());
+        for (EmbeddedFact fact : facts) {
+            float[] vector = VectorCodec.decode(fact.embedding());
             if (vector == null || vector.length != queryVector.length) {
                 // Skip a row embedded with a different model (dimension mismatch) rather than fail the search.
                 continue;
             }
             double score = VectorMath.cosine(queryVector, vector);
-            hits.add(new SearchHit(row.identityId, row.agentId, row.key, row.value, score));
+            hits.add(new SearchHit(fact.identityId(), fact.agentId(), fact.key(), fact.value(), score));
         }
         hits.sort(Comparator.comparingDouble(SearchHit::score).reversed());
         return hits.size() > topK ? new ArrayList<>(hits.subList(0, topK)) : hits;
@@ -145,17 +149,16 @@ public class MemoryQueryService {
      * Populate the {@code embedding} BLOB for every {@code semantic_memory} row of the given identity/agent
      * that lacks one, using the {@code embeddingRef} model. Returns the number of rows embedded.
      *
-     * <p>Each batch is: a short no-tx READ planning the batch (capture {@code (id, value)} primitives so the
-     * detached entities are never reused), the blocking model calls with NO DB connection held (CLAUDE.md
-     * §14 [M7]), then a short WRITE transaction applying the BLOBs. The loop drains until no row needs an
-     * embedding; a batch that applies fewer rows than it planned (a concurrent delete/embed) stops the loop
-     * so it cannot spin.
+     * <p>Each batch is: a short no-tx READ planning the batch (capturing {@code (id, value)} primitives), the
+     * blocking model calls with NO DB connection held (CLAUDE.md §14 [M7]), then a short WRITE transaction
+     * applying the BLOBs. The loop drains until no row needs an embedding; a batch that applies fewer rows
+     * than it planned (a concurrent delete/embed) stops the loop so it cannot spin.
      */
     public int reindex(ModelRef embeddingRef, String identityId, String agentId) {
         EmbeddingModel model = embeddings.resolve(embeddingRef);
         int total = 0;
         while (true) {
-            List<RowToEmbed> batch = rowsNeedingEmbedding(identityId, agentId, REINDEX_BATCH);
+            List<RowToEmbed> batch = store.rowsNeedingEmbedding(identityId, agentId, REINDEX_BATCH);
             if (batch.isEmpty()) {
                 break;
             }
@@ -164,7 +167,7 @@ public class MemoryQueryService {
             for (RowToEmbed row : batch) {
                 embeddedRows.add(new EmbeddedRow(row.id(), VectorCodec.encode(embed(model, row.value()))));
             }
-            int applied = applyEmbeddings(embeddedRows);
+            int applied = store.applyEmbeddings(embeddedRows);
             total += applied;
             if (applied < batch.size()) {
                 // Fewer applied than planned (a row was deleted/embedded concurrently) — avoid an infinite loop.
@@ -172,45 +175,6 @@ public class MemoryQueryService {
             }
         }
         return total;
-    }
-
-    /** A row that still needs an embedding, captured as primitives (no detached entity reuse). */
-    record RowToEmbed(long id, String value) {
-    }
-
-    /** A computed BLOB ready to apply to its row. */
-    private record EmbeddedRow(long id, byte[] blob) {
-    }
-
-    /** Read (no transaction) up to {@code batch} rows still missing an embedding, as {@code (id, value)} pairs. */
-    @ActivateRequestContext
-    List<RowToEmbed> rowsNeedingEmbedding(String identityId, String agentId, int batch) {
-        List<SemanticMemoryEntity> rows = SemanticMemoryEntity.list(
-                "identityId = ?1 and agentId = ?2 and embedding is null order by id", identityId, agentId);
-        List<RowToEmbed> planned = new ArrayList<>(Math.min(batch, rows.size()));
-        for (SemanticMemoryEntity row : rows) {
-            if (planned.size() == batch) {
-                break;
-            }
-            planned.add(new RowToEmbed(row.id, row.value));
-        }
-        return planned;
-    }
-
-    /** Apply pre-computed embedding BLOBs in one short write transaction; returns the count actually written. */
-    @ActivateRequestContext
-    @Transactional
-    int applyEmbeddings(List<EmbeddedRow> embeddedRows) {
-        int applied = 0;
-        for (EmbeddedRow embeddedRow : embeddedRows) {
-            SemanticMemoryEntity row = SemanticMemoryEntity.findById(embeddedRow.id());
-            if (row == null || row.embedding != null) {
-                continue;
-            }
-            row.embedding = embeddedRow.blob();
-            applied++;
-        }
-        return applied;
     }
 
     private static float[] embed(EmbeddingModel model, String text) {

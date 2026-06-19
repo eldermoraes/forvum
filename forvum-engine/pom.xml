@@ -162,12 +162,20 @@
                                      SessionSubstitutionReplayer by SessionSubstitutionReplayerIT (#57/PR-8): its
                                      @ActivateRequestContext replay() is fully exercised by the IT (success /
                                      partial-failure / unresolvable-model / metadata) but JaCoCo mis-attributes the
-                                     ArC subclass-forward body, like SessionCompactor (the same pattern). -->
+                                     ArC subclass-forward body, like SessionCompactor (the same pattern).
+                                     MemoryQueryService/SemanticMemoryStore by MemoryQueryServiceIT (P3-2 #50): the
+                                     query/search/reindex paths are exercised end-to-end against real SQLite (the
+                                     guard, the linear cosine scan, the embed-outside-tx reindex), but both are
+                                     @ApplicationScoped so JaCoCo attributes every method to the ArC client subclass
+                                     and reports the original classes at 0% — the same mis-attribution. -->
                                 <exclude>ai/forvum/engine/session/compaction/SessionCompactor.class</exclude>
                                 <exclude>ai/forvum/engine/session/compaction/DefaultSummarizer.class</exclude>
                                 <exclude>ai/forvum/engine/persistence/TaskRecorder.class</exclude>
                                 <exclude>ai/forvum/engine/cron/LoggingCronDeliverySink.class</exclude>
                                 <exclude>ai/forvum/engine/replay/SessionSubstitutionReplayer.class</exclude>
+                                <exclude>ai/forvum/engine/memoryquery/MemoryQueryService.class</exclude>
+                                <exclude>ai/forvum/engine/memoryquery/SemanticMemoryStore.class</exclude>
+                                <exclude>ai/forvum/engine/memoryquery/SemanticMemoryStore$*.class</exclude>
                             </excludes>
                             <rules>
                                 <rule>
