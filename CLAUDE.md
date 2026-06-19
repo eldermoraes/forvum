@@ -181,7 +181,10 @@ contribution as if native is the only target; CI enforces it.
   fast-jar-only fallback, not exercised in native. The `~/.forvum/plugins/` drop-in path is
   JVM-fast-jar-only **by design** (native users rebuild) — a documented property, not a carve-out.
 - **Vetoed dependencies:** `sun.misc.Unsafe`, runtime bytecode generation (CGLib, runtime Javassist),
-  and un-hinted reflection are excluded via `forvum-bom` and banned by a CI import grep.
+  and un-hinted reflection are excluded via `forvum-bom` and banned by a CI import grep
+  (`.github/native-discipline.sh`, X1) that also bans dynamic class loading outside the JVM-only
+  `~/.forvum/plugins/` drop-in; a companion grep (`.github/reflection-registration.sh`) enforces
+  `@RegisterForReflection` on every `.dto.`-package record in a Quarkus-bearing module.
 - **LangGraph4j native:** graph-state types are records carrying `@RegisterForReflection` with
   hand-authored reachability metadata under `forvum-engine/src/main/resources/META-INF/native-image/`.
 - **CI parity is MANDATORY:** every PR builds JVM + native on `linux-amd64` and `macos-arm64`; every
@@ -316,7 +319,15 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **Native-mode parity — MANDATORY** (§5). Parser/record (M2), provider HTTP (M9–M12), TUI (M15), web
   (M16), Telegram (M17), and the M20 cold-start gate run native.
 - **Per-turn performance gates** (excluding inference, via `FakeProvider`): TUI ≤200 ms, Web ≤300 ms,
-  Telegram ≤500 ms — baselined at M5/M6.
+  Telegram ≤500 ms — ENFORCED (X4/#70) by `ChannelLatencyGateTest` (a `forvum-app` `@QuarkusTest` in
+  `./mvnw verify`): it drives the real turn through the shared SDK `ChannelTurnDriver` with the in-process
+  `FakeModelProvider`, warms persistence in `@BeforeEach`, and over 60 dispatches/channel asserts the
+  **median ≤ the budget** (the typical-turn regression signal) plus a **p95 ≤ budget × 3 CI-headroom
+  ceiling**. The amendment is intentional: a warm fake-model turn pays a real per-turn SQLite round-trip
+  (ensure-session + the eager compaction read), so the measured median is ~80–110 ms and a loaded runner's
+  GC outliers blow the raw 200 ms p95 (e.g. `median=88 ms, p95=317 ms`); the median enforces the documented
+  budget and the ×3 p95 ceiling is the sanctioned CI-hardware multiplier (§5/§10 carve-out), not a silent
+  drop. A regression alarm on the shared engine turn, not a per-channel transport micro-benchmark.
 - **Flaky-test quarantine:** `*-LiveTest` `@Tag("live")`, default-off, nightly with retry budget 1 —
   except `OllamaNativeTurnIT` (the Risk #5 native turn), which the per-PR `native-turn` job gates on, also
   retry budget 1.
@@ -333,8 +344,12 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
   a stderr `Thread pinned` grep is a vacuous always-pass gate and is NOT used). JEP 491 (JDK 24) also
   stopped `synchronized` from pinning, leaving only native-code pins (e.g. SQLite JNI); runtime detection
   is via the JFR `jdk.VirtualThreadPinned` event — the `quarkus-junit-virtual-threads` extension's
-  `@ShouldNotPin` — and wiring that gate is a tracked follow-up. The enforced concurrency checks today are
-  the static `synchronized`/Mutiny greps (`pinning-allowlist.txt` / `vt-allowlist.txt`).
+  `@VirtualThreadUnit` + `@ShouldNotPin` — and wiring that gate is a tracked follow-up (X2/#68), deferred
+  deliberately: any real engine-turn test boots through SQLite, whose JNI pins the carrier (the one
+  documented non-first-party pin), so a bare `@ShouldNotPin` on a turn fails by design — the gate first
+  needs the `@ShouldPin`/allowlist machinery + the `org.sqlite` stack fingerprint (`pinning-allowlist.txt`
+  already names it). The enforced concurrency checks today are the static `synchronized`/Mutiny greps
+  (`.github/concurrency-guardrails.sh`; allowlists `pinning-allowlist.txt` / `vt-allowlist.txt`).
 
 ---
 
@@ -1496,3 +1511,31 @@ Generalizable lessons from completed milestones; append here as milestones land.
   the `replay` two-launch JDBC-seed dance (untagged, default native leg, proves the SQLite/BLOB stack);
   the live reindex+search against a real Ollama embedding model (`all-minilm`) is a `@Tag("live")` native
   IT the `native-turn` CI job runs (pull the embedding model alongside the chat model). [P3-2/Risk#2]
+- **The Dev UI live config editor is a dev-build-gated `@Route`, NOT a Dev UI card — a card needs a
+  `*-deployment` module that breaks the headless-library setup ([M6]).** P3-6 (#54): a true Dev UI card
+  (`CardPageBuildItem` + a Lit web component) requires a `@BuildStep` in a `*-deployment` artifact, which would
+  force `forvum-engine` into the runtime+deployment split that ArC's custom-context path already showed breaks
+  its no-`build`-goal library structure ([M6]); `forvum-app` (Layer 4, the runnable app) is not a library
+  extension either, so neither layer can host one without the restructuring this issue forbids. The sanctioned
+  fallback is a `quarkus-reactive-routes` `@Route` surface (`DevConfigEditorRoute` in `forvum-app`) over the Web
+  channel's already-present `vertx-http` — the same mechanism as `CaprDashboardRoute`/`ApprovalDashboardRoute`
+  (X6) — serving a self-contained editor page + JSON list/read/validate/save APIs at `/q/dev-ui/config-editor`,
+  reachable in `quarkus:dev`. **Dev-only carve-out via a BUILD-TIME property, not `@IfBuildProfile`:** gate the
+  bean with `@IfBuildProperty(name="forvum.devui.config-editor.enabled", stringValue="true")`, set `true` only in
+  `%dev`/`%test` (absent → false in prod). `@IfBuildProperty` is evaluated at AUGMENTATION, so the bean — and its
+  `@Route` handlers — are removed entirely from the prod/native image (zero native surface, zero cold-start
+  cost), the native carve-out the issue mandates. Choosing the build-property gate over `@IfBuildProfile("dev")`
+  is what makes the route TESTABLE: a `@QuarkusTest` runs in the `test` build profile (not `dev`), so
+  `@IfBuildProfile("dev")` would remove the route from the test build and leave the HTTP wiring unexercised; the
+  `%test`-enabled property keeps it built for the E2E while still off in prod. **Validation reuses the P2-9
+  oracle, never a second schema:** the engine `ConfigEditorService` (plain final class constructed per request,
+  mirroring `ConfigDoctor`; the app supplies `knownProviders` from `Instance<ModelProvider>` like `DoctorCommand`)
+  validates a candidate through `ConfigDoctor` and SAVES validate-then-write-then-rollback — write the candidate,
+  run doctor, and if the findings for THAT file carry an ERROR restore the previous content (a new file is
+  deleted) and fire no event, so a bad edit can never reach the engine's hot-reload; on success fire the same
+  `ConfigurationChangedEvent` the `WatchService` emits so the running engine re-reads the spec without a restart.
+  `validate` is the dry run (stage the candidate into a throwaway copy of the home so cross-file refs still
+  resolve, run doctor, touch nothing on disk). The editable surface is path-confined (traversal/unknown-folder/
+  bad-suffix rejected) since it writes user files. Test the service as a plain JUnit unit (no Quarkus boot, a
+  `@TempDir` home + a recording change-notifier, mirroring `ConfigDoctorTest`) and the HTTP wiring as an app E2E
+  (`%test`-enabled route, seed a `fake:`-pinned agent so no live model). [P3-6]

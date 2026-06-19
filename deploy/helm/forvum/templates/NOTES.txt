@@ -1,0 +1,47 @@
+Forvum has been deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Image:        {{ include "forvum.image" . }}
+Replicas:     {{ .Values.replicaCount }}
+$FORVUM_HOME: {{ .Values.forvumHome }}
+
+PER-NAMESPACE MEMORY ISOLATION
+------------------------------
+This release runs an ISOLATED Forvum instance. Its memory — the SQLite ledger at
+{{ .Values.forvumHome }}/state/forvum.sqlite —
+lives on a PersistentVolumeClaim scoped to THIS namespace:
+
+  {{- if .Values.persistence.enabled }}
+  PVC: {{ include "forvum.pvcName" . }} ({{ .Values.persistence.size }}, {{ join "," .Values.persistence.accessModes }})
+  {{- else }}
+  WARNING: persistence is DISABLED — state lives in an emptyDir and is LOST on pod restart.
+           Set persistence.enabled=true for a durable, isolated store.
+  {{- end }}
+
+Installing this chart into another namespace creates a separate Deployment + PVC + state database, so
+namespace "{{ .Release.Namespace }}" cannot read another namespace's conversations or memory. Run one
+release per team for per-team isolation.
+
+REACH THE ASSISTANT
+-------------------
+The bundled Web channel serves HTTP on the Service:
+
+  Service: {{ include "forvum.fullname" . }} (port {{ .Values.service.port }}, type {{ .Values.service.type }})
+
+{{- if eq .Values.service.type "ClusterIP" }}
+Port-forward to it locally:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "forvum.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+{{- end }}
+
+NEXT STEPS
+----------
+1. A real conversation needs a model provider. The default agent points at "ollama:qwen3:1.7b" — run an
+   Ollama service reachable from the pod, or edit config.agents in values and set a cloud provider:
+     helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} \
+       --set-string config.agents.main\.json='{"primaryModel":"anthropic:claude-sonnet-4-...","persona":"...","allowedTools":[]}'
+2. Cloud provider keys are read from QUARKUS_LANGCHAIN4J_<PROVIDER>_API_KEY env vars — wire them from a
+   Kubernetes Secret via `env` in values (do NOT inline secrets).
+3. Check the pod:
+     kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+See deploy/helm/README.md for the full isolation model and configuration reference.

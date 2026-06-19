@@ -29,8 +29,10 @@ import java.util.concurrent.Callable;
  * {@code mcp list} manage the remote MCP-server registry under {@code ~/.forvum/mcp-servers/};
  * {@code pair approve}/{@code pair reject} govern a paired device's requested scopes and {@code devices}
  * lists them; {@code provider add} onboards an LLM provider (stores its API key {@code 0600} + smoke-tests it);
- * {@code memory query}/{@code memory search}/{@code memory reindex} query the semantic-memory store (read-only
- * SQL + vector nearest-neighbor over the SQLite store, P3-2).
+ * {@code qa suite}/{@code qa <channel>} runs the packaged QA scenario pack and fails by default on a
+ * missing/failed scenario; {@code eval} runs a CAPR-gated evaluation suite and exits non-zero on a
+ * regression below its floor; {@code memory query}/{@code memory search}/{@code memory reindex} query
+ * the semantic-memory store (read-only SQL + vector nearest-neighbor over the SQLite store, P3-2).
  */
 @CommandLine.Command(
         name = "forvum",
@@ -39,7 +41,8 @@ import java.util.concurrent.Callable;
         description = "Forvum - local-first, open-source personal AI agents on the JVM.",
         subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class, SessionReplayCommand.class,
                 PluginCommand.class, SkillCommand.class, McpCommand.class, CopilotCommand.class,
-                PairCommand.class, DevicesCommand.class, ProviderCommand.class, MemoryCommand.class })
+                PairCommand.class, DevicesCommand.class, ProviderCommand.class, QaCommand.class,
+                EvalCommand.class, MemoryCommand.class })
 public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";

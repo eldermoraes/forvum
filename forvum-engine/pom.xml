@@ -168,6 +168,11 @@
                                      guard, the linear cosine scan, the embed-outside-tx reindex), but both are
                                      @ApplicationScoped so JaCoCo attributes every method to the ArC client subclass
                                      and reports the original classes at 0% — the same mis-attribution. -->
+                                     EvalRunner by forvum-app EvalCommandTest/EvalNativeIT (P3-10 #58): it drives a
+                                     turn through ChannelTurnDriver, so it only runs end-to-end under the app's
+                                     @QuarkusMainTest/native ITs — never engine Surefire. Its pure collaborators
+                                     (EvalSuiteReader, MatcherJudge, LlmJudge, MatchMode, the value records) ARE
+                                     unit-tested here and stay counted. -->
                                 <exclude>ai/forvum/engine/session/compaction/SessionCompactor.class</exclude>
                                 <exclude>ai/forvum/engine/session/compaction/DefaultSummarizer.class</exclude>
                                 <exclude>ai/forvum/engine/persistence/TaskRecorder.class</exclude>
@@ -176,6 +181,8 @@
                                 <exclude>ai/forvum/engine/memoryquery/MemoryQueryService.class</exclude>
                                 <exclude>ai/forvum/engine/memoryquery/SemanticMemoryStore.class</exclude>
                                 <exclude>ai/forvum/engine/memoryquery/SemanticMemoryStore$*.class</exclude>
+                                <exclude>ai/forvum/engine/eval/EvalRunner.class</exclude>
+                                <exclude>ai/forvum/engine/eval/EvalRunner$TurnCapture.class</exclude>
                             </excludes>
                             <rules>
                                 <rule>

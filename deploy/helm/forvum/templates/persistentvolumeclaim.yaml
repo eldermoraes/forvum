@@ -1,0 +1,31 @@
+{{- /*
+The per-namespace state PVC: $FORVUM_HOME (holding state/forvum.sqlite — this release's isolated memory).
+Created only when persistence is enabled and no existing claim is reused. Helm installs are
+namespace-scoped, so each release in a different namespace gets its own PVC => no cross-namespace memory
+sharing.
+*/ -}}
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "forvum.pvcName" . }}
+  labels:
+    {{- include "forvum.labels" . | nindent 4 }}
+  {{- with .Values.persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+  {{- if .Values.persistence.storageClass }}
+  {{- if (eq "-" .Values.persistence.storageClass) }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}

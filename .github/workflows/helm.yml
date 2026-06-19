@@ -1,0 +1,46 @@
+name: Helm
+
+# Validate the team-assistant Helm chart (deploy/helm/forvum) on every PR that touches it. This is
+# lint + template only — it does NOT spin up a Kubernetes cluster (P3-7 #55: the chart's bar is a clean
+# lint/template render and an explicit, documented per-namespace isolation model, not a live deploy).
+# This workflow is intentionally separate from ci.yml (the Java/native build pipeline).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/**'
+      - '.github/workflows/helm.yml'
+  pull_request:
+    paths:
+      - 'deploy/**'
+      - '.github/workflows/helm.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  helm:
+    name: Lint + template the Forvum chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+      - name: helm lint
+        run: helm lint deploy/helm/forvum
+      # Render with the default values, then with persistence disabled (emptyDir) and an existing PVC
+      # reused — the two branches the templates gate on — so a regression in either path fails the PR.
+      - name: helm template (default values)
+        run: helm template forvum deploy/helm/forvum
+      - name: helm template (persistence disabled)
+        run: helm template forvum deploy/helm/forvum --set persistence.enabled=false
+      - name: helm template (existing PVC, no ServiceAccount)
+        run: |
+          helm template forvum deploy/helm/forvum \
+            --set persistence.existingClaim=preexisting-state \
+            --set serviceAccount.create=false

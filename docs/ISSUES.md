@@ -1238,6 +1238,17 @@ Dev UI validates against the schema and hot-reloads without restart. **[NATIVE]*
 (fast-jar) ONLY — explicit, documented native carve-out (Dev UI is not in the native binary).
 **[PLUGIN]** `quarkus/skills` for Dev UI card patterns. **Dependencies.** M4, P2-9 (JSON Schemas).
 **Commit.** `feat(engine): add Dev UI live config editor`
+**Resolution (landed).** A full Dev UI *card* (`CardPageBuildItem` + web component) needs a `*-deployment`
+module, which would force `forvum-engine` into a runtime+deployment split that breaks its headless-library
+setup ([M6]); so — per this issue's sanctioned fallback — the editor is a `quarkus-reactive-routes` `@Route`
+surface (`DevConfigEditorRoute`) over the Web channel's already-present `vertx-http` (the same mechanism as
+`CaprDashboardRoute`/`ApprovalDashboardRoute`), reachable in `quarkus:dev` at `/q/dev-ui/config-editor`. It is
+build-time-gated off in prod via `@IfBuildProperty("forvum.devui.config-editor.enabled")` (`true` only in
+`%dev`/`%test`), so the bean is removed from the prod/native image entirely (zero native surface, the carve-out).
+The "schema" is the P2-9 `ConfigDoctor`/reader oracle (no separate JSON Schema — formal schemas stay a
+documented fast-follow); the editor service (`ConfigEditorService`, in `forvum-engine`) validates a candidate
+through `ConfigDoctor`, saves it validate-then-write-then-rollback (a bad edit never reaches the engine), and
+fires the `ConfigurationChangedEvent` the `WatchService` emits so the running engine hot-reloads it.
 
 ## P3-7 — Kubernetes-native team-assistant mode
 **Labels:** `phase-3`, `engine`, `native` · **Milestone:** `v1.0+`
@@ -1567,8 +1578,9 @@ a behavior change. **Scope.** Cross-link each Critical File to its owning milest
 `ChannelProvider`→M3, `AgentContext`→M6, `AgentRegistry`→M7, `FallbackChatModel`→M8, `SupervisorGraph`→
 M18, `ConfigLoader`→M4, `V1__baseline.sql`→M5, `application.properties`→M5/M20, `ci.yml`→M20.
 **Acceptance.** Every Critical File is mapped to a milestone in the issue tracker; each compiles when its
-milestone closes. **Dependencies.** the listed milestones. **Commit.** `docs: cross-link Critical Files
-to owning milestones`
+milestone closes. The mapping is materialized as the **Owning milestone (issue)** column of the
+`docs/ULTRAPLAN.md` § Critical Files table (`Mn → #(n+5)`). **Dependencies.** the listed milestones.
+**Commit.** `docs: cross-link Critical Files to owning milestones`
 
 ---
 
