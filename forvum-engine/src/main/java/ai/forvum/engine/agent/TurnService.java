@@ -85,6 +85,15 @@ public class TurnService implements ChannelTurnDriver {
     @ConfigProperty(name = "forvum.compaction.retain-tokens", defaultValue = "6000")
     int retainTokens;
 
+    /**
+     * #53 multi-user toggle. When false (default) every turn binds the {@code "default"} tenant identity,
+     * so per-identity state collapses to one namespace — byte-identical to single-user. When true, the
+     * turn binds the RESOLVED identity, isolating that user's long-term facts from other users' (the
+     * {@code "default"} namespace stays shared as the team-skill read-through).
+     */
+    @ConfigProperty(name = "forvum.multi-user.enabled", defaultValue = "false")
+    boolean multiUserEnabled;
+
     @Inject
     DeviceRegistry devices;
 
@@ -142,10 +151,14 @@ public class TurnService implements ChannelTurnDriver {
             // be re-dispatched from it after a restart (R1). ScopedValue forbids a null binding, so a
             // null/blank content (which cannot be meaningfully replayed anyway) binds the empty string.
             String userMessage = message.content() == null ? "" : message.content();
+            // #53: bind the multi-user tenant key — the resolved identity when multi-user is on, else the
+            // shared "default" namespace (single-user, byte-identical). AgentMemory scopes facts by it.
+            String tenantIdentity = multiUserEnabled ? identityId : CurrentIdentity.DEFAULT_IDENTITY;
             String reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId)
                     .where(CurrentAgent.CURRENT_TURN, turnId)
                     .where(CurrentAgent.CURRENT_USER_MESSAGE, userMessage)
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, effectiveScopes)
+                    .where(CurrentIdentity.CURRENT_IDENTITY_ID, tenantIdentity)
                     .call(() -> agent.respond(sessionId, message.content()));
 
             // P2-OUTPUTGUARD pre-channel-emit seam (DR-6a §9.2): run the composed OutputGuard chain over

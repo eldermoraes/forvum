@@ -164,6 +164,7 @@ public class CronScheduler {
             // arrive (mirrors forvum ask). The flag is read by ApprovalService via ApprovalContext.
             reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, spec.agentId())
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, cronScopes)
+                    .where(CurrentIdentity.CURRENT_IDENTITY_ID, CurrentIdentity.DEFAULT_IDENTITY)
                     .where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE)
                     .call(() -> agent.respond(sessionId, spec.prompt(), model));
             // Record the cron task ONLY after the turn succeeds (persist-after-success; the turn's own

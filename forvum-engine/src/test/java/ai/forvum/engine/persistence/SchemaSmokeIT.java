@@ -32,9 +32,10 @@ class SchemaSmokeIT {
 
     private static final List<String> EXPECTED_INDEXES = List.of(
             "idx_sessions_identity", "idx_sessions_lastseen", "idx_messages_session", "idx_messages_agent",
-            "idx_episodic_agent_session", "idx_semantic_agent", "idx_tool_session", "idx_tool_agent",
-            "idx_provider_session", "idx_provider_agent", "idx_provider_fallback", "idx_capr_agent",
-            "idx_tasks_agent", "idx_tasks_status", "idx_approvals_status", "idx_approvals_session");
+            "idx_episodic_agent_session", "idx_semantic_agent", "idx_semantic_identity", "idx_tool_session",
+            "idx_tool_agent", "idx_provider_session", "idx_provider_agent", "idx_provider_fallback",
+            "idx_capr_agent", "idx_tasks_agent", "idx_tasks_status", "idx_approvals_status",
+            "idx_approvals_session");
 
     @Inject
     EntityManager em;
@@ -42,12 +43,12 @@ class SchemaSmokeIT {
     @Test
     void flywayMigratedToHeadAndAllTablesExist() {
         // V1 baseline + V2__tasks.sql (P2-TASKLEDGER, the 'tasks' table) + V3__compaction.sql (P2-COMPACT,
-        // the compaction columns) + V4__approvals.sql (P2-14 #39, the 'tool_approvals' queue), so the head
-        // version is now 4.
+        // the compaction columns) + V4__approvals.sql (P2-14 #39, the 'tool_approvals' queue) +
+        // V5__multi_user_isolation.sql (#53, semantic_memory identity_id), so the head version is now 5.
         Object version = em.createNativeQuery(
                 "select version from flyway_schema_history where success = 1 "
               + "order by installed_rank desc limit 1").getSingleResult();
-        assertEquals("4", String.valueOf(version), "Flyway must have migrated to the head version (V4)");
+        assertEquals("5", String.valueOf(version), "Flyway must have migrated to the head version (V5)");
 
         @SuppressWarnings("unchecked")
         List<String> tables = em.createNativeQuery(
@@ -102,6 +103,7 @@ class SchemaSmokeIT {
         episodic.persist();
 
         SemanticMemoryEntity semantic = new SemanticMemoryEntity();
+        semantic.identityId = "default";
         semantic.agentId = "main";
         semantic.key = "fav-color";
         semantic.value = "blue";
@@ -210,7 +212,7 @@ class SchemaSmokeIT {
         RuntimeException ex = assertThrows(RuntimeException.class,
                 () -> QuarkusTransaction.requiringNew().run(() -> persistSemantic(now)));
         assertTrue(mentionsUniqueViolation(ex),
-                "expected a UNIQUE(agent_id, key) violation, got: " + ex);
+                "expected a UNIQUE(identity_id, agent_id, key) violation, got: " + ex);
     }
 
     private static boolean mentionsUniqueViolation(Throwable t) {
@@ -224,6 +226,7 @@ class SchemaSmokeIT {
 
     private static void persistSemantic(long now) {
         SemanticMemoryEntity e = new SemanticMemoryEntity();
+        e.identityId = "default";
         e.agentId = "dup-agent";
         e.key = "dup-key";
         e.value = "v";

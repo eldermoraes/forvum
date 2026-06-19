@@ -26,6 +26,22 @@ public final class CurrentIdentity {
     /** The caller's effective permission scopes for the current turn (P2-11). */
     public static final ScopedValue<Set<PermissionScope>> CURRENT_EFFECTIVE_SCOPES = ScopedValue.newInstance();
 
+    /**
+     * The owning identity id for the current turn — the multi-user tenant key (#53). Bound at the turn
+     * entry to the resolved identity when {@code forvum.multi-user.enabled}, or to {@code "default"}
+     * otherwise (single-user, byte-identical). Read by {@code AgentMemory} to scope per-identity facts;
+     * when UNBOUND (a lower-level unit test) it falls back to {@code "default"}.
+     */
+    public static final ScopedValue<String> CURRENT_IDENTITY_ID = ScopedValue.newInstance();
+
+    /** The single-user / shared team-skill namespace (the migration default). */
+    public static final String DEFAULT_IDENTITY = "default";
+
+    /** The current turn's tenant identity, or {@link #DEFAULT_IDENTITY} when unbound (lower-level callers). */
+    public static String currentIdentityId() {
+        return CURRENT_IDENTITY_ID.isBound() ? CURRENT_IDENTITY_ID.get() : DEFAULT_IDENTITY;
+    }
+
     private CurrentIdentity() {
     }
 }
