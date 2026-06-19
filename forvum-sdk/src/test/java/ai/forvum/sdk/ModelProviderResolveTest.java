@@ -1,6 +1,8 @@
 package ai.forvum.sdk;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.ModelRef;
 import dev.langchain4j.model.chat.ChatModel;
@@ -39,5 +41,27 @@ class ModelProviderResolveTest {
         ChatModel resolved = provider.resolve(ModelRef.parse("fake:qwen3:1.7b"));
 
         assertSame(stub, resolved);
+    }
+
+    @Test
+    void resolveEmbeddingDefaultsToUnsupported() {
+        // The P3-2 (#50) embedding prelude: a provider that does not override resolveEmbedding rejects it
+        // with an actionable message naming the extension — so existing providers compile unchanged.
+        ModelProvider provider = new AbstractModelProvider() {
+            @Override
+            public String extensionId() {
+                return "no-embed";
+            }
+
+            @Override
+            public ChatModel resolve(ModelRef ref) {
+                return null;
+            }
+        };
+
+        UnsupportedOperationException ex = assertThrows(UnsupportedOperationException.class,
+                () -> provider.resolveEmbedding(ModelRef.parse("no-embed:some-model")));
+        assertTrue(ex.getMessage().contains("no-embed"),
+                "the default rejection must name the extension that lacks an embedding model");
     }
 }
