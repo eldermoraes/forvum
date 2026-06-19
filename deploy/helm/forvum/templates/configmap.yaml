@@ -1,0 +1,29 @@
+{{- /*
+The Forvum config surface (the human-editable ~/.forvum/ tree) as a ConfigMap. Each entry's KEY is a
+relative path under $FORVUM_HOME, "/"-escaped to "__" so it is a valid ConfigMap data key; the
+deployment mounts each back into place via a subPath whose value re-substitutes "/". This keeps config
+declarative (GitOps) and read-only, while operational state stays on the writable PVC.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "forvum.fullname" . }}-config
+  labels:
+    {{- include "forvum.labels" . | nindent 4 }}
+data:
+  {{- if .Values.config.configJson }}
+  config.json: |
+    {{- .Values.config.configJson | nindent 4 }}
+  {{- end }}
+  {{- range $name, $content := .Values.config.agents }}
+  {{ printf "agents/%s" $name | replace "/" "__" }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+  {{- range $name, $content := .Values.config.channels }}
+  {{ printf "channels/%s" $name | replace "/" "__" }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+  {{- range $path, $content := .Values.config.extraFiles }}
+  {{ $path | replace "/" "__" }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}

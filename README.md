@@ -156,6 +156,27 @@ typing notifications, sync messages, edited messages, and group messages are ign
 support are documented limitations), and the bot never replies to its own account (self-echo). An
 empty `allowedUserIds` allows any sender; a non-empty list restricts to those phone numbers/UUIDs.
 
+### Kubernetes (team-assistant mode)
+
+A Helm chart under [`deploy/helm/forvum`](deploy/helm/forvum) deploys Forvum as a **per-namespace team
+assistant**: each Helm release is one isolated instance with its own persistent SQLite state, so a
+namespace gets a private assistant whose memory no other namespace can read (the isolation is structural
+— Kubernetes namespacing plus a per-release `PersistentVolumeClaim`). The chart runs the native
+single-binary container image (published to GHCR by the release pipeline) as a long-lived Web-channel
+HTTP server.
+
+```bash
+# Give each team its own isolated assistant:
+helm install forvum deploy/helm/forvum --namespace team-a --create-namespace
+helm install forvum deploy/helm/forvum --namespace team-b --create-namespace
+kubectl -n team-a port-forward svc/forvum 8080:8080
+```
+
+Configuration (`agents/`, `channels/`, …) comes from values and is projected into `$FORVUM_HOME` from a
+ConfigMap; provider API keys are wired from Kubernetes Secrets. There is no Kubernetes operator (out of
+scope for v0.1). See [`deploy/helm/README.md`](deploy/helm/README.md) for the full isolation model and
+configuration reference.
+
 ## Quick demo
 
 The demo lives on the `demo/conference-mvp` branch and runs a single agent against an Ollama model via an interactive CLI. It predates v0.1 — for everyday use, the install path above on `main` now provides the same interactive experience (banner, `forvum>` prompt, `/exit`) with the full v0.1 feature set; this branch remains as the frozen conference snapshot.
