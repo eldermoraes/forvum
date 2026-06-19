@@ -9,7 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
-/** Maps the {@code semantic_memory} table (embedded long-term facts; unique per (agent_id, key)). */
+/** Maps the {@code semantic_memory} table (long-term facts; unique per (identity_id, agent_id, key), #53). */
 @Entity
 @Table(name = "semantic_memory")
 public class SemanticMemoryEntity extends PanacheEntityBase {
@@ -18,6 +18,10 @@ public class SemanticMemoryEntity extends PanacheEntityBase {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id")
     public Long id;
+
+    /** The owning identity (#53 multi-user); {@code "default"} is the single-user / shared team-skill namespace. */
+    @Column(name = "identity_id", nullable = false)
+    public String identityId;
 
     @Column(name = "agent_id", nullable = false)
     public String agentId;

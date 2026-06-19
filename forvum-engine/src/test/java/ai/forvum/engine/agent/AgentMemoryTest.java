@@ -1,6 +1,7 @@
 package ai.forvum.engine.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -10,6 +11,7 @@ import jakarta.transaction.Transactional;
 
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
+import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.persistence.EpisodicMemoryEntity;
 import ai.forvum.engine.persistence.MessageEntity;
 import ai.forvum.engine.persistence.SemanticMemoryEntity;
@@ -82,5 +84,41 @@ class AgentMemoryTest {
         SemanticMemoryEntity row = SemanticMemoryEntity
                 .<SemanticMemoryEntity>find("agentId = ?1", "fact-upsert-agent").firstResult();
         assertEquals("Rio", row.value, "the latest value wins on upsert");
+    }
+
+    @Test
+    void factsAreIsolatedPerIdentityWithASharedDefaultReadThrough() {
+        AgentId agent = new AgentId("mu-agent");
+
+        // Two users record the SAME key under the SAME agent — must stay isolated (#53).
+        recordFactAs(agent, "alice", "name", "Alice");
+        recordFactAs(agent, "bob", "name", "Bob");
+        // A shared team fact lives in the 'default' (team-skill) namespace.
+        recordFactAs(agent, "default", "team", "Acme");
+
+        // Per-identity isolation: each sees only its own 'name'.
+        assertEquals("Alice", factValueAs(agent, "alice", "name"));
+        assertEquals("Bob", factValueAs(agent, "bob", "name"));
+        // Shared read-through: an identity with no own 'team' fact reads the 'default' one.
+        assertEquals("Acme", factValueAs(agent, "alice", "team"));
+        assertEquals("Acme", factValueAs(agent, "bob", "team"));
+        // The owning identity's own fact wins over the shared namespace.
+        recordFactAs(agent, "alice", "team", "Team Alice");
+        assertEquals("Team Alice", factValueAs(agent, "alice", "team"), "own fact beats the shared default");
+        assertEquals("Acme", factValueAs(agent, "bob", "team"), "bob still reads the shared default");
+        // A miss in both the own and the default namespace yields null.
+        assertNull(factValueAs(agent, "carol", "name"), "no own fact and no default fact -> null");
+    }
+
+    private void recordFactAs(AgentId agent, String identity, String key, String value) {
+        ScopedValue.where(CurrentAgent.CURRENT_AGENT, agent)
+                .where(CurrentIdentity.CURRENT_IDENTITY_ID, identity)
+                .run(() -> memory.recordFact(key, value, "mu-test"));
+    }
+
+    private String factValueAs(AgentId agent, String identity, String key) {
+        return ScopedValue.where(CurrentAgent.CURRENT_AGENT, agent)
+                .where(CurrentIdentity.CURRENT_IDENTITY_ID, identity)
+                .call(() -> memory.factValue(key));
     }
 }

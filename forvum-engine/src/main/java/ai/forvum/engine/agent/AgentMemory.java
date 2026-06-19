@@ -5,6 +5,7 @@ import ai.forvum.core.BlockType;
 import ai.forvum.core.EventType;
 import ai.forvum.core.Role;
 import ai.forvum.engine.context.CurrentAgent;
+import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.persistence.EpisodicMemoryEntity;
 import ai.forvum.engine.persistence.MessageEntity;
 import ai.forvum.engine.persistence.SemanticMemoryEntity;
@@ -77,17 +78,20 @@ public class AgentMemory {
     }
 
     /**
-     * Record a long-term fact, upserting on {@code (agent_id, key)} so a re-write updates the existing
-     * row rather than violating the table's UNIQUE constraint. The {@code embedding} vector is left null
-     * this cycle (M7 AC-7); {@code updated_at} is bumped on every update.
+     * Record a long-term fact for the current identity (#53), upserting on
+     * {@code (identity_id, agent_id, key)} so a re-write updates the existing row rather than violating the
+     * table's UNIQUE constraint, and two identities can hold the same key independently. The
+     * {@code embedding} vector is left null this cycle (M7 AC-7); {@code updated_at} is bumped on update.
      */
     @Transactional
     public void recordFact(String key, String value, String source) {
         long now = System.currentTimeMillis();
         String agentId = agentId();
-        // Filter by key in-memory (per-agent fact sets are small in a single-user deployment) to avoid
-        // referencing the SQL-reserved column name "key" in a JPQL where-clause.
-        SemanticMemoryEntity existing = SemanticMemoryEntity.<SemanticMemoryEntity>list("agentId = ?1", agentId)
+        String identityId = CurrentIdentity.currentIdentityId();
+        // Filter by key in-memory (per-(identity,agent) fact sets are small) to avoid referencing the
+        // SQL-reserved column name "key" in a JPQL where-clause.
+        SemanticMemoryEntity existing = SemanticMemoryEntity
+                .<SemanticMemoryEntity>list("identityId = ?1 and agentId = ?2", identityId, agentId)
                 .stream().filter(fact -> fact.key.equals(key)).findFirst().orElse(null);
         if (existing != null) {
             existing.value = value;
@@ -96,6 +100,7 @@ public class AgentMemory {
             return;
         }
         SemanticMemoryEntity fact = new SemanticMemoryEntity();
+        fact.identityId = identityId;
         fact.agentId = agentId;
         fact.key = key;
         fact.value = value;
@@ -104,6 +109,29 @@ public class AgentMemory {
         fact.createdAt = now;
         fact.updatedAt = now;
         fact.persist();
+    }
+
+    /**
+     * The value of long-term fact {@code key} for the current identity, falling back to the shared
+     * {@code "default"} (team-skill) namespace if the identity has no own fact for it — null if neither
+     * holds it (#53: per-identity isolation with a shared read-through). The owning identity's own fact
+     * always wins over a shared one of the same key.
+     */
+    public String factValue(String key) {
+        String agentId = agentId();
+        String identityId = CurrentIdentity.currentIdentityId();
+        String own = factFor(identityId, agentId, key);
+        if (own != null) {
+            return own;
+        }
+        return identityId.equals(CurrentIdentity.DEFAULT_IDENTITY)
+                ? null : factFor(CurrentIdentity.DEFAULT_IDENTITY, agentId, key);
+    }
+
+    private static String factFor(String identityId, String agentId, String key) {
+        return SemanticMemoryEntity
+                .<SemanticMemoryEntity>list("identityId = ?1 and agentId = ?2", identityId, agentId)
+                .stream().filter(fact -> fact.key.equals(key)).map(fact -> fact.value).findFirst().orElse(null);
     }
 
     private MessageEntity persistMessage(String sessionId, Role role, String content) {
