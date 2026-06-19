@@ -1510,7 +1510,21 @@ Generalizable lessons from completed milestones; append here as milestones land.
   invocation bypasses them (the [P2-15] trap), silently dropping the write. The deterministic native IT is
   the `replay` two-launch JDBC-seed dance (untagged, default native leg, proves the SQLite/BLOB stack);
   the live reindex+search against a real Ollama embedding model (`all-minilm`) is a `@Tag("live")` native
-  IT the `native-turn` CI job runs (pull the embedding model alongside the chat model). [P3-2/Risk#2]
+  IT the `native-turn` CI job runs (pull the embedding model alongside the chat model). **NATIVE-ONLY TRAP
+  that ONLY the live native IT caught (Risk #5, mirroring [M20]):** the native binary's `forvum memory
+  reindex` died with `Reindex failed: {"error":"model '' not found"}` — Ollama got `{"model":""}`. The
+  `quarkus-langchain4j-ollama` extension's `nativeSupport` build step registers reflection for ONLY the CHAT
+  DTOs (`OllamaChatRequest`/`OllamaChatResponse`) — because Forvum builds the embedding model
+  PROGRAMMATICALLY (`OllamaEmbeddingModel.builder()`), the langchain4j Ollama `EmbeddingRequest`/`EmbeddingResponse`
+  (package-private, `@JsonInclude`/`@JsonNaming` Jackson DTOs) are NEVER registered, so in native Jackson
+  serializes an empty request (the `model` field is dropped) → `model ''`. The chat path works ONLY because
+  the extension registered ITS request DTOs. Fix = a `forvum-provider-ollama` reflection holder
+  (`OllamaEmbeddingReflectionConfig`, the `GraphNativeSerializationConfig` precedent) with the REAL Quarkus
+  `@RegisterForReflection(classNames={…EmbeddingRequest, …EmbeddingResponse})` — `classNames` not `targets`
+  (the DTOs are package-private, unreferenceable via `.class`), `serialization=false` (JSON via Jackson, not
+  `ObjectOutputStream`), `methods`/`fields` default `true` (Jackson needs both halves). The provider module
+  already deps `quarkus-arc` and its enforcer bans only `ai.forvum:*`, so the real annotation is allowed; the
+  JVM tests can't catch this (no native reflection) — the live native IT is the sole gate. [P3-2/Risk#5]
 - **The Dev UI live config editor is a dev-build-gated `@Route`, NOT a Dev UI card — a card needs a
   `*-deployment` module that breaks the headless-library setup ([M6]).** P3-6 (#54): a true Dev UI card
   (`CardPageBuildItem` + a Lit web component) requires a `@BuildStep` in a `*-deployment` artifact, which would
