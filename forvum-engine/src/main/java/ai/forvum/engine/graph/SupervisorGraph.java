@@ -5,8 +5,15 @@ import static org.bsc.langgraph4j.StateGraph.START;
 import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
 import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
+import ai.forvum.core.MemoryHit;
+import ai.forvum.core.MemoryPolicy;
+import ai.forvum.core.MemoryQuery;
+import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.routing.MemorySelector;
+import ai.forvum.engine.routing.RetrievedMemory;
+import ai.forvum.engine.session.compaction.Summarizer;
 import ai.forvum.engine.tools.ApprovalDeniedException;
 import ai.forvum.engine.tools.PermissionDeniedException;
 import ai.forvum.engine.tools.ToolCallBridge;
@@ -20,6 +27,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
@@ -30,6 +38,8 @@ import io.opentelemetry.instrumentation.annotations.WithSpan;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
+import org.jboss.logging.Logger;
 
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -69,11 +79,14 @@ import java.util.concurrent.Future;
  * lambdas (the graph is compiled per turn), so no langchain4j type is ever serialized (native-clean).
  *
  * <p>v0.1 scope: {@code route} is a deterministic direct-path classifier; a worker runs a single
- * generation (no nested tool loop or sub-spawn) via {@link WorkerRunner}; {@code reduce} passes each
- * digest through (proxy-model {@code qwen3:1.7b} compression is the documented v1+ refinement).
+ * generation (no nested tool loop or sub-spawn) via {@link WorkerRunner}; {@code reduce} compresses each
+ * worker digest exceeding {@code memoryPolicy.compressThresholdChars} through the proxy-model
+ * {@link Summarizer} (#56 — the same knob that compresses retrieved memory before it enters the window).
  */
 @ApplicationScoped
 public class SupervisorGraph {
+
+    private static final Logger LOG = Logger.getLogger(SupervisorGraph.class);
 
     /** Safety cap on {@code generate ⇄ (tool_loop|workers)} rounds, independent of any per-agent budget. */
     private static final int MAX_ROUNDS = 8;
@@ -101,6 +114,12 @@ public class SupervisorGraph {
     WorkerRunner workerRunner;
 
     @Inject
+    MemorySelector memorySelector;
+
+    @Inject
+    Summarizer summarizer;
+
+    @Inject
     ObjectMapper mapper;
 
     /** Run one turn through the compiled graph, returning the final assistant text. */
@@ -111,7 +130,11 @@ public class SupervisorGraph {
                 .setAttribute("forvum.session.id", request.sessionId())
                 .setAttribute("forvum.agent.id", request.agentId().value())
                 .setAttribute("thread.is_virtual", Thread.currentThread().isVirtual());
-        Turn turn = new Turn(request, toolCallBridge.specificationsFor(request.belt()));
+        if (request.cycle() != null) {
+            return runCycle(request); // #51: a declared reflection cycle compiles a different graph
+        }
+        Turn turn = new Turn(request, retrieveAndFrame(request),
+                toolCallBridge.specificationsFor(request.belt()));
         String finalText;
         try {
             CompiledGraph<GraphState> graph = compile(turn);
@@ -124,6 +147,93 @@ public class SupervisorGraph {
                     + request.sessionId(), e);
         }
         return enforceOutputSchema(request, finalText);
+    }
+
+    /**
+     * The Context-Engineering Select pillar's read step (DR-5): retrieve memory relevant to the turn's
+     * user message ONCE at turn entry (not per generate round) and frame it as a {@code <retrieved_memory>}
+     * DATA block inserted just before the user's question (DR-6a §9 — never spliced into the
+     * system/instruction region). Returns the seeded messages unchanged — retrieval disabled — when the
+     * policy is null / {@code NONE}, no selector/provider is available, the session or query text is blank,
+     * or retrieval yields nothing. The returned list is always a fresh mutable copy ({@link Turn} mutates
+     * it across rounds).
+     */
+    private List<ChatMessage> retrieveAndFrame(GraphTurnRequest request) {
+        List<ChatMessage> messages = new ArrayList<>(request.messages());
+        if (ReplayContext.CURRENT_REPLAY.isBound()) {
+            return messages; // replay (#57): deterministic — never re-retrieve memory
+        }
+        MemoryPolicy policy = request.memoryPolicy();
+        if (policy == null || policy.strategy() == RetrievalStrategy.NONE || memorySelector == null) {
+            return messages;
+        }
+        int lastUser = lastUserIndex(messages);
+        if (lastUser < 0) {
+            return messages;
+        }
+        String queryText = userText((UserMessage) messages.get(lastUser));
+        String sessionId = request.sessionId();
+        if (queryText == null || queryText.isBlank() || sessionId == null || sessionId.isBlank()) {
+            return messages;
+        }
+        List<MemoryHit> hits = memorySelector.retrieve(
+                new MemoryQuery(request.agentId().value(), sessionId, queryText), policy);
+        String block = RetrievedMemory.frame(compressHits(hits, policy.compressThresholdChars()));
+        if (block != null) {
+            // Insert as a user-role DATA message immediately before the user's question (context → question).
+            messages.add(lastUser, UserMessage.from(block));
+        }
+        return messages;
+    }
+
+    /**
+     * The Context-Engineering Compress pillar (#56): summarize any retrieved hit whose content exceeds
+     * {@code threshold} chars through the small-and-fast proxy model ({@link Summarizer}) before it
+     * re-enters the window, leaving shorter hits untouched. {@code threshold <= 0} disables compression.
+     */
+    private List<MemoryHit> compressHits(List<MemoryHit> hits, int threshold) {
+        if (threshold <= 0 || hits.isEmpty()) {
+            return hits;
+        }
+        List<MemoryHit> out = new ArrayList<>(hits.size());
+        for (MemoryHit hit : hits) {
+            String content = hit.content();
+            if (content == null || content.length() <= threshold) {
+                out.add(hit);
+                continue;
+            }
+            // Best-effort (graceful degradation, mirroring MemorySelector.retrieve): a proxy-model failure
+            // — a throw, or a null/blank summary the MemoryHit ctor would reject — must NOT fail the turn;
+            // keep the raw hit and proceed. retrieveAndFrame runs OUTSIDE run()'s try/catch.
+            try {
+                String summary = summarizer.summarize(List.of(content));
+                out.add(summary == null || summary.isBlank()
+                        ? hit : new MemoryHit(hit.tier(), summary, hit.score(), hit.source()));
+            } catch (RuntimeException e) {
+                LOG.warnf(e, "Proxy compression of a retrieved hit failed; keeping it uncompressed.");
+                out.add(hit);
+            }
+        }
+        return out;
+    }
+
+    /** Index of the last {@link UserMessage} in {@code messages}, or {@code -1} if there is none. */
+    private static int lastUserIndex(List<ChatMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i) instanceof UserMessage) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** The user message's text, or {@code null} for a multi-part/non-text message (skip retrieval, don't fail). */
+    private static String userText(UserMessage message) {
+        try {
+            return message.singleText();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**
@@ -149,6 +259,75 @@ public class SupervisorGraph {
                 "Output-schema validation failed for session " + request.sessionId()
               + ": the validated reply could not be re-serialized.", e);
         }
+    }
+
+    /**
+     * Run a turn whose agent declares a reflection cycle (DR-8 DP-7, #51): compile the declared steps into
+     * a cyclic generation graph and drive it to termination. Each step is one generation pass with the
+     * step's free-text instruction; one round is one in-order traversal of the steps; the loop exits when a
+     * pass's reply contains the {@code stopSentinel} (stripped from the answer) or after {@code maxRounds}
+     * (best-effort degrade, the M18 lesson). v0.1 scope: generation-only — a declared cycle runs no tool
+     * loop and no retrieval (those belong to the standard supervisor graph); {@code outputSchema} still
+     * validates the cycle's FINAL answer, unchanged (after the graph returns).
+     */
+    private String runCycle(GraphTurnRequest request) {
+        CycleTurn turn = new CycleTurn(request);
+        String finalText;
+        try {
+            CompiledGraph<GraphState> graph = compileCycle(turn);
+            Optional<GraphState> result = graph.invoke(Map.of());
+            // Every cycleStep sets FINAL (on both "done" and "continue"), so the graph always carries the
+            // latest pass as the final answer; "" is an unreachable belt-and-suspenders fallback.
+            finalText = result.flatMap(GraphState::finalText).orElse("");
+        } catch (SupervisorGraphException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SupervisorGraphException(
+                "Cyclic-agent graph failed for session " + request.sessionId(), e);
+        }
+        return enforceOutputSchema(request, finalText);
+    }
+
+    private CompiledGraph<GraphState> compileCycle(CycleTurn turn) throws Exception {
+        // recursionLimit must cover every step of every round (the M18 lesson: it counts each node run).
+        int limit = turn.cycle.maxRounds() * turn.cycle.steps().size() + 8;
+        return new StateGraph<>(GraphState.SCHEMA, GraphState::new)
+                .addNode("cycle", node_async(state -> cycleStep(state, turn)))
+                .addEdge(START, "cycle")
+                .addConditionalEdges("cycle", edge_async(state -> state.next().orElse("done")),
+                        Map.of("continue", "cycle", "done", END))
+                .compile(CompileConfig.builder().recursionLimit(limit).build());
+    }
+
+    private Map<String, Object> cycleStep(GraphState state, CycleTurn turn) {
+        String instruction = turn.cycle.steps().get(turn.stepIndex);
+        // The step instruction is a user-role directive appended to the running conversation, so each pass
+        // sees the prior drafts (the reflect -> critique -> revise shape).
+        turn.conversation.add(UserMessage.from(instruction));
+        AiMessage reply = turn.model.chat(ChatRequest.builder()
+                .messages(turn.conversation)
+                .build()).aiMessage();
+        turn.conversation.add(reply);
+        String text = reply.text() == null ? "" : reply.text();
+
+        String sentinel = turn.cycle.stopSentinel();
+        if (sentinel != null && text.contains(sentinel)) {
+            return Map.of(GraphState.NEXT, "done", GraphState.FINAL, stripSentinel(text, sentinel));
+        }
+        // Advance the step; completing the last step closes a round.
+        if (++turn.stepIndex >= turn.cycle.steps().size()) {
+            turn.stepIndex = 0;
+            turn.round++;
+        }
+        if (turn.round >= turn.cycle.maxRounds()) {
+            return Map.of(GraphState.NEXT, "done", GraphState.FINAL, text); // best-effort after the cap
+        }
+        return Map.of(GraphState.NEXT, "continue", GraphState.FINAL, text);
+    }
+
+    /** Remove every occurrence of the stop sentinel from the final answer, trimming surrounding blanks. */
+    private static String stripSentinel(String text, String sentinel) {
+        return text.replace(sentinel, "").strip();
     }
 
     private CompiledGraph<GraphState> compile(Turn turn) throws Exception {
@@ -208,6 +387,11 @@ public class SupervisorGraph {
     }
 
     private String runTool(Turn turn, ToolExecutionRequest request) {
+        if (ReplayContext.CURRENT_REPLAY.isBound()) {
+            // Replay (#57): serve the recorded result FIFO-per-tool — never execute or audit a real tool,
+            // so a substituted-model rerun sees the SAME outputs (deterministic). A miss → synthetic marker.
+            return ReplayContext.CURRENT_REPLAY.get().next(request.name());
+        }
         try {
             return toolCallBridge.dispatch(turn.sessionId, turn.agentId, turn.belt,
                     request.name(), request.arguments());
@@ -299,16 +483,32 @@ public class SupervisorGraph {
         for (SpawnRequest spawn : turn.spawns) {
             String digest = turn.digests.getOrDefault(spawn.request().id(), "");
             digests.add(digest);
-            turn.conversation.add(ToolExecutionResultMessage.from(spawn.request(), compress(digest)));
+            turn.conversation.add(ToolExecutionResultMessage.from(spawn.request(),
+                    compress(digest, turn.compressThreshold)));
         }
         turn.spawns.clear();
         turn.digests.clear();
         return digests.isEmpty() ? Map.of() : Map.of(GraphState.WORKER_DIGESTS, digests);
     }
 
-    /** v0.1 pass-through. Proxy-model ({@code qwen3:1.7b}) summarization is the v1+ Compress refinement. */
-    private static String compress(String digest) {
-        return digest;
+    /**
+     * The Compress pillar at the worker-digest merge (#56, the §5.5 reduce boundary): summarize a digest
+     * exceeding {@code threshold} chars through the proxy-model {@link Summarizer} ({@code qwen3:1.7b}),
+     * else pass it through. The SAME {@code compressThresholdChars} knob governs this and retrieved-memory
+     * compression (DR-5); {@code threshold <= 0} disables it (the pre-#56 pass-through behavior).
+     */
+    private String compress(String digest, int threshold) {
+        if (threshold <= 0 || digest == null || digest.length() <= threshold) {
+            return digest;
+        }
+        // Best-effort like compressHits: a proxy-model failure keeps the raw digest rather than failing the turn.
+        try {
+            String summary = summarizer.summarize(List.of(digest));
+            return summary == null || summary.isBlank() ? digest : summary;
+        } catch (RuntimeException e) {
+            LOG.warnf(e, "Proxy compression of a worker digest failed; keeping it uncompressed.");
+            return digest;
+        }
     }
 
     /** One delegated subtask: the model's {@code spawn_worker} call paired with its parsed child + task. */
@@ -323,17 +523,24 @@ public class SupervisorGraph {
         private final List<ToolSpec> belt;
         private final List<ToolSpecification> toolSpecs;
         private final List<ChatMessage> conversation;
+        private final int compressThreshold;
         private final List<SpawnRequest> spawns = new ArrayList<>();
         private final ConcurrentMap<String, String> digests = new ConcurrentHashMap<>();
         private int round;
 
-        private Turn(GraphTurnRequest request, List<ToolSpecification> toolSpecs) {
+        private Turn(GraphTurnRequest request, List<ChatMessage> conversation,
+                List<ToolSpecification> toolSpecs) {
             this.sessionId = request.sessionId();
             this.agentId = request.agentId();
             this.model = request.model();
             this.belt = request.belt();
             this.toolSpecs = toolSpecs;
-            this.conversation = new ArrayList<>(request.messages());
+            // Already a fresh mutable copy (built by retrieveAndFrame), mutated across rounds.
+            this.conversation = conversation;
+            // The §5.5 reduce node compresses worker digests above this; 0 disables it (no memory policy,
+            // or a replay #57 where compression must be off for determinism).
+            this.compressThreshold = ReplayContext.CURRENT_REPLAY.isBound() ? 0
+                    : (request.memoryPolicy() != null ? request.memoryPolicy().compressThresholdChars() : 0);
         }
 
         private String lastAssistantText() {
@@ -343,6 +550,25 @@ public class SupervisorGraph {
                 }
             }
             return "";
+        }
+    }
+
+    /**
+     * Per-turn mutable holder for a declared reflection cycle (#51): generation-only, so it carries no
+     * tool specs, spawns, or digests — only the running conversation plus the cycle cursor (step index +
+     * round). Captured by the {@code cycle} node lambda (R6 — keeps langchain4j types out of graph state).
+     */
+    private static final class CycleTurn {
+        private final ChatModel model;
+        private final CycleSpec cycle;
+        private final List<ChatMessage> conversation;
+        private int stepIndex;
+        private int round;
+
+        private CycleTurn(GraphTurnRequest request) {
+            this.model = request.model();
+            this.cycle = request.cycle();
+            this.conversation = new ArrayList<>(request.messages());
         }
     }
 }

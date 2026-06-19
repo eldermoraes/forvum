@@ -108,7 +108,9 @@ public final class ConfigDoctor {
             }
             String persona = reader.persona(id).orElse("");
             try {
-                Persona p = specReader.parse(new AgentId(id), persona, spec);
+                // parseSpec validates the persona AND the optional cycle block (DR-8) — the doctor inherits
+                // every rule through the reader-as-oracle design (P2-9), the cycle included.
+                Persona p = specReader.parseSpec(new AgentId(id), persona, spec).persona();
                 checkProvider(findings, location, p.primaryModel().provider(),
                         "primaryModel '" + p.primaryModel() + "'");
             } catch (IllegalStateException e) {

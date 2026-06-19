@@ -158,11 +158,16 @@
                                      end-to-end by @QuarkusTest *IT with real SQLite, not unit Surefire tests):
                                      SessionCompactor/DefaultSummarizer by SessionCompactorIT (P2-COMPACT),
                                      TaskRecorder by CronSchedulerFireIT/AgentRegistrySpawnLedgerIT (P2-TASKLEDGER),
-                                     LoggingCronDeliverySink by CronSchedulerFireIT (P2-CRON-DELIVERY). -->
+                                     LoggingCronDeliverySink by CronSchedulerFireIT (P2-CRON-DELIVERY),
+                                     SessionSubstitutionReplayer by SessionSubstitutionReplayerIT (#57/PR-8): its
+                                     @ActivateRequestContext replay() is fully exercised by the IT (success /
+                                     partial-failure / unresolvable-model / metadata) but JaCoCo mis-attributes the
+                                     ArC subclass-forward body, like SessionCompactor (the same pattern). -->
                                 <exclude>ai/forvum/engine/session/compaction/SessionCompactor.class</exclude>
                                 <exclude>ai/forvum/engine/session/compaction/DefaultSummarizer.class</exclude>
                                 <exclude>ai/forvum/engine/persistence/TaskRecorder.class</exclude>
                                 <exclude>ai/forvum/engine/cron/LoggingCronDeliverySink.class</exclude>
+                                <exclude>ai/forvum/engine/replay/SessionSubstitutionReplayer.class</exclude>
                             </excludes>
                             <rules>
                                 <rule>

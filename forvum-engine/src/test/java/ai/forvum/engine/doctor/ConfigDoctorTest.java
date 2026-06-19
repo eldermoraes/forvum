@@ -364,4 +364,21 @@ class ConfigDoctorTest {
         assertTrue(findings.stream().allMatch(f -> !f.location().isBlank() && !f.problem().isBlank()),
                 () -> "every finding must carry a non-blank location + problem: " + findings);
     }
+
+    @Test
+    void aMalformedCycleBlockIsReportedAsAnError() throws IOException {
+        writeValidMainAgent();
+        // A second agent with a structurally-invalid cycle (empty steps). parse() never reads the cycle —
+        // only parseSpec() does — so the doctor catches this ONLY because checkAgents switched to parseSpec.
+        // Red-check: revert that one line to specReader.parse(...) and this assertion goes green-for-wrong.
+        write("agents/cyclic.md", "You are a cyclic agent.");
+        write("agents/cyclic.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\",\"cycle\":{\"steps\":[]}}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(hasError(report, "agents/cyclic.json"),
+                () -> "a malformed cycle block (empty steps) must be reported via parseSpec; findings: "
+                        + report.findings());
+    }
 }

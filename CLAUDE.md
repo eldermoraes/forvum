@@ -1435,3 +1435,36 @@ Generalizable lessons from completed milestones; append here as milestones land.
   throwing lambda for the failure branch — a `@QuarkusMainTest` has NO stdin so the interactive wizard
   can't be driven there [Risk#5].
   Gemini's `unset` boot placeholder counts as "no key" so the file fallback applies. [P2-10]
+- **A design round merged "into the docs" is NOT merged "into the code" — verify on disk before assuming
+  a contract exists.** PR-8's first commit had to MATERIALIZE DR-8: it landed in PR-1 only as
+  `docs/design-rounds/group-8-agentspec-composition.md` + ULTRAPLAN §4.3.8, while the code still carried
+  the 8-field `Persona`, no `AgentSpec`/`CycleSpec` records, and an `AgentSpecReader` that hard-passed
+  `costBudget=null` — exactly the M13 stale-Files trap in reverse (the design was committed, the record
+  never built). Grep the actual types a "merged" round names before consuming them. The composition is the
+  `Identity.roles` additive-growth recipe at n=4: `Persona` grew 8→12 (`fallbackModels`/`memoryPolicy`/
+  `roles`/`identityId`), the canonical ctor widened, an 8-arg delegating overload supplies the defaults
+  (null list→`List.of()`, null `memoryPolicy`→`MemoryPolicy.defaults()` — "memory off" is the value
+  `strategy=NONE`, not absence); `AgentSpec(Persona, CycleSpec)` became the §5.2 registry value but
+  `AgentRegistry.persona(id)` still returns `Persona` (a new `spec(id)` exposes the cycle); `spawn` inherits
+  the 4 new fields verbatim (never the cycle — a worker is one direct generation) and `ConfigDoctor`
+  validates the cycle by switching to `parseSpec` (reader-as-oracle). [DR-8/PR-8]
+- **Memory retrieval, proxy compression, and replay-substitution are all `SupervisorGraph` seams threaded
+  through `GraphTurnRequest` additive ctors (the P2-12 `outputSchema` precedent) — keep the graph the
+  single place the turn's read/compress/replay behavior lives.** (1) **Retrieval** (commit 1): `MemorySelector`
+  mirrors `LlmSelector`'s `Instance<MemoryProvider>` (resolves the SINGLE installed provider — multi-provider
+  deferred — and degrades to empty on no-provider/`NONE`/failure so a retrieval problem NEVER fails the
+  turn); `SupervisorGraph` retrieves ONCE at turn entry (last user message = query) and inserts a
+  `<retrieved_memory>` DATA `UserMessage` just before the user's question (DR-6a §9 — never the
+  system/instruction region; the closing tag is neutralized inside untrusted hit content). (2) **Compression**
+  (#56): one `MemoryPolicy.compressThresholdChars` knob governs BOTH retrieved-hit compression and the §5.5
+  reduce-node worker-digest compression via the shared P2-COMPACT `Summarizer` seam; `threshold<=0` (no
+  policy) disables both. (3) **Replay** (#57): a `ReplayContext.CURRENT_REPLAY` ScopedValue (the `CURRENT_AGENT`
+  pattern) puts the graph in replay mode — `runTool` serves recorded outputs FIFO-per-tool from a
+  `ReplayToolSource` (miss → synthetic marker) instead of executing/auditing, AND retrieval + compression are
+  short-circuited for determinism. The [M18] green-for-wrong-reason guard is load-bearing for all four: a
+  scripted model that CAPTURES `ChatRequest.messages()` is the only way to prove the framed block / compressed
+  summary / recorded result / per-step instruction actually reached the model (not a coincidence).
+  (4) **Cycles** (#51): a declared `CycleSpec` compiles a cyclic generation graph by REUSING the supervisor's
+  own `generate↔tool_loop` self-loop pattern (a `cycle` node + a conditional self-edge),
+  `recursionLimit = maxRounds×steps+margin` (the M18 counts-every-node lesson); generation-only by DP-7 (no
+  tools/retrieval inside a cycle). [PR-8]
