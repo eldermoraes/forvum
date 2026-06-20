@@ -120,3 +120,7 @@ jobs:
           files: release/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+          # Mark any tag with a pre-release suffix (e.g. v0.5.0-rc.1, v0.5.0-beta.1) as a
+          # GitHub pre-release, so `/releases/latest` (what `install.sh` defaults to) keeps
+          # pointing at the last STABLE release; a final `vX.Y.Z` tag publishes as latest.
+          prerelease: ${{ contains(github.ref_name, '-') }}
