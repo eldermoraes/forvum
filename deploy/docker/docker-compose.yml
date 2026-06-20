@@ -1,0 +1,41 @@
+# Forvum + Ollama on a VPS via Docker Compose.
+# Full guide (Telegram setup, security, reverse proxy): ../../docs/DEPLOY.md.
+#
+#   docker compose -f deploy/docker/docker-compose.yml run --rm forvum init   # scaffold ./forvum-home
+#   # edit ./forvum-home/agents/main.json + add ./forvum-home/channels/telegram.json (or web.json)
+#   docker compose -f deploy/docker/docker-compose.yml up -d
+#   docker compose -f deploy/docker/docker-compose.yml exec ollama ollama pull qwen3:1.7b
+#
+# The forvum image (ghcr.io/eldermoraes/forvum:<version>-native) is published by the release pipeline.
+# Pin a real tag below once a release that builds the image is out (the systemd + binary path in
+# docs/DEPLOY.md works today with the existing binary release, no image required).
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+  forvum:
+    image: ghcr.io/eldermoraes/forvum:latest-native   # pin an immutable tag in production
+    depends_on:
+      - ollama
+    environment:
+      FORVUM_HOME: /forvum
+      # Reach the Ollama service by its compose name (not localhost) from inside the network:
+      QUARKUS_LANGCHAIN4J_OLLAMA_BASE_URL: http://ollama:11434
+      # Web channel: bind inside the container; expose it only behind an authenticating proxy.
+      QUARKUS_HTTP_HOST: 0.0.0.0
+      QUARKUS_HTTP_PORT: "8080"
+      # Cloud keys (optional): QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY: "sk-ant-..."
+    volumes:
+      - ./forvum-home:/forvum
+    # Web channel only. Bound to loopback on the host — front it with nginx/Caddy + TLS for public use.
+    # A Telegram-only deployment needs no published port at all (remove this block).
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+volumes:
+  ollama:

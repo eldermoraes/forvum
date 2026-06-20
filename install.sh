@@ -2,14 +2,18 @@
 # Forvum installer — downloads the single-binary GraalVM native build for this
 # platform from the latest GitHub Release, verifies its sha256, and installs it.
 #
+# The release tag is resolved from the GitHub API: the latest STABLE release if one
+# exists, otherwise the newest pre-release (so the one-liner works even before the
+# first stable release is cut). Pin an exact tag with FORVUM_VERSION.
+#
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh | sh
 #
 # Environment overrides:
 #   FORVUM_INSTALL_DIR   target bin directory (default: $HOME/.local/bin, else /usr/local/bin)
-#   FORVUM_VERSION       release tag to install (default: latest, e.g. FORVUM_VERSION=v0.1.0)
+#   FORVUM_VERSION       release tag to install (default: auto-resolved, e.g. FORVUM_VERSION=v0.5.0-rc.1)
 #
-# The native binary is ~40 MB (one executable, no JVM, no Docker, no Node).
+# The native binary is ~130 MB (one executable, no JVM, no Docker, no Node).
 # POSIX sh, set -eu, shellcheck-clean.
 
 set -eu
@@ -89,11 +93,54 @@ sha256_of() {
 }
 
 # ---------------------------------------------------------------------------
+# Release-tag resolution (GitHub API)
+#
+# `releases/latest` (web shortcut + API) EXCLUDES pre-releases, so a repo whose only
+# release is a pre-release would 404 on the `latest/download` URL. Resolve the tag
+# explicitly: prefer the latest stable release, fall back to the newest release of any
+# kind (including pre-releases), then download from `releases/download/<tag>/<asset>`.
+# ---------------------------------------------------------------------------
+
+# Emit the body of URL $1 to stdout (curl or wget). Non-zero on failure.
+http_get() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$1" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "$1" 2>/dev/null
+  else
+    return 1
+  fi
+}
+
+# Read the first GitHub-release `tag_name` from a JSON payload on stdin.
+first_tag() {
+  grep -m1 '"tag_name"' | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//' -e 's/".*//'
+}
+
+# Resolve the tag to install: latest stable, else newest (incl. pre-release). Echoes the tag.
+resolve_tag() {
+  api="https://api.github.com/repos/${REPO}"
+  tag=$(http_get "${api}/releases/latest" | first_tag || true)
+  if [ -n "${tag:-}" ]; then
+    printf '%s' "$tag"
+    return 0
+  fi
+  tag=$(http_get "${api}/releases" | first_tag || true)
+  if [ -n "${tag:-}" ]; then
+    warn "no stable release yet; installing the latest pre-release ${tag}"
+    printf '%s' "$tag"
+    return 0
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------------------------
 # Install target
 # ---------------------------------------------------------------------------
 choose_install_dir() {
   if [ -n "${FORVUM_INSTALL_DIR:-}" ]; then
     INSTALL_DIR="$FORVUM_INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || true
     return
   fi
 
@@ -117,13 +164,12 @@ choose_install_dir
 
 if [ -n "${FORVUM_VERSION:-}" ]; then
   TAG="$FORVUM_VERSION"
-  BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
-  info "installing $BINARY_NAME $TAG for $platform"
 else
-  TAG="latest"
-  BASE_URL="https://github.com/${REPO}/releases/latest/download"
-  info "installing the latest $BINARY_NAME for $platform"
+  TAG=$(resolve_tag) || err "could not resolve the latest release from the GitHub API; pin one with FORVUM_VERSION=<tag> (see https://github.com/${REPO}/releases)"
 fi
+
+BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
+info "installing $BINARY_NAME $TAG for $platform"
 
 BIN_URL="${BASE_URL}/${ASSET}"
 SUM_URL="${BIN_URL}.sha256"

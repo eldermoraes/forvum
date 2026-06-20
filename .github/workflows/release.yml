@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write   # required to create/upload the GitHub Release
+  packages: write   # required to push the native container image to GHCR
 
 jobs:
   build:
@@ -84,6 +85,26 @@ jobs:
           chmod +x "dist/$ASSET"
           ( cd dist && shasum -a 256 "$ASSET" > "$ASSET.sha256" )
           ls -lh dist
+
+      # Publish the native single-binary OCI image to GHCR (linux leg only — the image is linux/amd64).
+      # The Helm chart (deploy/helm) and docs/DEPLOY.md's Docker path pull this image. The native runner
+      # built above sits at forvum-app/target/*-runner, which Dockerfile.native COPYs (context=forvum-app).
+      - name: Build & push native container image to GHCR
+        if: matrix.platform == 'linux-x64'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/forvum"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker build -f forvum-app/src/main/docker/Dockerfile.native -t "${IMAGE}:${VERSION}-native" forvum-app
+          docker push "${IMAGE}:${VERSION}-native"
+          # Move :latest-native only for a STABLE release (no '-' suffix), mirroring the GitHub
+          # `releases/latest` exclusion of pre-releases — so `docker pull ...:latest-native` never
+          # resolves to a pre-release build.
+          case "${GITHUB_REF_NAME}" in
+            *-*) echo "pre-release tag ${GITHUB_REF_NAME} — leaving :latest-native unchanged" ;;
+            *)   docker tag "${IMAGE}:${VERSION}-native" "${IMAGE}:latest-native"
+                 docker push "${IMAGE}:latest-native" ;;
+          esac
 
       - name: Upload platform asset
         uses: actions/upload-artifact@v4
