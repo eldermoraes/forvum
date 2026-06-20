@@ -1,0 +1,57 @@
+# Forvum — run the single native binary as a long-lived server on a VPS.
+# Full walkthrough (dedicated user, channel setup, security, backups): docs/DEPLOY.md.
+#
+#   sudo cp deploy/systemd/forvum.service /etc/systemd/system/forvum.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now forvum
+#   systemctl status forvum        # check it is running
+#   journalctl -u forvum -f        # follow the logs
+#
+# Forvum stays alive only when a SERVER channel is enabled (e.g. channels/telegram.json with a
+# botToken, or channels/web.json). With no server channel it runs in command mode and exits 0 — and
+# systemd would then restart it in a loop. Configure a channel BEFORE enabling the service.
+
+[Unit]
+Description=Forvum personal AI assistant
+Documentation=https://github.com/eldermoraes/forvum
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=forvum
+Group=forvum
+
+# Persist state outside any home dir. The SQLite ledger (conversations, memory, metrics) lives at
+# $FORVUM_HOME/state/forvum.sqlite — back this directory up. StateDirectory= creates it 0700,
+# owned by User=, and adds it to the writable paths under ProtectSystem=strict below.
+Environment=FORVUM_HOME=/var/lib/forvum
+StateDirectory=forvum
+
+# Web channel: bind to loopback and front it with an authenticating reverse proxy (nginx/Caddy) for
+# public access — the Web channel has no built-in auth. Telegram needs no inbound port (it polls out),
+# so for a Telegram-only deployment these two lines are harmless.
+Environment=QUARKUS_HTTP_HOST=127.0.0.1
+Environment=QUARKUS_HTTP_PORT=8080
+
+# Secrets (cloud-provider API keys etc.) — put them in an 0600 env file rather than this unit:
+#   /etc/forvum/forvum.env   e.g.   QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY=sk-ant-...
+# The leading '-' makes the file optional (fine for an Ollama-only deployment).
+EnvironmentFile=-/etc/forvum/forvum.env
+
+ExecStart=/usr/local/bin/forvum
+Restart=always
+RestartSec=5
+
+# Hardening — the binary needs only its state dir.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

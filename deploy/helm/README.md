@@ -46,10 +46,14 @@ Pin an immutable image in production (a tag or digest):
 
 ```bash
 helm install forvum deploy/helm/forvum -n team-a --create-namespace \
-  --set image.tag=0.1.0-native
+  --set image.tag=<release-version>-native   # e.g. 0.5.0-native — must match a published release tag
 # or, by digest:
   # --set image.digest=sha256:<...>
 ```
+
+> The release pipeline publishes `ghcr.io/eldermoraes/forvum:<version>-native` (and `:latest-native`)
+> for each `vX.Y.Z` tag. Pin a tag that an actual release built — the chart's `appVersion` default is a
+> convenience, not a guarantee a matching image exists.
 
 Reach the assistant (the bundled Web channel serves HTTP on the Service):
 

@@ -34,7 +34,7 @@ Phase-1 MVP feature-complete. `main` ships milestones **M1–M20 (EPIC-1 / v0.1)
 ## Install
 
 The fastest path is the one-command installer. It downloads the single-binary GraalVM native build
-(~40 MB — one executable, no JVM, no Docker, no Node) for your platform from the latest
+(~130 MB — one executable, no JVM, no Docker, no Node) for your platform from the latest
 [GitHub Release](https://github.com/eldermoraes/forvum/releases), verifies its `sha256`, and installs
 it to `$HOME/.local/bin`:
 
@@ -42,22 +42,27 @@ it to `$HOME/.local/bin`:
 curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh | sh
 ```
 
-Supported platforms: **linux-x64** and **macos-arm64**. Override the target directory or pin a
+The installer resolves the release tag from the GitHub API — the latest stable release if one exists,
+otherwise the newest pre-release — so the one-liner works today against the current
+[`v0.5.0-rc.1`](https://github.com/eldermoraes/forvum/releases) pre-release.
+
+Supported platforms: **linux-x64** and **macos-arm64**. Override the target directory or pin an exact
 version with `FORVUM_INSTALL_DIR` / `FORVUM_VERSION`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh \
-  | FORVUM_INSTALL_DIR=/usr/local/bin FORVUM_VERSION=v0.1.0 sh
+  | FORVUM_INSTALL_DIR=/usr/local/bin FORVUM_VERSION=v0.5.0-rc.1 sh
 ```
 
-**Manual download.** Grab the native binary for your platform from the
-[latest release](https://github.com/eldermoraes/forvum/releases/latest), verify it against the
-`.sha256` shipped alongside, then make it executable:
+**Manual download.** Pick the newest release on the
+[releases page](https://github.com/eldermoraes/forvum/releases) and download the `forvum-<platform>`
+asset plus its `.sha256`, verify it, then make it executable (using the current tag as an example):
 
 ```bash
+VER=v0.5.0-rc.1                                # the newest release tag
 # linux-x64 (use forvum-macos-arm64 on Apple silicon)
-curl -fsSLO https://github.com/eldermoraes/forvum/releases/latest/download/forvum-linux-x64
-curl -fsSLO https://github.com/eldermoraes/forvum/releases/latest/download/forvum-linux-x64.sha256
+curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum-linux-x64"
+curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum-linux-x64.sha256"
 shasum -a 256 -c forvum-linux-x64.sha256       # or: sha256sum -c
 chmod +x forvum-linux-x64 && sudo mv forvum-linux-x64 /usr/local/bin/forvum
 ```
@@ -73,7 +78,8 @@ forvum --help                   # also --version
 ```
 
 For a real conversation you need a model provider — the zero-config default is a local
-[Ollama](https://ollama.com):
+[Ollama](https://ollama.com). Install it first from
+[ollama.com/download](https://ollama.com/download), then start it and pull the default model:
 
 ```bash
 ollama serve &            # local model server, no API key
@@ -155,6 +161,48 @@ its JSON-RPC endpoint (`POST /api/v1/rpc`). Direct text messages only in this re
 typing notifications, sync messages, edited messages, and group messages are ignored (group and edit
 support are documented limitations), and the bot never replies to its own account (self-echo). An
 empty `allowedUserIds` allows any sender; a non-empty list restricts to those phone numbers/UUIDs.
+
+### Run on a server (VPS)
+
+To run Forvum 24/7 on a Linux VPS, install the binary (the one-liner above works on `linux-x64`),
+enable a **server channel**, and run it under `systemd`. Dropping a channel file under
+`~/.forvum/channels/` flips the binary from one-shot command mode into a long-lived server:
+
+- **Telegram** — recommended for phone access: it uses outbound long-polling, so there is **no inbound
+  port, no TLS, and no reverse proxy** to manage. Create a bot with
+  [@BotFather](https://t.me/BotFather), then write `~/.forvum/channels/telegram.json`:
+
+  ```json
+  { "botToken": "123456:ABC-your-bot-token", "allowedUserIds": [111111111] }
+  ```
+
+  `allowedUserIds` are the numeric Telegram ids allowed to talk to the bot (an empty list allows
+  anyone — always set it on a public bot).
+
+- **Web** — a browser chat UI over WebSocket. Drop an empty `~/.forvum/channels/web.json` (`{}`) and
+  Forvum serves HTTP on port 8080. **The Web channel has no built-in authentication**, so bind it to
+  localhost (`QUARKUS_HTTP_HOST=127.0.0.1`) and put an authenticating reverse proxy (nginx/Caddy, with
+  TLS) in front of it for public access — never expose `0.0.0.0:8080` directly on a public VPS.
+
+A ready-to-use unit and a full walkthrough (dedicated user, persistence/backups, security checklist,
+Docker Compose, reverse-proxy TLS) live in **[docs/DEPLOY.md](docs/DEPLOY.md)** and
+[`deploy/systemd/forvum.service`](deploy/systemd/forvum.service):
+
+```bash
+# install system-wide, create a dedicated user + state dir, scaffold, then enable the service:
+curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh | FORVUM_INSTALL_DIR=/usr/local/bin sh
+sudo useradd -r -s /usr/sbin/nologin -d /var/lib/forvum forvum
+sudo install -d -o forvum -g forvum /var/lib/forvum
+sudo -u forvum env FORVUM_HOME=/var/lib/forvum forvum init
+# edit /var/lib/forvum/agents/main.json + add channels/telegram.json (see docs/DEPLOY.md), then:
+sudo cp deploy/systemd/forvum.service /etc/systemd/system/
+sudo systemctl enable --now forvum
+journalctl -u forvum -f
+```
+
+A real conversation needs a model provider reachable from the VPS — either a cloud key
+(`forvum provider add ...` or a `QUARKUS_LANGCHAIN4J_<PROVIDER>_API_KEY` env var) or an Ollama server
+the box can reach. See [docs/DEPLOY.md](docs/DEPLOY.md) for both.
 
 ### Kubernetes (team-assistant mode)
 
