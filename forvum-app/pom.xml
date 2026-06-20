@@ -105,6 +105,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-shell</artifactId>
         </dependency>
+        <!-- Layer-3 sandbox tool module (P2-2 #27): contributes sandbox.run (PermissionScope.SHELL_EXEC,
+             userConfirmRequired) — a SAFE shell.exec sibling that runs code inside an ephemeral, locked-down
+             container (podman/docker). Pure java.lang Process launching the runtime, no AI library. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-sandbox</artifactId>
+        </dependency>
         <!-- Layer-3 web tool module (PR-6): contributes web.fetch (WEB_FETCH, java.net.http) and
              web.search (WEB_SEARCH, Brave Search REST client) to the ToolRegistry. READ-only outbound
              HTTP, INERT until an operator sets a Brave key / fetch target. -->
