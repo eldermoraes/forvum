@@ -168,6 +168,11 @@
             </dependency>
             <dependency>
                 <groupId>ai.forvum</groupId>
+                <artifactId>forvum-tools-sandbox</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.forvum</groupId>
                 <artifactId>forvum-tools-web</artifactId>
                 <version>${project.version}</version>
             </dependency>

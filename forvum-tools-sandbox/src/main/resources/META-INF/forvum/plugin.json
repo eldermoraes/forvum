@@ -1,0 +1,7 @@
+{
+  "extension_id": "sandbox",
+  "module_name": "forvum-tools-sandbox",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.sandbox.SandboxToolProvider" }
+  ]
+}

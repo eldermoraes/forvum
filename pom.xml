@@ -35,6 +35,7 @@
         <module>forvum-tools-filesystem</module>
         <module>forvum-tools-mcp-bridge</module>
         <module>forvum-tools-shell</module>
+        <module>forvum-tools-sandbox</module>
         <module>forvum-tools-web</module>
         <module>forvum-tools-browser</module>
         <module>forvum-channel-web</module>
