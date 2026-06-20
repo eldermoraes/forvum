@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -16,11 +17,11 @@ import java.util.Optional;
 
 /**
  * Live acceptance for {@code sandbox.run}: drives a REAL container through the provider end-to-end. This is
- * the only test that needs a container runtime (podman/docker), so it SKIPS itself via JUnit
- * {@link org.junit.jupiter.api.Assumptions} when none is present — CI has no runtime, so the default suite
- * stays hermetic (this module also declares no {@code excludedGroups} default, so a JUnit {@code @Tag} would
- * not be filtered; the assumption-skip is the {@code ShellExecutorTest} {@code binaryOrSkip} pattern). To
- * run it locally: install podman (or docker) and {@code podman pull busybox:latest}, then
+ * the only test that needs a container runtime (podman/docker), so it is {@code @Tag("live")} (the CLAUDE.md
+ * §4/§11 default-off-in-CI convention) AND it SKIPS itself via JUnit {@link org.junit.jupiter.api.Assumptions}
+ * when no runtime is present — so the default suite stays hermetic both on a CI cell with no runtime and on a
+ * developer/CI machine that DOES have podman/docker but runs a plain {@code verify}. To run it locally:
+ * install podman (or docker) and {@code podman pull busybox:latest}, then
  * {@code ./mvnw -pl forvum-tools-sandbox test}.
  *
  * <p>The two acceptance properties it proves on a real container:
@@ -30,6 +31,7 @@ import java.util.Optional;
  *       network is unreachable from inside the container, so a network probe fails (non-zero exit).</li>
  * </ol>
  */
+@Tag("live")
 class SandboxRunLiveTest {
 
     private static final String IMAGE = "busybox:latest";
