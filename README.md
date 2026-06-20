@@ -1,35 +1,46 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/forvum-mark.svg">
-    <img src="docs/brand/forvum-mark-light.svg" alt="Forvum" width="120" />
+    <img src="docs/brand/forvum-mark-light.svg" alt="Forvum" width="140" />
   </picture>
 </p>
 
 # Forvum
 
-*A JVM platform for personal AI agents, designed in the open. The plan is written; the code follows, milestone by milestone.*
+<p align="center">
+  <a href="https://github.com/eldermoraes/forvum/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/eldermoraes/forvum/ci.yml?branch=main&style=for-the-badge" alt="CI status"></a>
+  <a href="https://github.com/eldermoraes/forvum/releases"><img src="https://img.shields.io/github/v/release/eldermoraes/forvum?style=for-the-badge" alt="GitHub release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge" alt="Apache 2.0 License"></a>
+  <img src="https://img.shields.io/badge/Java-25-orange?style=for-the-badge" alt="Java 25">
+  <img src="https://img.shields.io/badge/GraalVM-native-1abc9c?style=for-the-badge" alt="GraalVM native">
+</p>
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+**Forvum** is a _local-first personal AI assistant on the JVM_ — one GraalVM native binary you run on
+your own machine. No JVM to install, no Docker, no Node; it boots in under 200 ms and answers you on
+the channels you already use.
 
-> **Forvum is being designed and built around the principles documented in [Context Engineering for Multi-LLM Low-Latency Agents](docs/CONTEXT-ENGINEERING.md). See [how Forvum maps to those principles](docs/CONTEXT-ENGINEERING-MAPPING.md).**
+Its guiding principle is **fixed code, configurable behavior**: new agents, sub-agents, skills,
+identities, cron jobs, and MCP servers are just files under `~/.forvum/` — no recompile, hot-reloaded
+while it runs. And every turn, tool call, fallback, and judgment is recorded in a local ledger you can
+inspect; nothing dissolves into a black box.
 
-Forvum is a JVM platform being built to let anyone run personal AI agents on their own machine — with the same discipline enterprise Java brings to any other production system. The full architectural vision lives in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md), covering the core contracts for agents, events, budgets, and scope isolation. The `main` branch ships the complete v0.1 feature set (milestones M1–M20) and the design documentation; a working vertical slice — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. Implementation proceeds milestone by milestone. If you're a Java developer who wants an AI layer on your own terms, contributions to design or code are welcome.
+**Supported channels:** TUI · Web · Telegram · Discord · Slack · Matrix · Signal · WhatsApp · Voice.
 
-## The name
+[Website](https://forvum.ai) · [Architecture](docs/ULTRAPLAN.md) · [Context Engineering](docs/CONTEXT-ENGINEERING.md) · [Roadmap](docs/ULTRAPLAN.md#7-phased-roadmap) · [Deploy](docs/DEPLOY.md) · [Contributing](CONTRIBUTING.md) · [Releases](https://github.com/eldermoraes/forvum/releases)
 
-*Forvum* is a fusion of two Latin words.
+> **Forvum is designed around the principles in [Context Engineering for Multi-LLM Low-Latency Agents](docs/CONTEXT-ENGINEERING.md) — see [how Forvum maps to them](docs/CONTEXT-ENGINEERING-MAPPING.md).** The full architectural vision lives in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md).
 
-**Forum** — the public space where Roman citizens gathered to deliberate, debate, and decide.
+## Highlights
 
-**Quorum** — the minimum number of voices required for a collective decision to stand.
-
-The platform inherits both. Forvum is where agents convene, deliberate, and act — and where every decision is shaped by structure rather than by an opaque single step. Each turn, each tool call, each fallback, each judgment is observable in the ledger; nothing dissolves into a black box.
-
-The result is not an orchestrator that commands silently from the center. It is an architecture where coordination, evidence, and control are all first-class — and where the work of an agent system can finally be reasoned about.
-
-## Status
-
-Phase-1 MVP feature-complete. `main` ships milestones **M1–M20 (EPIC-1 / v0.1)** — the multi-module reactor, core domain contracts, plugin SDK, and config loader (M1–M4); SQLite persistence, `@AgentScoped` isolation, `AgentRegistry`, and fallback chains (M5–M8); the provider fleet — Ollama, Anthropic, OpenAI, Google (M9–M12); the tool registry, permission scopes, and filesystem tools (M13–M14); the TUI, Web, and Telegram channels (M15–M17); the LangGraph4j supervisor graph that wires tool execution into the turn (M18); file-driven crons (M19); and the GraalVM native single-binary with a picocli command-mode/lazy-DB **&lt;200 ms cold-start gate** (M20) — plus the architectural design docs. A conference-demo MVP — a single agent against a local Ollama model via an interactive CLI — lives on the `demo/conference-mvp` branch. v0.1 is feature-complete; not yet hardened for production.
+- **Single native binary** — one GraalVM-compiled executable (~130 MB), [&lt;200 ms cold start](docs/ULTRAPLAN.md), no JVM/Docker/Node on the end-user machine.
+- **Local-first & private** — runs entirely on your machine; conversations, memory, and metrics live in an embedded SQLite ledger under `~/.forvum/`.
+- **Multi-channel** — talk to your assistant from a [terminal REPL](forvum-channel-tui), a [browser](forvum-channel-web), [Telegram](forvum-channel-telegram), [Discord](forvum-channel-discord), [Slack](forvum-channel-slack), [Matrix](forvum-channel-matrix), [Signal](forvum-channel-signal), [WhatsApp](forvum-channel-whatsapp), or [voice](forvum-channel-voice).
+- **Provider fleet with fallback** — [Ollama](forvum-provider-ollama) (local, zero-config default), [Anthropic](forvum-provider-anthropic), [OpenAI](forvum-provider-openai), [Google](forvum-provider-google), and [GitHub Copilot](forvum-provider-copilot); per-agent fallback chains keep a turn alive when a provider fails.
+- **Fixed code, configurable behavior** — agents, sub-agents, skills, identities, crons, roles, and MCP servers are JSON/Markdown files under `~/.forvum/`, hot-reloaded by a `WatchService` with no restart.
+- **Tools, gated** — filesystem, [web fetch](forvum-tools-web), [shell](forvum-tools-shell), a [headless browser](forvum-tools-browser), a [code sandbox](forvum-tools-sandbox), and an [MCP bridge](forvum-tools-mcp-bridge) — each behind permission scopes, role-based access, and an interactive approval gate for sensitive calls.
+- **Sub-agent orchestration** — a [LangGraph4j](docs/ULTRAPLAN.md) supervisor graph spawns isolated specialist workers on virtual threads and merges their results.
+- **Semantic memory** — pluggable retrieval with a [Qdrant](forvum-provider-memory-qdrant) backend and a built-in local vector search (`forvum memory search`).
+- **Observable by design** — every turn, tool call, and fallback is written to the ledger; an optional CAPR dashboard and OpenTelemetry spans are one config flag away.
 
 ## Install
 
@@ -42,24 +53,25 @@ it to `$HOME/.local/bin`:
 curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh | sh
 ```
 
-The installer resolves the release tag from the GitHub API — the latest stable release if one exists,
-otherwise the newest pre-release — so the one-liner works today against the current
-[`v0.5.0-rc.1`](https://github.com/eldermoraes/forvum/releases) pre-release.
-
-Supported platforms: **linux-x64** and **macos-arm64**. Override the target directory or pin an exact
-version with `FORVUM_INSTALL_DIR` / `FORVUM_VERSION`:
+The installer resolves the release tag from the GitHub API — the latest stable release (currently
+[`v0.5.0`](https://github.com/eldermoraes/forvum/releases/tag/v0.5.0)), falling back to the newest
+pre-release if no stable exists. Supported platforms: **linux-x64** and **macos-arm64**. Override the
+target directory or pin an exact version with `FORVUM_INSTALL_DIR` / `FORVUM_VERSION`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh \
-  | FORVUM_INSTALL_DIR=/usr/local/bin FORVUM_VERSION=v0.5.0-rc.1 sh
+  | FORVUM_INSTALL_DIR=/usr/local/bin FORVUM_VERSION=v0.5.0 sh
 ```
 
-**Manual download.** Pick the newest release on the
-[releases page](https://github.com/eldermoraes/forvum/releases) and download the `forvum-<platform>`
-asset plus its `.sha256`, verify it, then make it executable (using the current tag as an example):
+<details>
+<summary><strong>Manual download</strong></summary>
+
+Pick the newest release on the [releases page](https://github.com/eldermoraes/forvum/releases) and
+download the `forvum-<platform>` asset plus its `.sha256`, verify it, then make it executable (using a
+tag as an example):
 
 ```bash
-VER=v0.5.0-rc.1                                # the newest release tag
+VER=v0.5.0                                     # the release tag to install
 # linux-x64 (use forvum-macos-arm64 on Apple silicon)
 curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum-linux-x64"
 curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum-linux-x64.sha256"
@@ -67,7 +79,18 @@ shasum -a 256 -c forvum-linux-x64.sha256       # or: sha256sum -c
 chmod +x forvum-linux-x64 && sudo mv forvum-linux-x64 /usr/local/bin/forvum
 ```
 
-Then scaffold your home and start a session:
+</details>
+
+For a real conversation you need a model provider — the zero-config default is a local
+[Ollama](https://ollama.com). Install it from [ollama.com/download](https://ollama.com/download), then
+start it and pull the default model:
+
+```bash
+ollama serve &            # local model server, no API key
+ollama pull qwen3:1.7b    # the model agent `main` is pinned to by default
+```
+
+## Quick start (TL;DR)
 
 ```bash
 forvum init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
@@ -77,114 +100,97 @@ forvum ask "who are you?"       # one non-interactive turn (stdout is just the r
 forvum --help                   # also --version
 ```
 
-For a real conversation you need a model provider — the zero-config default is a local
-[Ollama](https://ollama.com). Install it first from
-[ollama.com/download](https://ollama.com/download), then start it and pull the default model:
+The first turn can take several seconds while Ollama loads the model; the reply prints when complete.
+If a turn fails with `Is the model provider running?`, start Ollama (`ollama serve`) and pull the model
+named in the error.
 
-```bash
-ollama serve &            # local model server, no API key
-ollama pull qwen3:1.7b    # the model the default agent is pinned to
-```
+![FORVUM CLI session — boot banner, agent ready prompt, and a two-turn interaction](docs/images/cli-demo.png)
 
-### Build from source
+## Security defaults
 
-> v0.1 is feature-complete but not yet hardened for production. Building from source is the path for
-> platforms without a published binary, or for development.
+Forvum can connect to real messaging surfaces, so treat inbound messages as **untrusted input**. The
+defaults are conservative — run `forvum doctor` to validate your config and surface malformed files,
+unknown providers, and pending device scope upgrades.
 
-**Prerequisites:** Java 25 (the bundled `./mvnw` provides Maven); for the native binary, GraalVM CE 25 /
-Mandrel 25.0.x-Final.
+- **Channel allowlists** — every server channel (Telegram, Discord, Signal, …) takes an
+  `allowedUserIds`; an empty list on a public bot allows *anyone*, so always set it.
+- **Device pairing & role-based scopes** — unknown devices are paired explicitly
+  (`forvum pair approve …`); an identity's role maps to a set of permission scopes, and a tool outside
+  an agent's belt is refused and audited.
+- **Approval gate** — tools marked `userConfirmRequired` (e.g. `shell.exec`) block the turn for an
+  interactive yes/no, and are denied by default in non-interactive / cron contexts.
+- **Output guard** — a secret-redaction filter masks API keys and tokens on the way out of a turn
+  (on by default).
+- **The Web channel has no built-in authentication** — bind it to localhost
+  (`QUARKUS_HTTP_HOST=127.0.0.1`) and front it with an authenticating reverse proxy (TLS) for public
+  access; never expose `0.0.0.0:8080` directly.
 
-**Native single binary** (the primary target — one executable, no JVM, &lt;200 ms cold start):
+## Channels
 
-```bash
-# -am pulls in the reactor deps — builds from a fresh clone; -DskipTests skips the
-# development test suite (installing doesn't need it — contributors run ./mvnw verify)
-./mvnw -Pnative -pl forvum-app -am package -DskipTests
-BIN=$(ls forvum-app/target/forvum-app-*-runner)
-"$BIN" init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
-"$BIN" doctor                   # validate ~/.forvum config (exits non-zero on problems)
-"$BIN"                          # interactive session: banner + `forvum> ` prompt; /exit or Ctrl+D quits
-"$BIN" ask "who are you?"       # one non-interactive turn (stdout is just the reply)
-echo "who are you?" | "$BIN"    # the piped REPL also works (banner line + reply)
-"$BIN" --help                   # also --version
-```
+Each channel is enabled by dropping one JSON file under `~/.forvum/channels/`. Dropping any **server
+channel** file flips the binary from one-shot command mode into a long-lived server.
 
-**JVM fast-jar** (no GraalVM needed — development / drop-in plugins). Same steps, same `init`:
-
-```bash
-./mvnw package -pl forvum-app -am -DskipTests
-JAR=forvum-app/target/quarkus-app/quarkus-run.jar
-java -jar "$JAR" init           # first run only — without it there are no agents/channels yet
-java -jar "$JAR"                # interactive session (the same `forvum> ` REPL as the native binary)
-```
-
-Configuration lives in `~/.forvum` (override with the `FORVUM_HOME` env var). Cloud providers
-(Anthropic, OpenAI, Google) need an API key. The quickest path is `forvum provider add <provider>`
-(e.g. `forvum provider add anthropic`): it prompts for the key (no echo), stores it owner-only (`0600`)
-under `~/.forvum/state/credentials/`, runs a smoke test, and offers to make `<provider>:<model>` agent
-`main`'s default. You can still export the key as an env var
-(`QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY`, which takes precedence) and point an agent at a model by
-editing `~/.forvum/agents/main.json` (e.g. `anthropic:claude-sonnet-4-...`). GitHub Copilot uses a
-device-code login instead of an API key: run `forvum copilot login`, authorize in the browser, then point
-an agent at a `copilot:<model>` ModelRef (e.g. `copilot:gpt-4o`). If a turn fails with
-`Is the model provider running?`, start Ollama (`ollama serve`) and pull the model named in the error.
-The first turn can take several seconds while Ollama loads the model; the reply prints when complete
-(v0.1 has no token streaming or spinner yet).
-
-Chat channels are enabled the same way, one JSON file each under `~/.forvum/channels/` — e.g.
-`matrix.json` (`homeserver`, `accessToken`, and `userId` — all three required — plus an optional
-`allowedUserIds`) connects the assistant to a Matrix homeserver. `userId` is the bot's own Matrix id
-(e.g. `@bot:example.org`): Matrix `/sync` echoes the bot's own messages, so without it the bot cannot
-filter itself and the channel refuses to start. **The Matrix channel supports unencrypted rooms only**:
-end-to-end encryption (E2EE) is not yet supported
-([#125](https://github.com/eldermoraes/forvum/issues/125)) — the bot stays silent in encrypted rooms.
-
-### Optional: the Signal channel (connect-only)
-
-The Signal channel connects to an **operator-run [signal-cli](https://github.com/AsamK/signal-cli)
-HTTP daemon** — Forvum does not spawn, install, or manage signal-cli (daemon spawn/install is a
-documented follow-up). With your Signal account already registered (or linked) in signal-cli, start
-the daemon yourself:
-
-```bash
-signal-cli -a +15550001111 daemon --http localhost:8080
-```
-
-then enable the channel in `~/.forvum/channels/signal.json`:
-
-```json
-{ "baseUrl": "http://localhost:8080", "account": "+15550001111", "allowedUserIds": ["+15557772222"] }
-```
-
-Forvum receives messages over the daemon's SSE event stream (`GET /api/v1/events`) and replies via
-its JSON-RPC endpoint (`POST /api/v1/rpc`). Direct text messages only in this release — receipts,
-typing notifications, sync messages, edited messages, and group messages are ignored (group and edit
-support are documented limitations), and the bot never replies to its own account (self-echo). An
-empty `allowedUserIds` allows any sender; a non-empty list restricts to those phone numbers/UUIDs.
-
-### Run on a server (VPS)
-
-To run Forvum 24/7 on a Linux VPS, install the binary (the one-liner above works on `linux-x64`),
-enable a **server channel**, and run it under `systemd`. Dropping a channel file under
-`~/.forvum/channels/` flips the binary from one-shot command mode into a long-lived server:
-
-- **Telegram** — recommended for phone access: it uses outbound long-polling, so there is **no inbound
-  port, no TLS, and no reverse proxy** to manage. Create a bot with
-  [@BotFather](https://t.me/BotFather), then write `~/.forvum/channels/telegram.json`:
+- **TUI** — the built-in interactive terminal REPL; `forvum init` scaffolds an enabled `channels/tui.json`, so `forvum` launches it with no hand-written config.
+- **Telegram** — recommended for phone access: outbound long-polling, so **no inbound port, no TLS, no
+  reverse proxy**. Create a bot with [@BotFather](https://t.me/BotFather), then write
+  `channels/telegram.json`:
 
   ```json
   { "botToken": "123456:ABC-your-bot-token", "allowedUserIds": [111111111] }
   ```
 
-  `allowedUserIds` are the numeric Telegram ids allowed to talk to the bot (an empty list allows
-  anyone — always set it on a public bot).
+- **Web** — a browser chat UI over WebSocket. Drop an empty `channels/web.json` (`{}`) and Forvum
+  serves HTTP on port 8080. **No built-in auth** — see [Security defaults](#security-defaults).
+- **Discord / Slack / WhatsApp** — enable with a `channels/<id>.json` carrying the bot credentials and
+  an `allowedUserIds` allowlist.
+- **Matrix** — set `homeserver`, `accessToken`, and `userId` (the bot's own id, e.g.
+  `@bot:example.org`) in `channels/matrix.json`. **Unencrypted rooms only** — end-to-end encryption is
+  not yet supported ([#125](https://github.com/eldermoraes/forvum/issues/125)); the bot stays silent in
+  encrypted rooms.
+- **Signal** — connects to an operator-run [signal-cli](https://github.com/AsamK/signal-cli) HTTP
+  daemon (Forvum does not spawn, install, or manage it). Start the daemon, then point
+  `channels/signal.json` at it:
 
-- **Web** — a browser chat UI over WebSocket. Drop an empty `~/.forvum/channels/web.json` (`{}`) and
-  Forvum serves HTTP on port 8080. **The Web channel has no built-in authentication**, so bind it to
-  localhost (`QUARKUS_HTTP_HOST=127.0.0.1`) and put an authenticating reverse proxy (nginx/Caddy, with
-  TLS) in front of it for public access — never expose `0.0.0.0:8080` directly on a public VPS.
+  ```json
+  { "baseUrl": "http://localhost:8088", "account": "+15550001111", "allowedUserIds": ["+15557772222"] }
+  ```
 
-A ready-to-use unit and a full walkthrough (dedicated user, persistence/backups, security checklist,
+  (point `baseUrl` at whatever port your signal-cli daemon listens on — not 8080 if the Web channel is
+  also enabled on the same host.) Direct text messages only (groups, edits, and receipts are ignored); the bot never replies to its
+  own account.
+- **Voice** — a file-drop transport: drop an audio clip in the channel's inbox and Forvum transcribes
+  it (whisper.cpp), runs the turn, and writes a spoken reply (Piper) to the outbox. Point
+  `channels/voice.json` at your operator-installed whisper/piper binaries.
+
+## Configuration
+
+Everything lives under `~/.forvum/` (override with the `FORVUM_HOME` env var). `forvum init` scaffolds
+a working `agents/main.json` + system-prompt `agents/main.md`; the only required agent field is the
+model:
+
+```json
+// ~/.forvum/agents/main.json
+{ "primaryModel": "ollama:qwen3:1.7b" }
+```
+
+Cloud providers (Anthropic, OpenAI, Google) need an API key. The quickest path is
+`forvum provider add <provider>` (e.g. `forvum provider add anthropic`): it prompts for the key (no
+echo), stores it owner-only (`0600`) under `~/.forvum/state/credentials/`, runs a smoke test, and
+offers to make `<provider>:<model>` agent `main`'s default. You can also export
+`QUARKUS_LANGCHAIN4J_<PROVIDER>_API_KEY` (which takes precedence) and point an agent at a model by
+editing `agents/main.json`. GitHub Copilot uses a device-code login instead of an API key:
+`forvum copilot login`, then point an agent at a `copilot:<model>` ModelRef.
+
+Beyond agents, the same `~/.forvum/` tree holds `channels/`, `crons/`, `skills/`, `roles/`,
+`devices/`, and `mcp-servers/` — all hot-reloaded with no restart. See
+[docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §4 for the full layout.
+
+## Run on a server (VPS)
+
+To run Forvum 24/7 on a Linux VPS, install the binary (the one-liner above works on `linux-x64`),
+enable a **server channel**, and run it under `systemd`. **Telegram** is the easiest for phone access —
+it uses outbound long-polling, so there is no inbound port, no TLS, and no reverse proxy to manage. A
+ready-to-use unit and a full walkthrough (dedicated user, persistence/backups, security checklist,
 Docker Compose, reverse-proxy TLS) live in **[docs/DEPLOY.md](docs/DEPLOY.md)** and
 [`deploy/systemd/forvum.service`](deploy/systemd/forvum.service):
 
@@ -204,14 +210,14 @@ A real conversation needs a model provider reachable from the VPS — either a c
 (`forvum provider add ...` or a `QUARKUS_LANGCHAIN4J_<PROVIDER>_API_KEY` env var) or an Ollama server
 the box can reach. See [docs/DEPLOY.md](docs/DEPLOY.md) for both.
 
-### Kubernetes (team-assistant mode)
+## Kubernetes (team-assistant mode)
 
 A Helm chart under [`deploy/helm/forvum`](deploy/helm/forvum) deploys Forvum as a **per-namespace team
 assistant**: each Helm release is one isolated instance with its own persistent SQLite state, so a
-namespace gets a private assistant whose memory no other namespace can read (the isolation is structural
-— Kubernetes namespacing plus a per-release `PersistentVolumeClaim`). The chart runs the native
-single-binary container image (published to GHCR by the release pipeline) as a long-lived Web-channel
-HTTP server.
+namespace gets a private assistant whose memory no other namespace can read (the isolation is
+structural — Kubernetes namespacing plus a per-release `PersistentVolumeClaim`). The chart runs the
+native single-binary container image (published to GHCR by the release pipeline) as a long-lived
+Web-channel HTTP server.
 
 ```bash
 # Give each team its own isolated assistant:
@@ -222,83 +228,112 @@ kubectl -n team-a port-forward svc/forvum 8080:8080
 
 Configuration (`agents/`, `channels/`, …) comes from values and is projected into `$FORVUM_HOME` from a
 ConfigMap; provider API keys are wired from Kubernetes Secrets. There is no Kubernetes operator (out of
-scope for v0.1). See [`deploy/helm/README.md`](deploy/helm/README.md) for the full isolation model and
+scope for now). See [`deploy/helm/README.md`](deploy/helm/README.md) for the full isolation model and
 configuration reference.
-
-## Quick demo
-
-The demo lives on the `demo/conference-mvp` branch and runs a single agent against an Ollama model via an interactive CLI. It predates v0.1 — for everyday use, the install path above on `main` now provides the same interactive experience (banner, `forvum>` prompt, `/exit`) with the full v0.1 feature set; this branch remains as the frozen conference snapshot.
-
-![FORVUM CLI session — boot banner, agent ready prompt, and a two-turn interaction](docs/images/cli-demo.png)
-
-**Prerequisites:**
-
-- Java 25
-- Maven 3.9+ (or use the bundled `./mvnw`)
-- [Ollama](https://ollama.com/) installed and running (`ollama serve`)
-- A model reference configured in `agents/demo.json`. The default is `ollama:gemma4:31b-cloud`, which requires Ollama cloud access — run `ollama pull gemma4:31b-cloud` with your Ollama account signed in; see [ollama.com](https://ollama.com/) for account setup. For a fully local alternative, edit `agents/demo.json` to use a model you have pulled locally — models with at least 3B parameters tend to follow system prompts reliably.
-
-**Optional (local models only):** export `OLLAMA_KEEP_ALIVE=30m` before running to prevent Ollama from unloading the model during idle periods. The default keep-alive is 5 minutes, which can trigger reload latency between turns during longer sessions.
-
-**Run:**
-
-```bash
-git clone https://github.com/eldermoraes/forvum.git
-cd forvum
-git checkout demo/conference-mvp
-
-# Optional — local models only
-export OLLAMA_KEEP_ALIVE=30m
-
-./mvnw package -pl forvum-app -am -DskipTests
-java -jar forvum-app/target/quarkus-app/quarkus-run.jar
-```
-
-**Example interaction:**
-
-```
-Forvum agent 'demo' ready (model: ollama:gemma4:31b-cloud)
-Type your message and press Enter. Use /exit or Ctrl+D to quit.
-
-forvum> who are you?
-I am Forvum, your local-first personal AI assistant. I'm here to help you manage your projects, ideas, and tasks.
-
-forvum> who made you?
-I am Forvum, a personal AI assistant running on the JVM via Quarkus and LangChain4j.
-
-forvum> /exit
-```
 
 ## Dev mode: the live config editor
 
-While developing Forvum itself in dev mode (`./mvnw -f forvum-app quarkus:dev`), a browser-based live editor for the `~/.forvum/` config is available at [http://localhost:8080/q/dev-ui/config-editor](http://localhost:8080/q/dev-ui/config-editor) (alongside the Quarkus Dev UI at `/q/dev/`). It lists the editable config files (agents, channels, crons, roles, devices, MCP servers, skills, tools, and `config.json`), validates an edit through the same loader/`forvum doctor` machinery the engine loads with — so a saved config is exactly one the engine can load — and fires the hot-reload event so the running engine re-reads the edited agent/cron **without a restart**. A malformed edit (or a model ref naming an uninstalled provider) is rejected with inline findings and the file is left unchanged.
+While developing Forvum itself in dev mode (`./mvnw -f forvum-app quarkus:dev`), a browser-based live
+editor for the `~/.forvum/` config is available at
+[http://localhost:8080/q/dev-ui/config-editor](http://localhost:8080/q/dev-ui/config-editor) (alongside
+the Quarkus Dev UI at `/q/dev/`). It lists the editable config files (agents, channels, crons, roles,
+devices, MCP servers, skills, tools, and `config.json`), validates an edit through the same
+loader / `forvum doctor` machinery the engine loads with — so a saved config is exactly one the engine
+can load — and fires the hot-reload event so the running engine re-reads the edited agent/cron
+**without a restart**. A malformed edit (or a model ref naming an uninstalled provider) is rejected
+with inline findings and the file is left unchanged.
 
-This editor is **dev-mode only** — an explicit, documented native carve-out. The Quarkus Dev UI is a fast-jar dev feature and is not part of the GraalVM native binary; the editor route is build-time-gated off in production, so it adds no native surface and no cold-start cost.
+This editor is **dev-mode only** — an explicit, documented native carve-out. The Quarkus Dev UI is a
+fast-jar dev feature and is not part of the GraalVM native binary; the editor route is build-time-gated
+off in production, so it adds no native surface and no cold-start cost.
+
+## Build from source
+
+> Prerequisites: Java 25 (the bundled `./mvnw` provides Maven); for the native binary, GraalVM CE 25 /
+> Mandrel 25.0.x-Final. Building from source is the path for platforms without a published binary, or
+> for development.
+
+**Native single binary** (the primary target — one executable, no JVM, &lt;200 ms cold start):
+
+```bash
+# -am pulls in the reactor deps — builds from a fresh clone; -DskipTests skips the
+# development test suite (installing doesn't need it — contributors run ./mvnw verify)
+./mvnw -Pnative -pl forvum-app -am package -DskipTests
+BIN=$(ls forvum-app/target/forvum-app-*-runner)
+"$BIN" init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
+"$BIN"                          # interactive session: banner + `forvum> ` prompt; /exit or Ctrl+D quits
+"$BIN" ask "who are you?"       # one non-interactive turn (stdout is just the reply)
+```
+
+<details>
+<summary><strong>JVM fast-jar</strong> (no GraalVM needed — development / drop-in plugins)</summary>
+
+```bash
+./mvnw package -pl forvum-app -am -DskipTests
+JAR=forvum-app/target/quarkus-app/quarkus-run.jar
+java -jar "$JAR" init           # first run only — without it there are no agents/channels yet
+java -jar "$JAR"                # interactive session (the same `forvum> ` REPL as the native binary)
+```
+
+</details>
 
 ## Architecture
 
-Forvum is organized as a four-layer Maven reactor (foundation → SDK → engine → first-party channel/provider/tool extensions, assembled by `forvum-app`), structured to match the architectural vision. The `main` branch now implements the full v0.1 feature set; the five core modules below are the architectural backbone, with Layer-3 channel/provider/tool extensions added milestone by milestone.
+Forvum is organized as a four-layer Maven reactor (foundation → SDK → engine → first-party
+channel/provider/tool extensions, assembled by `forvum-app`), structured so the core stays
+extension-agnostic at the build level.
 
-- **`forvum-core`** — pure Java value contracts with no framework dependencies (agent IDs, model references, event types). Specified in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §4.3.
-- **`forvum-sdk`** — public SPI for extension points (model providers, channels, tools). Specified in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §2.2.
-- **`forvum-engine`** — Quarkus engine, extension-agnostic. Orchestrates agent lifecycle, resolves specs, emits events. Specified in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §2.3.
-- **`forvum-bom`** — centralized dependency version management.
-- **`forvum-app`** — the runnable assembly. Wires providers, hosts the TamboUI TUI, boots Quarkus.
+- **`forvum-core`** — pure-Java value contracts with no framework dependencies (agent IDs, model
+  references, event types). [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §4.3.
+- **`forvum-sdk`** — the public SPI for extension points (model providers, channels, tools, memory).
+  [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §2.2.
+- **`forvum-engine`** — the Quarkus engine, extension-agnostic. Orchestrates agent lifecycle, resolves
+  specs, routes models, and emits events. [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §2.3.
+- **`forvum-bom`** — centralized dependency version management (the single version bump point).
+- **`forvum-app`** — the only runnable artifact. Wires every first-party channel/provider/tool, hosts
+  the TUI, and boots Quarkus.
 
-For the full architecture — decisions, tradeoffs, and deferred design — read [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md); see [docs/ISSUES.md](docs/ISSUES.md) for the per-step roadmap.
+A brand-new *Java* plugin (channel/provider/native tool) requires repackaging `forvum-app` — the
+deliberate trade-off for a reflection-free native binary. For the full architecture — decisions,
+trade-offs, and deferred design — read [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md); see
+[docs/ISSUES.md](docs/ISSUES.md) for the per-step roadmap.
 
 ## Roadmap
 
-Phase 1 (the v0.1 MVP) — milestones M1 through M20 — is complete. Phase 2 (v0.5, parity with OpenClaw) is the next arc; see [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §7.2.
+- **Phase 1 — MVP (v0.1) · complete** — the multi-module reactor, core contracts, plugin SDK, and
+  config loader; SQLite/Flyway persistence, `@AgentScoped` isolation, `AgentRegistry`, and fallback
+  chains; the provider fleet (Ollama, Anthropic, OpenAI, Google); the tool registry, permission scopes,
+  and filesystem tools; the TUI, Web, and Telegram channels; the LangGraph4j supervisor graph;
+  file-driven crons; and the GraalVM native single-binary with the &lt;200 ms cold-start gate.
+- **Phase 2 — v0.5 (parity with OpenClaw) · shipped** — released as
+  [`v0.5.0`](https://github.com/eldermoraes/forvum/releases/tag/v0.5.0): the Discord, Slack, Matrix,
+  Signal, WhatsApp, and Voice channels; the GitHub Copilot provider and Qdrant semantic memory; the
+  web-fetch, shell, headless-browser, code-sandbox, and MCP-bridge tools; role-based scopes, device
+  pairing, an approval gate, and an output guard; and observability + a live config editor.
+- **Phase 3 — v1.0+ (next)** — the differentiators on top of parity. Detailed scope lives in
+  [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §7.3.
 
-- **M1–M20 (complete)** — the multi-module reactor + core contracts + plugin SDK + config loader (M1–M4); SQLite/Flyway, `@AgentScoped`, `AgentRegistry`, and fallback chains (M5–M8); the provider fleet — Ollama, Anthropic, OpenAI, Google (M9–M12); the tool registry, permission scopes, and filesystem tools (M13–M14); the TUI, Web, and Telegram channels (M15–M17); the LangGraph4j supervisor graph (M18); file-driven crons (M19); and the GraalVM native single-binary + CI matrix with the &lt;200 ms cold-start gate (M20).
-- **Phase 2 (planned)** — browser tool, MCP bridge, sub-agent spawning, judging, observability dashboards, and production hardening.
+## The name
 
-Detailed milestone scope is in [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) §7.
+*Forvum* is a fusion of two Latin words.
+
+**Forum** — the public space where Roman citizens gathered to deliberate, debate, and decide.
+
+**Quorum** — the minimum number of voices required for a collective decision to stand.
+
+The platform inherits both. Forvum is where agents convene, deliberate, and act — and where every
+decision is shaped by structure rather than by an opaque single step. Each turn, each tool call, each
+fallback, each judgment is observable in the ledger; nothing dissolves into a black box.
+
+The result is not an orchestrator that commands silently from the center. It is an architecture where
+coordination, evidence, and control are all first-class — and where the work of an agent system can
+finally be reasoned about.
 
 ## Contributing
 
-Contributions to design and code are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute — open an issue or discussion for architectural changes before a PR. [docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) is the architectural source of truth.
+Contributions to design and code are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to
+contribute — open an issue or discussion for architectural changes before a PR.
+[docs/ULTRAPLAN.md](docs/ULTRAPLAN.md) is the architectural source of truth.
 
 ## License
 
