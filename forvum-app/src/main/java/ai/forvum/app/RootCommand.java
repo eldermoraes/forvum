@@ -70,17 +70,47 @@ public class RootCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
-        System.out.println(banner(interactiveTerminal()));
-        if (channels.shouldRunInteractive()) {
-            return tui.run();
+        boolean interactive = interactiveTerminal();
+        System.out.println(banner(interactive));
+        boolean tuiEnabled = channels.shouldRunInteractive();
+        // Evaluate the server check lazily: on a real terminal with the TUI enabled the decision is
+        // INTERACTIVE regardless of it, and shouldRunAsServer() reads every server channel's config
+        // file (throwing on a malformed one) — so skip it on that path, keeping a sibling channel's
+        // JSON typo from breaking the interactive REPL.
+        boolean serverEnabled = (interactive && tuiEnabled) ? false : channels.shouldRunAsServer();
+        return switch (decide(interactive, tuiEnabled, serverEnabled)) {
+            case INTERACTIVE -> tui.run();
+            case SERVER -> {
+                System.out.println("Server channel(s) ready - press Ctrl+C to stop.");
+                Quarkus.waitForExit();
+                yield 0;
+            }
+            case NONE -> {
+                System.out.println(NO_CHANNEL_HINT);
+                yield 0;
+            }
+        };
+    }
+
+    /** How a no-subcommand run launches. */
+    enum LaunchMode { INTERACTIVE, SERVER, NONE }
+
+    /**
+     * Decide how a default (no-subcommand) run launches. A foreground TUI takes over only on a real
+     * terminal, or — for the piped REPL ({@code echo ... | forvum}) — when no server channel is
+     * configured to run instead. Under a service manager (systemd: no TTY, stdin at EOF) a leftover
+     * {@code channels/tui.json} must NOT shadow a configured server channel, or the binary would read
+     * EOF, exit {@code 0}, and be restart-looped. With neither enabled the caller prints the
+     * {@code init} hint. Pure + side-effect-free so the dispatch matrix is unit-testable without booting.
+     */
+    static LaunchMode decide(boolean interactiveTerminal, boolean tuiEnabled, boolean serverEnabled) {
+        if (tuiEnabled && (interactiveTerminal || !serverEnabled)) {
+            return LaunchMode.INTERACTIVE;
         }
-        if (channels.shouldRunAsServer()) {
-            System.out.println("Server channel(s) ready - press Ctrl+C to stop.");
-            Quarkus.waitForExit();
-            return 0;
+        if (serverEnabled) {
+            return LaunchMode.SERVER;
         }
-        System.out.println(NO_CHANNEL_HINT);
-        return 0;
+        return LaunchMode.NONE;
     }
 
     /**
