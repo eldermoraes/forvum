@@ -58,4 +58,19 @@ class MatchModeTest {
     void regexRejectsAnInvalidPattern() {
         assertThrows(IllegalStateException.class, () -> MatchMode.REGEX.matches("(", "anything"));
     }
+
+    @Test
+    void satisfiedByIsTheSharedPublicMatcher() {
+        // The cross-module entry point (forvum qa uses it) delegates to the same matching semantics.
+        assertTrue(MatchMode.CONTAINS.satisfiedBy("fox", "the brown FOX"));
+        assertTrue(MatchMode.EXACT.satisfiedBy("echo: hi", "echo: hi"));
+        assertFalse(MatchMode.EXACT.satisfiedBy("echo: hi", "echo: bye"));
+    }
+
+    @Test
+    void satisfiedByTreatsNullExpectAndReplyAsEmpty() {
+        assertTrue(MatchMode.EXACT.satisfiedBy(null, ""));
+        assertTrue(MatchMode.CONTAINS.satisfiedBy("", null));
+        assertFalse(MatchMode.CONTAINS.satisfiedBy("x", null));
+    }
 }

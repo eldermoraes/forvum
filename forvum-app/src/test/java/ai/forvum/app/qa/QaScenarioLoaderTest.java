@@ -32,19 +32,21 @@ class QaScenarioLoaderTest {
     void loadsAnOverridePackFromAFile(@TempDir Path dir) throws IOException {
         Path pack = dir.resolve("pack.json");
         Files.writeString(pack, "{ \"scenarios\": [ { \"id\": \"s1\", \"channel\": \"cli\", "
-                + "\"input\": \"hi\", \"expect\": { \"match\": \"exact\", \"value\": \"echo: hi\" } } ] }");
+                + "\"prompt\": \"hi\", \"expect\": \"echo: hi\", \"match\": \"exact\" } ] }");
         List<QaScenario> scenarios = loader.loadFrom(pack);
         assertEquals(1, scenarios.size());
         assertEquals("s1", scenarios.get(0).id());
-        assertEquals("echo: hi", scenarios.get(0).expect().value());
+        assertEquals("hi", scenarios.get(0).prompt());
+        assertEquals("echo: hi", scenarios.get(0).expect());
+        assertEquals("exact", scenarios.get(0).match());
     }
 
     @Test
     void unknownFieldsAreToleratedForwardCompatWithEvalFormat(@TempDir Path dir) throws IOException {
         Path pack = dir.resolve("pack.json");
         Files.writeString(pack, "{ \"version\": 2, \"scenarios\": [ { \"id\": \"s1\", \"channel\": \"cli\", "
-                + "\"input\": \"hi\", \"setup\": { \"agentModel\": \"echo:x\" }, "
-                + "\"expect\": { \"match\": \"contains\", \"value\": \"hi\" } } ] }");
+                + "\"prompt\": \"hi\", \"setup\": { \"agentModel\": \"echo:x\" }, "
+                + "\"expect\": \"hi\", \"match\": \"contains\" } ] }");
         List<QaScenario> scenarios = loader.loadFrom(pack);
         assertEquals(1, scenarios.size());
         assertEquals("s1", scenarios.get(0).id());

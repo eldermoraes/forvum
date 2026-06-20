@@ -76,10 +76,29 @@ PASS/FAIL lines and the pass-rate go to stdout; a failure to load/run the suite 
 Eval computes the pass-rate in memory and persists no eval rows (no migration); each scenario's turn still
 writes its own `messages`/`provider_calls`/`capr_events` the normal way.
 
-## Notes for `forvum qa` (#43) alignment
+## `forvum qa` (#43) alignment
 
-`forvum qa` can read the SAME suite shape from `$FORVUM_HOME/qa/`. If qa needs richer expectations later
-(e.g. asserting a tool was called, or a non-error turn), extend the scenario record additively (a new
-optional field with a backward-compatible default), so an existing `eval/` or `qa/` suite keeps parsing
-— the additive-growth recipe used across the config records. Keep the parser hand-walking the `JsonNode`
-(no reflective databind) so the records stay native-clean.
+`forvum qa` reads the SAME per-scenario shape — `id`/`prompt`/`expect`/`match` — and scores each reply with
+the SAME match modes (the engine's shared `MatchMode`: `contains`/`exact`/`regex`, case-insensitive), so the
+two features never fork their case shape or their matcher. qa adds ONE suite-level concern of its own,
+`channel` (required per scenario), naming the channel turn-path the scenario runs through; v0.1 ships only
+`cli` scenarios. A qa pack is a JSON object `{ "scenarios": [ {scenario}, … ] }` — for example:
+
+```json
+{
+  "scenarios": [
+    { "id": "cli-exact-greeting", "channel": "cli", "prompt": "hello", "expect": "echo: hello", "match": "exact" }
+  ]
+}
+```
+
+A blank/absent `match` defaults to `contains`, as for eval. If qa needs richer expectations later (e.g.
+asserting a tool was called, or a non-error turn), extend the scenario record additively (a new optional
+field with a backward-compatible default), so an existing `eval/` or `qa/` suite keeps parsing — the
+additive-growth recipe used across the config records.
+
+The on-disk eval reader (`EvalSuiteReader`) hand-walks the `JsonNode` (no reflective databind), so its
+typed records carry no `@RegisterForReflection`. qa's bundled pack is a classpath JSON resource bound with
+Jackson databind, so `QaScenario` carries `@RegisterForReflection` for the native image; the `match` token
+stays a `String` on the record and is converted to a `MatchMode` at match time (a bad token fails the
+scenario, never the parse).

@@ -48,6 +48,18 @@ public enum MatchMode {
     abstract boolean matches(String expect, String reply);
 
     /**
+     * Whether {@code reply} satisfies {@code expect} under this mode, treating a {@code null}
+     * {@code reply}/{@code expect} as the empty string. The public, cross-module entry point onto the
+     * one shared matcher (used by {@code forvum qa} as well as the engine's {@link MatcherJudge}), so the
+     * {@code contains}/{@code exact}/{@code regex} semantics never fork.
+     *
+     * @throws IllegalStateException if a {@code regex} {@code expect} is not a valid Java regex
+     */
+    public boolean satisfiedBy(String expect, String reply) {
+        return matches(expect == null ? "" : expect, reply == null ? "" : reply);
+    }
+
+    /**
      * Parse a wire token ({@code contains}|{@code exact}|{@code regex}, case-insensitive) to a mode.
      *
      * @throws IllegalStateException if {@code token} names no mode (with the valid set in the message).

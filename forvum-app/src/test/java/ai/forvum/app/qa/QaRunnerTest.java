@@ -19,7 +19,8 @@ import java.util.UUID;
  * Unit tests for {@link QaRunner}'s verdict logic, with a hand-stubbed {@link ChannelTurnDriver} (no CDI,
  * no live model). Covers the pass/mismatch/error/no-reply/malformed-scenario branches and channel filtering
  * — the green-for-wrong-reason guard ([M18]): the stub echoes the input so the expectation is asserted
- * against the actual reply, not a constant.
+ * against the actual reply, not a constant. The match semantics live in the shared engine {@code MatchMode}
+ * (tested by {@code MatchModeTest}/{@code MatcherJudgeTest}); this asserts only the runner wiring onto it.
  */
 class QaRunnerTest {
 
@@ -34,16 +35,22 @@ class QaRunnerTest {
     void aMatchingScenarioPasses() {
         QaRunner runner = new QaRunner();
         runner.turns = echoDriver(); // reply = "echo: " + input, so the expectation hits the real reply
-        QaResult r = only(runner, scenario("s1", "cli", "hello",
-                new QaExpectation("exact", "echo: hello")));
+        QaResult r = only(runner, scenario("s1", "cli", "hello", "echo: hello", "exact"));
         assertTrue(r.passed(), () -> "detail: " + r.detail());
         assertEquals("echo: hello", r.actual());
     }
 
     @Test
+    void aBlankMatchDefaultsToContains() {
+        QaResult r = only(runnerReplying("echo: hello world"),
+                scenario("s1", "cli", "hello", "hello world", null));
+        assertTrue(r.passed(), () -> "a missing match must default to contains; detail: " + r.detail());
+    }
+
+    @Test
     void aMismatchFails() {
         QaResult r = only(runnerReplying("echo: hello"),
-                scenario("s1", "cli", "hello", new QaExpectation("exact", "WRONG")));
+                scenario("s1", "cli", "hello", "WRONG", "exact"));
         assertFalse(r.passed());
         assertTrue(r.detail().contains("expected exact 'WRONG'"), () -> r.detail());
     }
@@ -52,7 +59,7 @@ class QaRunnerTest {
     void anErrorEventFailsTheScenario() {
         QaRunner runner = new QaRunner();
         runner.turns = errorDriver("boom");
-        QaResult r = only(runner, scenario("s1", "cli", "hi", new QaExpectation("exact", "x")));
+        QaResult r = only(runner, scenario("s1", "cli", "hi", "x", "exact"));
         assertFalse(r.passed());
         assertTrue(r.detail().contains("turn failed"), () -> r.detail());
     }
@@ -61,29 +68,28 @@ class QaRunnerTest {
     void noTerminalEventFailsTheScenario() {
         QaRunner runner = new QaRunner();
         runner.turns = (message, sink) -> { /* emits nothing terminal */ };
-        QaResult r = only(runner, scenario("s1", "cli", "hi", new QaExpectation("exact", "x")));
+        QaResult r = only(runner, scenario("s1", "cli", "hi", "x", "exact"));
         assertFalse(r.passed());
         assertTrue(r.detail().contains("no reply"), () -> r.detail());
     }
 
     @Test
-    void aNullInputScenarioFails() {
-        QaResult r = only(runnerReplying("x"), scenario("s1", "cli", null, new QaExpectation("exact", "x")));
+    void aNullPromptScenarioFails() {
+        QaResult r = only(runnerReplying("x"), scenario("s1", "cli", null, "x", "exact"));
         assertFalse(r.passed());
-        assertTrue(r.detail().contains("no input"), () -> r.detail());
+        assertTrue(r.detail().contains("no prompt"), () -> r.detail());
     }
 
     @Test
     void aNullExpectationScenarioFails() {
-        QaResult r = only(runnerReplying("x"), scenario("s1", "cli", "hi", null));
+        QaResult r = only(runnerReplying("x"), scenario("s1", "cli", "hi", null, "exact"));
         assertFalse(r.passed());
         assertTrue(r.detail().contains("no expectation"), () -> r.detail());
     }
 
     @Test
-    void aBadExpectationModeFailsRatherThanThrows() {
-        QaResult r = only(runnerReplying("x"),
-                scenario("s1", "cli", "hi", new QaExpectation("equals", "x")));
+    void aBadMatchTokenFailsRatherThanThrows() {
+        QaResult r = only(runnerReplying("x"), scenario("s1", "cli", "hi", "x", "equals"));
         assertFalse(r.passed());
         assertTrue(r.detail().contains("bad expectation"), () -> r.detail());
     }
@@ -91,8 +97,8 @@ class QaRunnerTest {
     @Test
     void channelFilterExcludesNonMatchingScenarios() {
         List<QaResult> results = runnerReplying("echo: hi").run(List.of(
-                scenario("cli-one", "cli", "hi", new QaExpectation("exact", "echo: hi")),
-                scenario("tg-one", "telegram", "hi", new QaExpectation("exact", "echo: hi"))),
+                scenario("cli-one", "cli", "hi", "echo: hi", "exact"),
+                scenario("tg-one", "telegram", "hi", "echo: hi", "exact")),
                 "cli");
         assertEquals(1, results.size(), "only the cli scenario runs under the cli filter");
         assertEquals("cli-one", results.get(0).scenarioId());
@@ -101,7 +107,7 @@ class QaRunnerTest {
     @Test
     void aBlankIdScenarioIsLabelledUnnamed() {
         QaResult r = only(runnerReplying("echo: hi"),
-                scenario("  ", "cli", "hi", new QaExpectation("exact", "echo: hi")));
+                scenario("  ", "cli", "hi", "echo: hi", "exact"));
         assertEquals("<unnamed>", r.scenarioId());
     }
 
@@ -111,8 +117,8 @@ class QaRunnerTest {
         return results.get(0);
     }
 
-    private static QaScenario scenario(String id, String channel, String input, QaExpectation expect) {
-        return new QaScenario(id, channel, input, expect);
+    private static QaScenario scenario(String id, String channel, String prompt, String expect, String match) {
+        return new QaScenario(id, channel, prompt, expect, match);
     }
 
     private static ChannelTurnDriver doneDriver(String reply) {

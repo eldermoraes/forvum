@@ -4,6 +4,7 @@ import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.Done;
 import ai.forvum.core.event.ErrorEvent;
+import ai.forvum.engine.eval.MatchMode;
 import ai.forvum.sdk.ApprovalContext;
 import ai.forvum.sdk.ChannelTurnDriver;
 
@@ -57,8 +58,8 @@ public class QaRunner {
 
     private QaResult runOne(QaScenario scenario) {
         String id = scenario.id() == null || scenario.id().isBlank() ? "<unnamed>" : scenario.id();
-        if (scenario.input() == null) {
-            return QaResult.fail(id, "", "scenario has no input");
+        if (scenario.prompt() == null) {
+            return QaResult.fail(id, "", "scenario has no prompt");
         }
         if (scenario.expect() == null) {
             return QaResult.fail(id, "", "scenario has no expectation");
@@ -66,7 +67,7 @@ public class QaRunner {
 
         // A distinct session per scenario id, so suite scenarios never share a conversation window.
         ChannelMessage message = new ChannelMessage(
-                QA_CHANNEL, "qa-" + id, scenario.input(), Instant.now());
+                QA_CHANNEL, "qa-" + id, scenario.prompt(), Instant.now());
 
         String[] reply = {null};
         String[] error = {null};
@@ -82,10 +83,17 @@ public class QaRunner {
             return QaResult.fail(id, "", "turn produced no reply");
         }
         try {
-            return scenario.expect().satisfiedBy(reply[0])
+            // ONE shared matcher (docs/SCENARIO-FORMAT.md): the engine MatchMode the eval suite also uses.
+            // A blank/absent match defaults to contains (the documented suite default); a bad token throws,
+            // turning the scenario into a fail rather than a vacuous pass (fails-by-default).
+            MatchMode match = scenario.match() == null || scenario.match().isBlank()
+                    ? MatchMode.CONTAINS
+                    : MatchMode.fromWire(scenario.match());
+            return match.satisfiedBy(scenario.expect(), reply[0])
                     ? QaResult.pass(id, reply[0])
-                    : QaResult.fail(id, reply[0], "expected " + scenario.expect().match()
-                            + " '" + scenario.expect().value() + "'");
+                    : QaResult.fail(id, reply[0],
+                            "expected " + match.name().toLowerCase(java.util.Locale.ROOT)
+                            + " '" + scenario.expect() + "'");
         } catch (RuntimeException e) {
             return QaResult.fail(id, reply[0], "bad expectation: " + e.getMessage());
         }
