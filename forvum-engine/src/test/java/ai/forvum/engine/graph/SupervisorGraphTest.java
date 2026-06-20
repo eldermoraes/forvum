@@ -428,10 +428,8 @@ class SupervisorGraphTest {
                 () -> graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
                         List.of(), seed, ANSWER_SCHEMA)),
                 "a bare JSON value under an object outputSchema must abort the turn (no retry)");
-        assertTrue(thrown.getMessage().contains("(root)"),
-                "the error names the root, message was: " + thrown.getMessage());
-        assertTrue(thrown.getMessage().contains("declares it as object"),
-                "the error names the declared root object type, message was: " + thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("object expected"),
+                "the error names the expected root object type, message was: " + thrown.getMessage());
     }
 
     @Test

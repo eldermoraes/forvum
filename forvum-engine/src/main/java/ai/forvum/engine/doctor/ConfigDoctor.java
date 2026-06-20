@@ -13,9 +13,12 @@ import ai.forvum.engine.config.DeviceReader;
 import ai.forvum.engine.config.ForvumHome;
 import ai.forvum.engine.cron.CronSpec;
 import ai.forvum.engine.cron.CronSpecReader;
+import ai.forvum.engine.graph.OutputSchemaException;
+import ai.forvum.engine.graph.OutputSchemaValidator;
 import ai.forvum.engine.pairing.Device;
 import ai.forvum.engine.pairing.DeviceSpecReader;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -53,6 +56,7 @@ public final class ConfigDoctor {
     private final ForvumHome home;
     private final ConfigLoader loader;
     private final Set<String> knownProviders;
+    private final OutputSchemaValidator outputSchemaValidator = new OutputSchemaValidator(new ObjectMapper());
 
     public ConfigDoctor(ForvumHome home, ConfigLoader loader, Set<String> knownProviders) {
         this.home = home;
@@ -113,6 +117,7 @@ public final class ConfigDoctor {
                 Persona p = specReader.parseSpec(new AgentId(id), persona, spec).persona();
                 checkProvider(findings, location, p.primaryModel().provider(),
                         "primaryModel '" + p.primaryModel() + "'");
+                checkOutputSchema(findings, location, p.outputSchema());
             } catch (IllegalStateException e) {
                 findings.add(new Finding(Severity.ERROR, location, e.getMessage(),
                         "Fix " + location + " (or the agents/" + id + ".md persona it names)."));
@@ -231,6 +236,25 @@ public final class ConfigDoctor {
             new ConfigFileReader(loader, home).read();
         } catch (UncheckedIOException e) {
             findings.add(malformed("config.json", e));
+        }
+    }
+
+    /**
+     * Add an ERROR when a declared {@code outputSchema} (P2-12) is not a usable JSON Schema, validated
+     * through the SAME {@link OutputSchemaValidator} the {@code SupervisorGraph} enforces a reply against at
+     * turn time (#124) — so a doctor pass is exactly a schema the engine can compile, no parallel definition
+     * (the P2-9 reader-as-oracle design). A {@code null} schema is the free-text default and is skipped.
+     */
+    private void checkOutputSchema(List<Finding> findings, String location, String outputSchema) {
+        if (outputSchema == null) {
+            return;
+        }
+        try {
+            outputSchemaValidator.validateSchema(outputSchema);
+        } catch (OutputSchemaException e) {
+            findings.add(new Finding(Severity.ERROR, location,
+                    "Agent's outputSchema is not a usable JSON Schema: " + e.getMessage(),
+                    "Fix the 'outputSchema' object in " + location + " (a valid JSON Schema)."));
         }
     }
 

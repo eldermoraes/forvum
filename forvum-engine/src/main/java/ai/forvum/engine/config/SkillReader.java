@@ -18,9 +18,9 @@ import java.util.Optional;
  * Reads skill prompt templates from {@code $FORVUM_HOME/skills/<id>.md}. A skill is operator-trusted
  * CONTENT (a named prompt template, never code; ULTRAPLAN §4.1 / DR-6b T3): an optional leading
  * {@code ---}-fenced JSON front-matter ({@code name}/{@code description}/{@code inputSchema}) followed by
- * the template. The front-matter's {@code inputSchema} (if present) is validated on read against the
- * v0.5-subset via the SAME {@link OutputSchemaValidator} the future {@code SkillInvokerTool} enforces
- * invocation arguments against — one validator, no parallel schema (the P2-9 doctor lesson). A skill with
+ * the template. The front-matter's {@code inputSchema} (if present) is checked for well-formedness on read
+ * via the SAME {@link OutputSchemaValidator} the future {@code SkillInvokerTool} enforces invocation
+ * arguments against — one validator, no parallel schema (the P2-9 doctor lesson). A skill with
  * no front-matter is valid (the whole file is the template). This is the "real reader" the skill-install
  * command validates through (P2-7 #32).
  */

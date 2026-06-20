@@ -1,0 +1,13 @@
+# Native-first discipline allowlist (CLAUDE.md section 5 / 12, ULTRAPLAN section 6).
+#
+# Used by .github/native-discipline.sh. One fixed-string (substring) per line; blank lines and lines
+# starting with '#' are ignored. A banned-token hit whose `file:line:code` contains a listed substring
+# is PERMITTED. Every entry must cite the upstream justification at the line.
+#
+# Empty by design: the reactor's src/main carries no Unsafe, no CGLib, no runtime Javassist, and no
+# dynamic class loading in code (the only token mentions are Javadoc, which the scan's comment-exclusion
+# already drops). The sanctioned dynamic path — the JVM-fast-jar-only `~/.forvum/plugins/` drop-in
+# (PluginInstallCommand / MavenPluginResolver, guarded by ImageMode.NATIVE_RUN) — resolves Maven
+# coordinates through Maven Resolver but does NOT itself call Class.forName/defineClass/loadClass, so it
+# needs no entry. Add one here (with the citing comment) only if a future framework-mandated boundary
+# genuinely requires one.

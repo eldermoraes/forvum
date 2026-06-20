@@ -1,0 +1,31 @@
+apiVersion: v2
+name: forvum
+description: >-
+  Forvum — a local-first, open-source personal AI assistant on the JVM, packaged as a per-namespace
+  team assistant. Each Helm release deploys an isolated Forvum instance with its own SQLite state PVC,
+  so installing into a namespace gives that namespace its own private memory (no cross-namespace
+  sharing). The native single-binary container image is published to GHCR by the release pipeline.
+type: application
+
+# Chart version — bumped per chart change (independent of the app version below).
+version: 0.1.0
+
+# The Forvum application version this chart deploys by default (the GHCR image tag is derived from it
+# unless image.tag is set in values). Matches the project version 0.1.0 (-SNAPSHOT pre-release).
+appVersion: "0.1.0"
+
+home: https://github.com/eldermoraes/forvum
+sources:
+  - https://github.com/eldermoraes/forvum
+
+keywords:
+  - ai
+  - assistant
+  - llm
+  - quarkus
+  - native
+  - team-assistant
+
+maintainers:
+  - name: Elder Moraes
+    url: https://github.com/eldermoraes

@@ -43,10 +43,27 @@ jobs:
       # Wiring that JFR-based gate is a tracked follow-up; the static scan below is the enforced check.
       - name: Concurrency guardrails (no synchronized / no Mutiny in engine + channels)
         run: bash .github/concurrency-guardrails.sh
+      # Native-first discipline (X1 / CLAUDE.md section 5/12): static scan of every module's src/main for
+      # constructs that break the GraalVM native binary — sun.misc.Unsafe, CGLib / runtime Javassist,
+      # dynamic class loading outside the JVM-only ~/.forvum/plugins/ drop-in (allowlists at repo root).
+      # The native build catches these late and slowly; this fails the fast JVM job early with a file:line.
+      - name: Native-first discipline (no Unsafe / CGLib / runtime Javassist / dynamic class loading)
+        run: bash .github/native-discipline.sh
+      # Reflection-registration (X1 / CLAUDE.md section 5/6.3): every wire DTO (a record in a `.dto.`
+      # package of a Quarkus-bearing module) MUST carry @RegisterForReflection or Jackson cannot bind it
+      # in native. A full Maven-enforcer over every record false-positives on JsonNode-tree-walk config
+      # records, so this is the scoped, green-today grep gate (the full enforcer is documented-deferred).
+      - name: Reflection-registration (DTO records carry @RegisterForReflection)
+        run: bash .github/reflection-registration.sh
       # `verify` runs JaCoCo (X3 / ULTRAPLAN section 10): prepare-agent instruments the Surefire unit
       # run, then per-module `report` + `check` enforce the 80% LINE / 75% BRANCH coverage gate (the
       # native-profile Failsafe *IT smoke is deliberately not counted). A module below its threshold
       # fails this job. Per-module HTML/XML/CSV reports land under each module's target/site/jacoco/.
+      #
+      # `verify` also runs the X4 (#70) per-channel first-token latency gate (ChannelLatencyGateTest, a
+      # forvum-app @QuarkusTest): median ≤ TUI 200 / Web 300 / Telegram 500 ms + a p95 ≤ budget×3 CI ceiling,
+      # excluding inference via the in-process FakeModelProvider. A regression alarm on the shared
+      # ChannelTurnDriver turn (the warm median is ~80-110 ms, DB-bound), so no separate CI step is needed.
       - name: Build + test reactor (JVM) + coverage gate (JaCoCo 80% line / 75% branch)
         run: ./mvnw -B verify
       - name: Smoke-test fast-jar (must start and exit 0)
@@ -141,25 +158,30 @@ jobs:
           java-version: '25'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: maven
-      # OllamaNativeTurnIT pins the main agent to ollama:qwen2.5:0.5b. Wait for the service, then pull the
-      # model via the HTTP API (retried). The launched binary reaches it at the default base url
+      # OllamaNativeTurnIT pins the main agent to ollama:qwen2.5:0.5b, and MemorySearchNativeIT (P3-2 #50)
+      # reindexes/searches with ollama:all-minilm (a small embedding model). Wait for the service, then pull
+      # both via the HTTP API (retried). The launched binary reaches them at the default base url
       # http://localhost:11434 (the mapped service port) — no -D plumbing needed (a -D on mvnw would not
-      # reach the out-of-process binary anyway). The model is pulled fresh each run (~400 MB, not cached).
-      - name: Pull the Ollama model (qwen2.5:0.5b)
+      # reach the out-of-process binary anyway). The models are pulled fresh each run (not cached).
+      - name: Pull the Ollama models (qwen2.5:0.5b chat + all-minilm embedding)
         run: |
           for i in $(seq 1 20); do
             curl -sf http://localhost:11434/api/version >/dev/null && break
             echo "waiting for the ollama service... ($i)"; sleep 3
           done
-          ok=
-          for i in 1 2 3; do
-            if curl -sf --max-time 600 http://localhost:11434/api/pull \
-                 -d '{"name":"qwen2.5:0.5b","stream":false}'; then ok=1; break; fi
-            echo "pull attempt $i failed; retrying"; sleep 5
-          done
-          [ "$ok" = 1 ] || { echo "::error::failed to pull qwen2.5:0.5b"; exit 1; }
-          curl -sf http://localhost:11434/api/tags | grep -q 'qwen2.5:0.5b' \
-            || { echo "::error::qwen2.5:0.5b not present after pull"; exit 1; }
+          pull() {
+            ok=
+            for i in 1 2 3; do
+              if curl -sf --max-time 600 http://localhost:11434/api/pull \
+                   -d "{\"name\":\"$1\",\"stream\":false}"; then ok=1; break; fi
+              echo "pull attempt $i for $1 failed; retrying"; sleep 5
+            done
+            [ "$ok" = 1 ] || { echo "::error::failed to pull $1"; exit 1; }
+            curl -sf http://localhost:11434/api/tags | grep -q "$1" \
+              || { echo "::error::$1 not present after pull"; exit 1; }
+          }
+          pull "qwen2.5:0.5b"
+          pull "all-minilm"
       # Build the native binary and drive the real-provider turn (OllamaNativeTurnIT, @Tag("live")).
       # itExcludedGroups MUST be a non-empty no-op (none) — a blank one makes JUnit discover zero ITs
       # (see forvum-app/pom.xml). The two-cell `native` job above (boot smoke + 200 ms cold-start) stays

@@ -27,6 +27,12 @@
              is the no-DI bootstrap (RepositorySystemSupplier + MavenRepositorySystemUtils from the transitive
              maven-resolver-provider). Used in the fast-jar drop-in path only — see §6.2/§6.3. -->
         <maven-resolver.version>1.9.27</maven-resolver.version>
+        <!-- networknt JSON Schema validator (#124): a native-clean formal JSON-Schema engine for the
+             per-agent `outputSchema` value check (P2-12). Proven GraalVM-native (1.5.8 ships an EMPTY
+             reflect-config.json + a resource-config.json for its bundled draft meta-schemas — zero runtime
+             reflection, no META-INF/services); the optional GraalJS/Joni ECMA-262 regex engines are
+             `optional=true` and deliberately NOT pulled in (the JDK regex path stays the default). -->
+        <json-schema-validator.version>1.5.8</json-schema-validator.version>
     </properties>
 
     <dependencyManagement>
@@ -67,6 +73,17 @@
                 <groupId>org.xerial</groupId>
                 <artifactId>sqlite-jdbc</artifactId>
                 <version>${sqlite-jdbc.version}</version>
+            </dependency>
+            <!-- networknt JSON Schema validator (#124): formal draft-2020-12 validation for the per-agent
+                 `outputSchema` (P2-12). Native-clean — its own META-INF/native-image metadata is an EMPTY
+                 reflect-config.json + a resource-config for the bundled meta-schemas (no runtime reflection,
+                 no ServiceLoader), so it needs no Forvum-authored native hint. The optional ECMA-262 regex
+                 engines (org.graalvm.js:js ~50MB, org.jruby.joni) are `optional=true` upstream and stay out;
+                 the default JDK regex implementation is used (sufficient for the `pattern`/`format` subset). -->
+            <dependency>
+                <groupId>com.networknt</groupId>
+                <artifactId>json-schema-validator</artifactId>
+                <version>${json-schema-validator.version}</version>
             </dependency>
             <!-- Apache Maven Resolver: the no-DI `maven-resolver-supplier` wires a RepositorySystem and
                  pulls maven-resolver-provider (MavenRepositorySystemUtils) + the basic connector and the

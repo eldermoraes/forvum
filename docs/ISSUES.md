@@ -1004,10 +1004,23 @@ pure-Java `OutputSchemaValidator` and re-serializes the validated `JsonNode` as 
 (not-valid-JSON / missing-required / wrong-typed property) throws a `SupervisorGraphException` NAMING the
 schema + the field/cause, which `TurnService` already renders as a terminal `ErrorEvent` — NO retry.
 **Decision (locked):** JSON-Schema → `JsonNode`, NOT a typed POJO (no per-agent class loading / reflection
-— native-clean, config-driven). The validator covers the v0.5-parity subset (root `type`, `required`, and
-each declared property's primitive `type`); full JSON-Schema-draft validation (nested schemas, `enum`,
-`allOf`/`anyOf`, `format`) is a documented fast-follow. A spawned worker child does NOT inherit the
-schema (its output is a digest merged as a tool result, never the validated top-level final answer).
+— native-clean, config-driven). A spawned worker child does NOT inherit the schema (its output is a digest
+merged as a tool result, never the validated top-level final answer).
+**Fast-follow CLOSED (#124).** `OutputSchemaValidator` now delegates to `com.networknt:json-schema-validator`
+(default dialect draft 2020-12), replacing the hand-rolled v0.5 subset with full draft coverage (`enum`,
+nested object/array schemas, numeric bounds, string length, `pattern`/`format`, `allOf`/`anyOf`/`oneOf`).
+The library is GraalVM-native-clean: its bundled `META-INF/native-image/reflect-config.json` is EMPTY (zero
+runtime reflection) + a `resource-config.json` for its draft meta-schemas, no `META-INF/services`; the
+optional ECMA-262 regex engines (GraalJS/Joni) are `optional=true` and stay off the classpath (JDK regex
+backs `pattern`). PROVEN by a deterministic, offline native IT (`OutputSchemaDoctorNativeIT`, default native
+leg — `forvum doctor` over a home whose agent declares a valid `outputSchema` runs the library's factory
+init + bundled-meta-schema resource load + schema compile in the native binary, no live LLM). `ConfigDoctor`
+now validates a declared `outputSchema` through the SAME `OutputSchemaValidator` (a malformed schema becomes
+a doctor ERROR — reader-as-oracle, no parallel schema). The P2-9 config-loader half is otherwise NOT migrated:
+the loader-as-oracle is the no-drift design, and any schema generated-from / tested-against the loaders is
+still a parallel definition that can drift — so the library is adopted ONLY for the value-side `outputSchema`
+check, where there is no loader to drift from. Version managed by `forvum-bom`
+(`json-schema-validator.version=1.5.8`).
 
 ## P2-13 — MCP server registry enrichments
 **Labels:** `phase-2`, `tool`, `native` · **Milestone:** `v0.5 Parity`
@@ -1191,13 +1204,18 @@ binary; no runtime/Docker/Node. **Scope.** Install script + release pipeline (ex
 native installer`
 
 ## P3-2 — Queryable semantic memory
-**Labels:** `phase-3`, `engine`, `persistence`, `native` · **Milestone:** `v1.0+`
-**Context.** `forvum memory query 'SELECT ...'` over SQLite + `sqlite-vec`. Highest native-risk Phase-3
-item (Risk #2). **Scope.** engine CLI + Flyway V3 (`sqlite-vec` vec0 virtual table). **Acceptance.** A
-SQL query over `semantic_memory` returns rows; vector search returns nearest neighbors. **[NATIVE]**
-Risk #2: `sqlite-vec` is a C extension; native static-linking varies by platform — benchmark linear scan
-at 10k/100k/1M; defer vec0 if linear is acceptable at 100k. **[PLUGIN]** `quarkus/searchDocs` for SQLite
-extension loading. **Dependencies.** M5, P2-5, the Risk #2 decision.
+**Labels:** `phase-3`, `engine`, `persistence`, `native` · **Milestone:** `v1.0+` · **Status: DONE (#50).**
+**Context.** `forvum memory query 'SELECT ...'` over SQLite. Highest native-risk Phase-3 item (Risk #2).
+**Scope.** `forvum memory query/search/reindex` (engine `MemoryQueryService` + app CLI); `ModelProvider`
+gains the `resolveEmbedding` SPI prelude (implemented for Ollama). **Acceptance.** A read-only SQL query
+over `semantic_memory` returns rows; vector search embeds the query text and returns nearest neighbors.
+**[NATIVE] Risk #2 RESOLVED — LINEAR scan, `vec0` deferred.** `sqlite-vec` has no Maven artifact and would
+load a second runtime native C library into SQLite (`load_extension`) — a new native surface the native
+mandate forbids (§5: SQLite JNI is the only pin). The pure-Java linear cosine scan over the stored
+`float32` BLOBs adds zero native surface and is fast enough (benchmarked ~9 ms/query @10k, ~93 ms/query
+@100k, 768-dim, top-K 10). NO Flyway migration — the `semantic_memory.embedding` BLOB column already
+exists (V1/V5), self-describing (dim = `bytes.length/4`); write-time embedding is not automatic, an
+explicit `forvum memory reindex` pass populates it. **Dependencies.** M5, P2-5, the Risk #2 decision.
 **Commit.** `feat(app): add queryable semantic memory CLI over sqlite-vec`
 
 ## P3-3 — LangGraph4j cyclic agents as a first-class primitive
@@ -1233,6 +1251,17 @@ Dev UI validates against the schema and hot-reloads without restart. **[NATIVE]*
 (fast-jar) ONLY — explicit, documented native carve-out (Dev UI is not in the native binary).
 **[PLUGIN]** `quarkus/skills` for Dev UI card patterns. **Dependencies.** M4, P2-9 (JSON Schemas).
 **Commit.** `feat(engine): add Dev UI live config editor`
+**Resolution (landed).** A full Dev UI *card* (`CardPageBuildItem` + web component) needs a `*-deployment`
+module, which would force `forvum-engine` into a runtime+deployment split that breaks its headless-library
+setup ([M6]); so — per this issue's sanctioned fallback — the editor is a `quarkus-reactive-routes` `@Route`
+surface (`DevConfigEditorRoute`) over the Web channel's already-present `vertx-http` (the same mechanism as
+`CaprDashboardRoute`/`ApprovalDashboardRoute`), reachable in `quarkus:dev` at `/q/dev-ui/config-editor`. It is
+build-time-gated off in prod via `@IfBuildProperty("forvum.devui.config-editor.enabled")` (`true` only in
+`%dev`/`%test`), so the bean is removed from the prod/native image entirely (zero native surface, the carve-out).
+The "schema" is the P2-9 `ConfigDoctor`/reader oracle (no separate JSON Schema — formal schemas stay a
+documented fast-follow); the editor service (`ConfigEditorService`, in `forvum-engine`) validates a candidate
+through `ConfigDoctor`, saves it validate-then-write-then-rollback (a bad edit never reaches the engine), and
+fires the `ConfigurationChangedEvent` the `WatchService` emits so the running engine hot-reloads it.
 
 ## P3-7 — Kubernetes-native team-assistant mode
 **Labels:** `phase-3`, `engine`, `native` · **Milestone:** `v1.0+`
@@ -1562,8 +1591,9 @@ a behavior change. **Scope.** Cross-link each Critical File to its owning milest
 `ChannelProvider`→M3, `AgentContext`→M6, `AgentRegistry`→M7, `FallbackChatModel`→M8, `SupervisorGraph`→
 M18, `ConfigLoader`→M4, `V1__baseline.sql`→M5, `application.properties`→M5/M20, `ci.yml`→M20.
 **Acceptance.** Every Critical File is mapped to a milestone in the issue tracker; each compiles when its
-milestone closes. **Dependencies.** the listed milestones. **Commit.** `docs: cross-link Critical Files
-to owning milestones`
+milestone closes. The mapping is materialized as the **Owning milestone (issue)** column of the
+`docs/ULTRAPLAN.md` § Critical Files table (`Mn → #(n+5)`). **Dependencies.** the listed milestones.
+**Commit.** `docs: cross-link Critical Files to owning milestones`
 
 ---
 

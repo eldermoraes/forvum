@@ -111,6 +111,16 @@
             <artifactId>maven-resolver-supplier</artifactId>
         </dependency>
 
+        <!-- #124: formal JSON-Schema validation for the per-agent `outputSchema` (P2-12), replacing the
+             hand-rolled v0.5-subset tree-walk in OutputSchemaValidator with draft-2020-12 coverage
+             (enum, nested objects, arrays, numeric bounds, format/pattern). Native-clean: the library
+             ships an EMPTY reflect-config + a resource-config for its bundled meta-schemas, so the
+             native binary needs no Forvum-authored hint. Version managed by forvum-bom. -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
@@ -162,12 +172,27 @@
                                      SessionSubstitutionReplayer by SessionSubstitutionReplayerIT (#57/PR-8): its
                                      @ActivateRequestContext replay() is fully exercised by the IT (success /
                                      partial-failure / unresolvable-model / metadata) but JaCoCo mis-attributes the
-                                     ArC subclass-forward body, like SessionCompactor (the same pattern). -->
+                                     ArC subclass-forward body, like SessionCompactor (the same pattern).
+                                     MemoryQueryService/SemanticMemoryStore by MemoryQueryServiceIT (P3-2 #50): the
+                                     query/search/reindex paths are exercised end-to-end against real SQLite (the
+                                     guard, the linear cosine scan, the embed-outside-tx reindex), but both are
+                                     @ApplicationScoped so JaCoCo attributes every method to the ArC client subclass
+                                     and reports the original classes at 0% — the same mis-attribution. -->
+                                     EvalRunner by forvum-app EvalCommandTest/EvalNativeIT (P3-10 #58): it drives a
+                                     turn through ChannelTurnDriver, so it only runs end-to-end under the app's
+                                     @QuarkusMainTest/native ITs — never engine Surefire. Its pure collaborators
+                                     (EvalSuiteReader, MatcherJudge, LlmJudge, MatchMode, the value records) ARE
+                                     unit-tested here and stay counted. -->
                                 <exclude>ai/forvum/engine/session/compaction/SessionCompactor.class</exclude>
                                 <exclude>ai/forvum/engine/session/compaction/DefaultSummarizer.class</exclude>
                                 <exclude>ai/forvum/engine/persistence/TaskRecorder.class</exclude>
                                 <exclude>ai/forvum/engine/cron/LoggingCronDeliverySink.class</exclude>
                                 <exclude>ai/forvum/engine/replay/SessionSubstitutionReplayer.class</exclude>
+                                <exclude>ai/forvum/engine/memoryquery/MemoryQueryService.class</exclude>
+                                <exclude>ai/forvum/engine/memoryquery/SemanticMemoryStore.class</exclude>
+                                <exclude>ai/forvum/engine/memoryquery/SemanticMemoryStore$*.class</exclude>
+                                <exclude>ai/forvum/engine/eval/EvalRunner.class</exclude>
+                                <exclude>ai/forvum/engine/eval/EvalRunner$TurnCapture.class</exclude>
                             </excludes>
                             <rules>
                                 <rule>

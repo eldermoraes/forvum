@@ -381,4 +381,34 @@ class ConfigDoctorTest {
                 () -> "a malformed cycle block (empty steps) must be reported via parseSpec; findings: "
                         + report.findings());
     }
+
+    @Test
+    void aValidOutputSchemaIsHealthy() throws IOException {
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\",\"allowedTools\":[],"
+                + "\"outputSchema\":{\"type\":\"object\",\"required\":[\"answer\"],"
+                + "\"properties\":{\"answer\":{\"type\":\"string\"}}}}");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.healthy(),
+                () -> "a valid outputSchema must keep the home healthy; findings: " + report.findings());
+    }
+
+    @Test
+    void aMalformedOutputSchemaIsAnError() throws IOException {
+        // 'required' must be an array of field names; a string is not a usable JSON Schema. The doctor
+        // validates outputSchema through the SAME OutputSchemaValidator the SupervisorGraph enforces (#124),
+        // so a doctor pass is exactly a schema the engine can compile (the reader-as-oracle, no parallel def).
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\",\"allowedTools\":[],"
+                + "\"outputSchema\":{\"type\":\"object\",\"required\":\"answer\"}}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(hasError(report, "agents/main.json"),
+                () -> "a malformed outputSchema must be an error naming the file; findings: "
+                        + report.findings());
+    }
 }
