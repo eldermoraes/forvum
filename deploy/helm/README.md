@@ -74,7 +74,7 @@ config:
     {}
   agents:
     main.json: |
-      { "primaryModel": "ollama:qwen3:1.7b", "persona": "...", "allowedTools": [] }
+      { "primaryModel": "ollama:deepseek-v4-pro:cloud", "persona": "...", "allowedTools": [] }
   channels:
     web.json: |
       {}
