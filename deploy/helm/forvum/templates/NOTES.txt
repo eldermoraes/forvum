@@ -35,7 +35,7 @@ Port-forward to it locally:
 
 NEXT STEPS
 ----------
-1. A real conversation needs a model provider. The default agent points at "ollama:qwen3:1.7b" — run an
+1. A real conversation needs a model provider. The default agent points at "ollama:deepseek-v4-pro:cloud" — run an
    Ollama service reachable from the pod, or edit config.agents in values and set a cloud provider:
      helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} \
        --set-string config.agents.main\.json='{"primaryModel":"anthropic:claude-sonnet-4-...","persona":"...","allowedTools":[]}'
