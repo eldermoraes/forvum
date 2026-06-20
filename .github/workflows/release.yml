@@ -61,6 +61,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: maven
 
+      # Derive the release version from the tag (v0.5.0 -> 0.5.0) and stamp it across the
+      # reactor BEFORE the native build, so the binary's `forvum --version`
+      # (quarkus.application.version <- the Maven version, CLAUDE.md section 14 [M20]) reports the
+      # released version instead of the dev `0.1.0-SNAPSHOT`. Transient: CI-only, no commit, no
+      # backup poms (the working tree is discarded after the run). The tag is the version source of
+      # truth; `main` stays on `-SNAPSHOT`. (#160 Gap 1.)
+      - name: Set the release version from the tag
+        run: ./mvnw -B -ntp versions:set -DnewVersion="${GITHUB_REF_NAME#v}" -DprocessAllModules -DgenerateBackupPoms=false
+
       - name: Build native binary
         run: ./mvnw -B -Pnative -pl forvum-app -am package -DskipTests
 
