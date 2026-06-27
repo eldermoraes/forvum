@@ -27,8 +27,12 @@ jobs:
         include:
           - os: ubuntu-latest   # linux-amd64
             platform: linux-x64
+          - os: ubuntu-24.04-arm   # linux-arm64 (Mandrel, like linux-x64)
+            platform: linux-arm64
           - os: macos-14        # macos-arm64
             platform: macos-arm64
+          - os: macos-15-intel   # macos-x64 (Intel macOS runner, GraalVM CE)
+            platform: macos-x64
     steps:
       - uses: actions/checkout@v4
 

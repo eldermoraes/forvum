@@ -31,9 +31,9 @@ err()  { printf '%s\n' "forvum: error: $1" >&2; exit 1; }
 # ---------------------------------------------------------------------------
 # Platform detection
 #
-# Maps uname os/arch to the release asset name. Adding linux-arm64 or macos-x64
-# later is a single line in this case statement — keep the asset names in sync
-# with .github/workflows/release.yml.
+# Maps uname os/arch to the release asset name — all four targets
+# (linux-x64, linux-arm64, macos-x64, macos-arm64) are published; keep the
+# asset names in sync with .github/workflows/release.yml.
 # ---------------------------------------------------------------------------
 detect_asset() {
   os=$(uname -s)
@@ -53,11 +53,11 @@ detect_asset() {
 
   platform="${os_tag}-${arch_tag}"
 
-  # Acceptance minimum: linux-x64 and macos-arm64. Other native binaries are not
-  # published yet — fail clearly rather than 404 on a missing asset.
+  # The release pipeline publishes all four native targets; fail clearly on any
+  # other platform rather than 404 on a missing asset.
   case "$platform" in
-    linux-x64 | macos-arm64) : ;;
-    *) err "no published native binary for '$platform' yet (available: linux-x64, macos-arm64); build from source — see the README" ;;
+    linux-x64 | linux-arm64 | macos-x64 | macos-arm64) : ;;
+    *) err "no published native binary for '$platform' (available: linux-x64, linux-arm64, macos-x64, macos-arm64); build from source — see the README" ;;
   esac
 
   ASSET="${BINARY_NAME}-${platform}"
