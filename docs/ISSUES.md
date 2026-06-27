@@ -124,6 +124,11 @@ re-sync via `gh issue list --state all`. `✓` = closed.)
   P2-PAIR-SCOPE #44 · P2-COMPACT #45 · P2-TASKLEDGER #46 · P2-CRON-DELIVERY #47 · P2-OUTPUTGUARD #48.
 - **Phase 3 (EPIC-3):** P3-1…P3-10 #49–#58.
 - **Loose:** quarkus-langchain4j GA bump #75 · TamboUI backend spike #76.
+- **Post-roadmap (v0.5+).** The documented roadmap (M1–M20 / P2 / P3-1…P3-10) is fully consumed; the open
+  backlog now lives in the GitHub tracker, sequenced in **`docs/IMPLEMENTATION-ORDER.md`**. Newly-filed
+  v1.0+ **context-engineering differentiators** (`docs/ULTRAPLAN.md` §7.3 addendum items 11–13, not part of
+  P3-1…P3-10): real CAPR judge #195 · iterative/agentic RAG #196 (blocked on #175) · mid-turn context
+  pruning #197.
 
 ---
 
