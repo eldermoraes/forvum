@@ -45,7 +45,7 @@ public class InitCommand implements Callable<Integer> {
         writeIfAbsent(root.resolve("agents").resolve("main.md"),
                 "You are Forvum's main assistant. Be concise, accurate, and helpful.\n");
         writeIfAbsent(root.resolve("agents").resolve("main.json"),
-                "{\n  \"primaryModel\": \"ollama:deepseek-v4-pro:cloud\",\n"
+                "{\n  \"primaryModel\": \"ollama:gemma4:31b-cloud\",\n"
               + "  \"allowedTools\": [\"fs.read\", \"fs.write\", \"fs.list\"]\n}\n");
         writeIfAbsent(root.resolve("identities").resolve("default.json"),
                 "{\n  \"channelAccounts\": {}\n}\n");

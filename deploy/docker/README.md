@@ -15,7 +15,7 @@ docker compose -f deploy/docker/docker-compose.yml run --rm forvum init
 
 # 3. Start, and pull the default model into the Ollama container:
 docker compose -f deploy/docker/docker-compose.yml up -d
-docker compose -f deploy/docker/docker-compose.yml exec ollama ollama pull deepseek-v4-pro:cloud
+docker compose -f deploy/docker/docker-compose.yml exec ollama ollama pull gemma4:31b-cloud
 ```
 
 The `ghcr.io/eldermoraes/forvum:<version>-native` image is published by the release pipeline

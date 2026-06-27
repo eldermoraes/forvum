@@ -132,7 +132,7 @@ leaves `$FORVUM_HOME`. The complete egress inventory:
 
 | # | Surface | Carries | Gate | Default |
 |---|---|---|---|---|
-| 1 | Model provider calls | the prompt window: messages, retrieved memory, tool results | operator configures the provider + key (M9–M12); local Ollama is the scaffolded default (`init` pins `ollama:deepseek-v4-pro:cloud`) | on (the product's purpose) |
+| 1 | Model provider calls | the prompt window: messages, retrieved memory, tool results | operator configures the provider + key (M9–M12); local Ollama is the scaffolded default (`init` pins `ollama:gemma4:31b-cloud`) | on (the product's purpose) |
 | 2 | Channel egress | assistant replies to the channel platform (Telegram Bot API, Discord gateway/REST) | `OutputGuard` pre-channel-emit (§9.2), **default-on secrets redaction** (#48, this wave) | on when a channel is configured |
 | 3 | OTLP telemetry | spans/metrics | exports **only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set** (#40, this wave) | **off** (unset env var ⇒ zero telemetry egress; today no spans exist at all — X6) |
 | 4 | Operator-enabled extensions | memory content → configured Qdrant endpoint (`memory/qdrant.json`, P2-5 #30, inert without the file); tool args → configured MCP servers (off by default v0.1, Risk #9; trust contract = DR-6b §9.3); Maven coordinates → Maven Central on `forvum plugin install` (P2-6 — coordinates only, no user data) | each requires an explicit operator config/action | off |

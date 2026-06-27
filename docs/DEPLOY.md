@@ -61,7 +61,7 @@ A real conversation needs a model. Two common choices:
   Then point the default agent at that provider:
 
   ```bash
-  sudo -u forvum sed -i 's#"ollama:deepseek-v4-pro:cloud"#"anthropic:claude-sonnet-4-5"#' /var/lib/forvum/agents/main.json
+  sudo -u forvum sed -i 's#"ollama:gemma4:31b-cloud"#"anthropic:claude-sonnet-4-5"#' /var/lib/forvum/agents/main.json
   ```
 
   Supported cloud providers: `anthropic`, `openai`, `google`, and GitHub `copilot` (device-code login).
@@ -71,10 +71,10 @@ A real conversation needs a model. Two common choices:
 
   ```bash
   curl -fsSL https://ollama.com/install.sh | sh
-  ollama pull deepseek-v4-pro:cloud  # the model the default agent is pinned to
+  ollama pull gemma4:31b-cloud  # the model the default agent is pinned to
   ```
 
-  The default `agents/main.json` already points at `ollama:deepseek-v4-pro:cloud`, so no edit is needed.
+  The default `agents/main.json` already points at `ollama:gemma4:31b-cloud`, so no edit is needed.
 
 Validate the config any time with `sudo -u forvum env FORVUM_HOME=/var/lib/forvum forvum doctor`.
 

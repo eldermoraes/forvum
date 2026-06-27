@@ -68,7 +68,7 @@ config:
   agents:
     main.json: |
       {
-        "primaryModel": "ollama:deepseek-v4-pro:cloud",
+        "primaryModel": "ollama:gemma4:31b-cloud",
         "persona": "You are Forvum, a local-first team assistant.",
         "allowedTools": []
       }
