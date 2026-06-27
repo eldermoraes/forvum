@@ -87,7 +87,7 @@ start it and pull the default model:
 
 ```bash
 ollama serve &            # local model server, no API key
-ollama pull deepseek-v4-pro:cloud  # the model agent `main` is pinned to by default
+ollama pull gemma4:31b-cloud  # the model agent `main` is pinned to by default
 ```
 
 ## Quick start (TL;DR)
@@ -170,7 +170,7 @@ model:
 
 ```json
 // ~/.forvum/agents/main.json
-{ "primaryModel": "ollama:deepseek-v4-pro:cloud" }
+{ "primaryModel": "ollama:gemma4:31b-cloud" }
 ```
 
 Cloud providers (Anthropic, OpenAI, Google) need an API key. The quickest path is

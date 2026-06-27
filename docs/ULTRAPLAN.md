@@ -1304,7 +1304,7 @@ parses unchanged. (DR-8 DP-1)
 ```jsonc
 // ~/.forvum/agents/<id>.json — paired with the required agents/<id>.md system prompt (§4.1, §5.2)
 {
-  "primaryModel":  "ollama:deepseek-v4-pro:cloud", // REQUIRED — ModelRef.parse format (§4.3.5.1)
+  "primaryModel":  "ollama:gemma4:31b-cloud", // REQUIRED — ModelRef.parse format (§4.3.5.1)
   "fallbackModels": ["openai:gpt-4.1-mini"],     // default [] — ordered fallback refs after primary (§4.3.5.3, §5.4)
   "allowedTools":  ["fs.read", "web.*"],         // default [] — tool-belt globs (§5.3)
   "parent":        "main",                        // default null — top-level agent
