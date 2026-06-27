@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/eldermoraes/forvum/main/install.sh 
 
 The installer resolves the release tag from the GitHub API — the latest stable release (currently
 [`v0.5.0`](https://github.com/eldermoraes/forvum/releases/tag/v0.5.0)), falling back to the newest
-pre-release if no stable exists. Supported platforms: **linux-x64** and **macos-arm64**. Override the
+pre-release if no stable exists. Supported platforms: **linux-x64**, **linux-arm64**, **macos-arm64**, and **macos-x64**. Override the
 target directory or pin an exact version with `FORVUM_INSTALL_DIR` / `FORVUM_VERSION`:
 
 ```bash
@@ -72,7 +72,7 @@ tag as an example):
 
 ```bash
 VER=v0.5.0                                     # the release tag to install
-# linux-x64 (use forvum-macos-arm64 on Apple silicon)
+# example uses linux-x64; also available: forvum-linux-arm64, forvum-macos-arm64, forvum-macos-x64
 curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum-linux-x64"
 curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum-linux-x64.sha256"
 shasum -a 256 -c forvum-linux-x64.sha256       # or: sha256sum -c
