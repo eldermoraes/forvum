@@ -81,8 +81,8 @@ writes its own `messages`/`provider_calls`/`capr_events` the normal way.
 `forvum qa` reads the SAME per-scenario shape — `id`/`prompt`/`expect`/`match` — and scores each reply with
 the SAME match modes (the engine's shared `MatchMode`: `contains`/`exact`/`regex`, case-insensitive), so the
 two features never fork their case shape or their matcher. qa adds ONE suite-level concern of its own,
-`channel` (required per scenario), naming the channel turn-path the scenario runs through; v0.1 ships only
-`cli` scenarios. A qa pack is a JSON object `{ "scenarios": [ {scenario}, … ] }` — for example:
+`channel` (required per scenario), naming the channel turn-path the scenario runs through; the QA runner
+currently ships `cli` scenarios (other channels follow). A qa pack is a JSON object `{ "scenarios": [ {scenario}, … ] }` — for example:
 
 ```json
 {

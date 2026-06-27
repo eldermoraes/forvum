@@ -55,6 +55,12 @@ jobs:
       # records, so this is the scoped, green-today grep gate (the full enforcer is documented-deferred).
       - name: Reflection-registration (DTO records carry @RegisterForReflection)
         run: bash .github/reflection-registration.sh
+      # Docs-drift (#179 / CLAUDE.md section 10): the status / version / enforcement facts in the
+      # source-of-truth docs (README, CLAUDE.md, ULTRAPLAN, the CE mapping, …) must agree with the
+      # running code. A static grep fails the job if a known stale claim — JaCoCo "not yet wired",
+      # Phase-2/v0.5 framed as still upcoming, "only M1 shipped", or v0.1-as-current — reappears.
+      - name: Docs-drift (doc status/version claims agree with the code)
+        run: bash .github/docs-drift.sh
       # `verify` runs JaCoCo (X3 / ULTRAPLAN section 10): prepare-agent instruments the Surefire unit
       # run, then per-module `report` + `check` enforce the 80% LINE / 75% BRANCH coverage gate (the
       # native-profile Failsafe *IT smoke is deliberately not counted). A module below its threshold

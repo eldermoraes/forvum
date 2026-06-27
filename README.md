@@ -39,8 +39,8 @@ inspect; nothing dissolves into a black box.
 - **Fixed code, configurable behavior** — agents, sub-agents, skills, identities, crons, roles, and MCP servers are JSON/Markdown files under `~/.forvum/`, hot-reloaded by a `WatchService` with no restart.
 - **Tools, gated** — filesystem, [web fetch](forvum-tools-web), [shell](forvum-tools-shell), a [headless browser](forvum-tools-browser), a [code sandbox](forvum-tools-sandbox), and an [MCP bridge](forvum-tools-mcp-bridge) — each behind permission scopes, role-based access, and an interactive approval gate for sensitive calls.
 - **Sub-agent orchestration** — a [LangGraph4j](docs/ULTRAPLAN.md) supervisor graph spawns isolated specialist workers on virtual threads and merges their results.
-- **Semantic memory** — pluggable retrieval with a [Qdrant](forvum-provider-memory-qdrant) backend and a built-in local vector search (`forvum memory search`).
-- **Observable by design** — every turn, tool call, and fallback is written to the ledger; an optional CAPR dashboard and OpenTelemetry spans are one config flag away.
+- **Semantic memory** — a pluggable retrieval SPI (a [Qdrant](forvum-provider-memory-qdrant) backend) plus a built-in local vector search you query explicitly (`forvum memory search` / `reindex`); wiring long-term write/recall into every turn by default is on the roadmap ([#175](https://github.com/eldermoraes/forvum/issues/175)).
+- **Observable by design** — every turn, tool call, and fallback is written to the ledger; OpenTelemetry spans and a CAPR dashboard are one config flag away (the per-turn CAPR *judge verdict* is a placeholder in v0.5 — a real judge is tracked by [#195](https://github.com/eldermoraes/forvum/issues/195)).
 
 ## Install
 
