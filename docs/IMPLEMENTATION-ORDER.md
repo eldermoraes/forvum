@@ -29,6 +29,24 @@ foundation — so the authz spine comes first *on the merits*, not out of cautio
 
 ---
 
+## Picking the next issue
+
+To answer "which issue should we do now": walk the waves top-to-bottom and pick the **first open issue
+whose dependencies are satisfied**.
+
+1. Check status: `gh issue list --repo eldermoraes/forvum --state open` (and `--state closed` to see what
+   is already done).
+2. Suggest the first **open** issue in wave order, skipping any `[blocked]` item until its named
+   prerequisite has closed.
+3. The `▸`-marked items have no dependency on the authz spine — they may be pulled forward as a parallel
+   second stream if you want north-star progress while the spine lands.
+4. Starting an issue = start from its acceptance/Verify test (TDD-as-process), then implement to green.
+
+As of 2026-06-27 (nothing started), the recommended first pick is **Wave 0: #160** (unblocks the real
+v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item is **#165**.
+
+---
+
 ## Wave 0 — Release truth & docs *(cheap, parallel, start now)*
 
 1. **#160** ▸ `ci(release)`: align release pipeline with ratified #49 (tag-derived version, 4 platforms, GHCR image) — the published binary mislabels itself `0.1.0-SNAPSHOT`; **gates the first real v0.5.0 release** and the build-side of #174.
