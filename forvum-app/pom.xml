@@ -351,6 +351,15 @@
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>
+                    <!-- #165: the forvum-app suite runs many @QuarkusMainTests that RELAUNCH the app in the
+                         single reused fork (SessionReplayCommandTest boots ~12×), so heap accumulates across
+                         the run. The JVM's default max heap is ~1/4 of detected RAM: ~4 GB on the 16 GB
+                         ubuntu runner (passes) but only ~1.75 GB on the 7 GB macos-14 runner, which OOMs
+                         ("Java heap space") once this PR's added boot footprint pushes the accumulation past
+                         it. Pin an explicit -Xmx so the fork has the same headroom on both platforms (3 GB
+                         fits comfortably in the macos runner's 7 GB). @{argLine} preserves the JaCoCo agent
+                         argLine (late property replacement). -->
+                    <argLine>@{argLine} -Xmx3g</argLine>
                 </configuration>
             </plugin>
             <plugin>
