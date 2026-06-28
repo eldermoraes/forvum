@@ -118,9 +118,15 @@ it comes back after a crash or a reboot.
 
 ## The Web channel behind a reverse proxy
 
-The Web channel serves a browser chat UI but has **no authentication** and would accept a turn from
-anyone who can reach the port. Never expose it directly. The supported public-exposure pattern is:
-bind Forvum to loopback and put an authenticating, TLS-terminating reverse proxy in front.
+The Web channel's operator endpoints — the approval dashboard (`/q/dashboard/approvals`), the CAPR
+dashboard (`/q/dashboard/capr`), and the chat socket (`/ws/chat`) — require an **operator token** (#165):
+set `forvum.operator.token` (env `FORVUM_OPERATOR_TOKEN`, a Kubernetes Secret) or write
+`$FORVUM_HOME/state/credentials/operator` (`0600`). A server channel **fails closed at startup** without
+one. Clients authenticate with `Authorization: Bearer <token>` (HTTP) or `?access_token=<token>` (the
+WebSocket handshake); a missing/wrong token is `401`, an authenticated non-operator is `403`. The static
+UI page itself is unauthenticated (it carries no data); only the data/control paths are gated. TLS is
+still your responsibility — bind to loopback and front Forvum with a TLS-terminating reverse proxy for
+public access (the proxy can add a second auth layer).
 
 Enable it:
 

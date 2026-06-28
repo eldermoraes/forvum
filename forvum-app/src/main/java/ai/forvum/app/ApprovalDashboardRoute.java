@@ -31,11 +31,14 @@ import java.util.List;
  * re-dispatches its turn, R1). An unknown or already-resolved id returns {@code handled=false} with HTTP
  * 200 — the client reads the flag.
  *
- * <p><strong>v0.5 trust model:</strong> like {@code /q/dashboard/capr}, these endpoints are NOT
- * authenticated — they assume a local, trusted operator and the deployment binding the HTTP listener to a
- * trusted interface (the default host). A POST approve/reject mutates state, so do not expose the listener
- * to an untrusted network without a reverse-proxy auth layer; dashboard authentication is a documented
- * fast-follow.
+ * <p><strong>Authentication (#165):</strong> these endpoints — and {@code /q/dashboard/capr} and
+ * {@code /ws/chat} — require the {@code operator} role via the {@code quarkus.http.auth.permission} policy
+ * + {@link OperatorAuthMechanism}: a request must present the operator token as {@code Authorization:
+ * Bearer <token>} or it is {@code 401} (an authenticated non-operator is {@code 403}). A POST
+ * approve/reject mutates state — it resumes a parked turn and dispatches the approved tool call — so this
+ * matters: an unauthorized POST is rejected by the policy before the handler runs and cannot dispatch.
+ * A server channel fails closed at startup without an operator credential; still front the listener with a
+ * TLS reverse proxy for public exposure.
  */
 @ApplicationScoped
 public class ApprovalDashboardRoute {

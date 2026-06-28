@@ -100,6 +100,15 @@ env: []
 # zero overhead). Point at an in-cluster collector endpoint.
 otelExporterOtlpEndpoint: ""
 
+# -- #165 operator credential. The Web channel's approval/CAPR dashboards and chat socket require an
+# `operator` Bearer token; this deployment binds the listener to 0.0.0.0 (cluster-reachable), so it FAILS
+# CLOSED at startup when the Web server is enabled without one — the pod CrashLoopBackOffs with a clear
+# message. Set this to a strong random string (e.g. `openssl rand -hex 32`) to run the default (Web)
+# chart; it is projected into a Secret and surfaced as FORVUM_OPERATOR_TOKEN. Leave empty only for a
+# non-Web deployment (remove `channels.web.json` above). Clients send `Authorization: Bearer <token>`
+# (or `?access_token=<token>` for the WebSocket).
+operatorToken: ""
+
 persistence:
   # -- Create a PersistentVolumeClaim for $FORVUM_HOME (holds state/forvum.sqlite — the isolated memory).
   # Disabling it uses an emptyDir (memory is lost on pod restart) — only for ephemeral/demo installs.

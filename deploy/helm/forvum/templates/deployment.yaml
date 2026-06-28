@@ -55,6 +55,16 @@ spec:
               value: "0.0.0.0"
             - name: QUARKUS_HTTP_PORT
               value: {{ .Values.containerPort | quote }}
+            {{- if .Values.operatorToken }}
+            # #165: the operator credential the approval/CAPR dashboards + chat socket authenticate
+            # against. Required while the listener is cluster-reachable (0.0.0.0); without it the binary
+            # fails closed at startup. Projected from the chart-managed Secret, never inlined in the manifest.
+            - name: FORVUM_OPERATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "forvum.fullname" . }}-operator
+                  key: operator-token
+            {{- end }}
             {{- if .Values.otelExporterOtlpEndpoint }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.otelExporterOtlpEndpoint | quote }}
