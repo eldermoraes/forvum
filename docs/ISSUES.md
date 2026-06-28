@@ -11,6 +11,24 @@ Files, Acceptance Criteria, Dependencies, Labels, Milestone). The companion scri
 trailer for AI-assisted commits is welcome (convention updated 2026-06-04; supersedes the prior
 single-author / no-trailer rule).
 
+## Reading this file — original proposals vs. as-built amendments
+
+Each milestone/issue below carries its **original proposal** (Context, Scope, Files, Acceptance,
+Dependencies) and, where reality diverged, inline **amendment markers** added as the work shipped.
+Text WITHOUT one of these markers is the original proposal; text introduced BY one is the as-built
+amendment that supersedes it:
+
+- **`As-built (…)` / `Built (…)` / `*(As built, Mn: …)*`** — what actually shipped where it differs
+  from the original scope (the original text above it is preserved as the historical proposal).
+- **`Status:` / `Status (as-built, …):`** — the final disposition of the item (e.g. `CLOSED as-built`).
+- **`Decision (maintainer-locked):` / `Contract settled:`** — a ratified design ruling that supersedes
+  the proposal text above it.
+- **`*TBD*`** — an open placeholder from the original proposal (an acceptance bar is "no `*TBD*` remain").
+
+The current shipped baseline is **`v0.5.0`** (M1–M20 + Phase-2 parity); live sequencing of the remaining
+post-v0.5 work is in [`docs/IMPLEMENTATION-ORDER.md`](IMPLEMENTATION-ORDER.md), and the normative design is
+[`docs/ULTRAPLAN.md`](ULTRAPLAN.md) (see its preamble for the full source-of-truth precedence model).
+
 ## Two acceptance rules that thread into EVERY code milestone
 
 - **[NATIVE]** GraalVM native is the **primary, mandatory** build target — not co-equal with fast-jar.

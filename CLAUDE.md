@@ -34,8 +34,13 @@ trade-off for a reflection-free native binary.
   channels (TUI/Web/Telegram, M15–M17), the LangGraph4j supervisor graph wiring tool execution into the
   turn (M18), file-driven crons (M19), and the GraalVM native single-binary + CI matrix with the picocli
   command-mode/lazy-DB &lt;200 ms cold-start gate (M20). A working vertical slice (one agent vs local
-  Ollama via CLI) lives on `demo/conference-mvp`. v0.1 is feature-complete; not yet hardened for
-  production. Phase-2 (v0.5 parity) is the next roadmap arc (`docs/ULTRAPLAN.md` §7.2).
+  Ollama via CLI) lives on `demo/conference-mvp`. **Phase-2 (v0.5, OpenClaw parity) has since SHIPPED and
+  is released as `v0.5.0`** (`docs/ULTRAPLAN.md` §7.2): the Discord/Slack/Matrix/Signal/WhatsApp/Voice
+  channels; the GitHub Copilot provider + Qdrant semantic memory; the web/shell/browser/sandbox/MCP-bridge
+  tools; role-based scopes + device pairing + the approval gate + the output guard; and the OTel/CAPR
+  observability baseline + live config editor. v0.5 is feature-complete but **not yet hardened for
+  production**: the post-v0.5 hardening + remaining-parity + v1.0+ backlog is sequenced in
+  `docs/IMPLEMENTATION-ORDER.md`, and Phase-3 (v1.0+) is the next roadmap arc (§7.3).
 
 ---
 
@@ -130,7 +135,7 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
 ./mvnw -f forvum-app quarkus:dev             # Dev UI at /q/dev/ (live agent reload, CAPR dashboard,
                                              # provider-call inspector, Concurrency card)
 
-# Reactor verify — full test suite (JaCoCo coverage gates 80% line / 75% branch are PLANNED, not yet wired — see §11, #69)
+# Reactor verify — full test suite (JaCoCo coverage gates 80% line / 75% branch are wired + ENFORCED — see §11, #69)
 ./mvnw verify
 ```
 
@@ -293,10 +298,19 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **No commit/push/issue without explicit authorization.**
 - **Surgical edits.** Touch only what the task demands; do not "improve" untouched prose or code; match
   the existing terse, declarative register; remove only orphans your own change created.
-- **Keep project docs in sync.** On any commit or PR merge that changes behavior, build, architecture,
-  status, conventions, or roadmap, update the affected project-facing docs in the same change —
-  `README.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `docs/CONTEXT-ENGINEERING.md`,
-  `docs/CONTEXT-ENGINEERING-MAPPING.md`. `docs/ULTRAPLAN.md` remains the architectural source of truth.
+- **Keep project docs in sync (source-of-truth precedence).** `docs/ULTRAPLAN.md` is the **normative**
+  architectural source of truth; its preamble states the full precedence (running code / the `v0.5.0`
+  tag → ULTRAPLAN → `docs/IMPLEMENTATION-ORDER.md` → `docs/ISSUES.md`). On any commit or PR that changes
+  behavior, build, architecture, status, conventions, or roadmap, update the affected docs **in the same
+  change** (`README.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `docs/CONTEXT-ENGINEERING-MAPPING.md`, ULTRAPLAN)
+  and run `bash .github/docs-drift.sh` (also a CI gate). **Milestone/release-closure checklist:**
+  1. Flip the phase/milestone status in `README.md` §Roadmap, `CLAUDE.md` §1, and ULTRAPLAN §7.2/§7.3.
+  2. Reclassify each touched Context-Engineering capability in `docs/CONTEXT-ENGINEERING-MAPPING.md`
+     (`[shipped]` / `[partial]` / `[planned]` / `[gap → #NNN]`) and link the owning issue for any gap.
+  3. State a real runtime gap as `as-built … → #NNN`, **never** as a delivered/enforced boundary (#179 rule).
+  4. Re-sequence remaining work in `docs/IMPLEMENTATION-ORDER.md`; mark a superseded `docs/ISSUES.md`
+     proposal with an as-built marker (see that file's legend), never by deleting the original proposal.
+  5. Add any new canonical status fact to `.github/docs-drift.sh` so the gate guards it.
 
 ---
 
@@ -306,10 +320,10 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
   implementation passes (Red → Green → Refactor, enforced in PR review).
 - **Test pyramid:** unit `*Test` → integration `*IT` (`@QuarkusTest`, real SQLite via `@TempDir`) → E2E
   under `forvum-app/.../e2e/` (ten scripts).
-- **Coverage gates (target, NOT yet enforced):** the goal is JaCoCo 80% line (parent) + 75% branch, but
-  JaCoCo is **not yet wired** into the build, so coverage is not gated today — wiring it (and the Pitest
-  mutation ramp in `forvum-core`, 50% killed greenfield → 70% Phase 2) is tracked in #69 / X3. Once wired,
-  coverage is a hard gate while mutation thresholds stay signals until a baseline exists.
+- **Coverage gates (ENFORCED):** JaCoCo 80% line (parent) + 75% branch are wired into the build and gate
+  `./mvnw verify` per module (X3 / #69 — see the [X3] lesson below and `pom.xml`). The Pitest mutation
+  ramp in `forvum-core` (50% killed greenfield → 70% Phase 2) stays a signal, not a gate, until a baseline
+  exists. So: coverage is a hard gate; mutation thresholds remain signals.
 - **Property-style tests (JUnit 5) MANDATORY for parsers/records:** `ModelRef.parse` roundtrip,
   `AgentEvent` Jackson roundtrip, `CostBudget` invariants, `PermissionScope.fromName` failure modes.
   Expressed with `@ParameterizedTest` + `@EnumSource`/`@MethodSource` over curated edge cases plus
