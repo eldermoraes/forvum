@@ -2,6 +2,7 @@ package ai.forvum.engine.agent;
 
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.ModelRef;
+import ai.forvum.core.Persona;
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.Done;
@@ -56,9 +57,6 @@ public class TurnService implements ChannelTurnDriver {
     /** v0.1 routes every channel turn to the canonical {@code main} agent. */
     static final String DEFAULT_AGENT = "main";
 
-    /** Session identity when the native user matches no configured {@code Identity}. */
-    static final String ANONYMOUS_IDENTITY = "anonymous";
-
     @Inject
     AgentRegistry registry;
 
@@ -103,9 +101,11 @@ public class TurnService implements ChannelTurnDriver {
     /**
      * Drive a turn for an inbound {@link ChannelMessage}, rendering it to {@code sink}. The session is
      * keyed {@code channelId:nativeUserId} (one conversation per user per channel) and carries the
-     * resolved identity (or {@link #ANONYMOUS_IDENTITY}). A failed turn is surfaced to {@code sink} as a
-     * terminal {@link ErrorEvent} rather than propagated, so a self-driving channel that runs this on
-     * its own thread does not crash its callback (which would close the connection with nothing shown).
+     * effective identity resolved by {@link IdentityResolver#resolveEffective} (#168 precedence: resolved
+     * channel identity, then the agent's {@code identityId} fallback, then the restricted anonymous). A
+     * failed turn is surfaced to {@code sink} as a terminal {@link ErrorEvent} rather than propagated, so
+     * a self-driving channel that runs this on its own thread does not crash its callback (which would
+     * close the connection with nothing shown).
      *
      * <p>{@code @ActivateRequestContext}: a channel drives a turn from its own thread (a WebSocket
      * virtual thread, a stdin loop, a long-poll worker) with no ambient CDI request context, but the
@@ -131,9 +131,15 @@ public class TurnService implements ChannelTurnDriver {
             // CONSTRUCTION; the cron/server entries in EXEMPT are a defensive belt should that ever change.
             devices.requirePaired(message.channelId());
 
-            String identityId = identities.resolveIdentityId(message.channelId(), message.nativeUserId())
-                    .orElse(ANONYMOUS_IDENTITY);
             registry.getOrCreate(agentId);
+            Persona persona = registry.persona(agentId);
+            // #168 identity precedence: a resolved channel identity, else the agent's declared identityId
+            // fallback, else the deliberately restricted anonymous identity. Fails CLOSED (throws) when the
+            // agent names an undefined fallback, so an unresolved user never escalates to the permissive
+            // anonymous default. The effective identity is what the turn is attributed + authorized under.
+            EffectiveIdentity effective = identities.resolveEffective(
+                    message.channelId(), message.nativeUserId(), persona.identityId());
+            String identityId = effective.identityId();
             sessions.ensureSession(sessionId, agentId, identityId, message.channelId());
 
             // P2-COMPACT: eagerly compact the session BEFORE the turn runs, so the agent always reads a
@@ -142,10 +148,11 @@ public class TurnService implements ChannelTurnDriver {
             compactor.compact(sessionId, agentId.value(),
                     new CompactionPolicy(reserveFloorTokens, retainTokens));
 
-            // P2-11 RBAC: resolve the caller's effective scopes (union of its roles' scope-sets, or the
-            // permissive default role for an identity that declares none) and bind them for the turn so
-            // ToolExecutor can gate each tool's required scope. Mirrors the CURRENT_AGENT/CURRENT_TURN binds.
-            Set<PermissionScope> effectiveScopes = roles.effectiveScopes(identities.rolesFor(identityId));
+            // P2-11 RBAC + #168: resolve the caller's effective scopes from the EFFECTIVE identity's roles
+            // (the restricted anonymous role for an unresolved/no-fallback session; the permissive default
+            // only for a RESOLVED identity that declares none) and bind them so ToolExecutor can gate each
+            // tool's required scope. Mirrors the CURRENT_AGENT/CURRENT_TURN binds.
+            Set<PermissionScope> effectiveScopes = roles.effectiveScopes(effective.roleNames());
 
             // P2-14 #39: bind the originating user message so a confirm-required tool parked this turn can
             // be re-dispatched from it after a restart (R1). ScopedValue forbids a null binding, so a
@@ -170,7 +177,7 @@ public class TurnService implements ChannelTurnDriver {
             String egress = outputGuards.enforce(
                     new OutputContext(HookLayer.PRE_CHANNEL_EMIT, agentId, turnId), reply);
 
-            ModelRef model = registry.persona(agentId).primaryModel();
+            ModelRef model = persona.primaryModel();
             Instant now = Instant.now();
             sink.accept(new TokenDelta(now, egress, model));
             sink.accept(new Done(now, turnId, egress));
@@ -179,6 +186,13 @@ public class TurnService implements ChannelTurnDriver {
             // FallbackReasons.FILTERED path as a terminal output_filtered ErrorEvent — never the candidate.
             sink.accept(ErrorEvent.from(Instant.now(), turnId, "output_filtered",
                     filtered.getMessage(), filtered));
+        } catch (IdentityResolutionException unresolved) {
+            // #168: the agent's declared identityId fallback names no configured identity. Fail CLOSED with
+            // an actionable terminal error rather than degrade an unresolved user to the permissive
+            // anonymous default. Thrown before any session/scope binding, so nothing ran and nothing
+            // escalated.
+            sink.accept(ErrorEvent.from(Instant.now(), turnId, "identity_unresolved",
+                    unresolved.getMessage(), unresolved));
         } catch (RuntimeException e) {
             // A failed turn (model/network failure, fallback exhaustion, a persistence error) must not
             // escape a self-driving channel's callback. Surface it as a terminal ErrorEvent; the failed
