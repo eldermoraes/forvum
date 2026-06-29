@@ -50,6 +50,13 @@ public class RoleRegistry {
             CRON, EnumSet.of(PermissionScope.FS_READ),
             ANONYMOUS, EnumSet.noneOf(PermissionScope.class));
 
+    /**
+     * The built-in role names. Exposed so a pure validator ({@code ConfigDoctor}, #167) can decide whether
+     * an agent's declared role resolves — against the SAME source of truth as {@link #load}, with no
+     * drifting second list of built-ins (a role resolves iff it is here or a {@code roles/<name>.json}).
+     */
+    public static final Set<String> BUILT_IN_ROLE_NAMES = Set.copyOf(BUILT_INS.keySet());
+
     @Inject
     RoleReader reader;
 
@@ -77,11 +84,36 @@ public class RoleRegistry {
         if (roleNames == null || roleNames.isEmpty()) {
             return scopesFor(DEFAULT_USER);
         }
+        return unionOf(roleNames);
+    }
+
+    /** The union of {@code roleNames}' scope-sets in a fresh mutable {@link EnumSet}; throws on an unknown role. */
+    private Set<PermissionScope> unionOf(List<String> roleNames) {
         Set<PermissionScope> union = EnumSet.noneOf(PermissionScope.class);
         for (String roleName : roleNames) {
             union.addAll(scopesFor(roleName));
         }
         return union;
+    }
+
+    /**
+     * Apply an agent's role CAP to the caller's scopes (#167, ULTRAPLAN section 4.3.4 / DR-8 DP-8): the
+     * intersection of {@code callerScopes} with the union of the agent roles' scope-sets. An absent/empty
+     * agent role list is NO cap — {@code callerScopes} pass through unchanged — because {@code roles} is
+     * opt-in restriction, never a grant: the cap can only ever RESTRICT, never add a scope the caller
+     * lacks. A named-but-undefined agent role FAILS CLOSED via {@link #scopesFor}'s
+     * {@link IllegalStateException} (a security-sensitive config error, NOT silently "no cap"). This is
+     * deliberately distinct from {@link #effectiveScopes}, whose empty-list branch is the permissive
+     * {@link #DEFAULT_USER} (the caller's own roles); reusing it for the cap would WRONGLY widen an
+     * uncapped agent back to every scope.
+     */
+    public Set<PermissionScope> capScopes(Set<PermissionScope> callerScopes, List<String> agentRoleNames) {
+        if (agentRoleNames == null || agentRoleNames.isEmpty()) {
+            return callerScopes; // no agent-level cap — the caller's scopes already govern
+        }
+        Set<PermissionScope> cap = unionOf(agentRoleNames); // throws on an unknown role -> fail closed (never no-cap)
+        cap.retainAll(callerScopes); // intersect in place: caller ∩ cap (cap is a fresh mutable EnumSet)
+        return cap;
     }
 
     private Set<PermissionScope> load(String roleName) {

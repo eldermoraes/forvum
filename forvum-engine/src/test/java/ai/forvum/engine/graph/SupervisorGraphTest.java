@@ -16,6 +16,7 @@ import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.approval.ApprovalGate;
+import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.model.InMemoryToolInvocationRecorder;
 import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.session.compaction.Summarizer;
@@ -27,6 +28,7 @@ import ai.forvum.sdk.ToolProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -46,6 +48,7 @@ import java.util.Deque;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -65,6 +68,7 @@ class SupervisorGraphTest {
     private static final class ScriptedChatModel implements ChatModel {
         private final Deque<AiMessage> replies;
         private final List<List<ChatMessage>> seen = new ArrayList<>();
+        private final List<List<ToolSpecification>> offeredToolSpecs = new ArrayList<>();
 
         private ScriptedChatModel(AiMessage... replies) {
             this.replies = new ArrayDeque<>(List.of(replies));
@@ -73,6 +77,7 @@ class SupervisorGraphTest {
         @Override
         public ChatResponse chat(ChatRequest request) {
             seen.add(List.copyOf(request.messages()));
+            offeredToolSpecs.add(List.copyOf(request.toolSpecifications()));
             return ChatResponse.builder().aiMessage(replies.poll()).build();
         }
     }
@@ -101,6 +106,9 @@ class SupervisorGraphTest {
     }
 
     private static final ToolSpec FS_READ = new ToolSpec("fs.read", "Read a file", PermissionScope.FS_READ,
+            "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
+
+    private static final ToolSpec FS_WRITE = new ToolSpec("fs.write", "Write a file", PermissionScope.FS_WRITE,
             "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
 
     private static ToolProvider readProvider(String cannedResult) {
@@ -238,6 +246,43 @@ class SupervisorGraphTest {
         assertSame(InvocationStatus.DENIED, recorder.invocations().get(0).status(), "the declined call is audited denied");
         assertTrue(hasToolResult(model.seen.get(1), "declined"),
                 "the model must see a clear declined result, not a generic 'not permitted'");
+    }
+
+    @Test
+    void toolDiscoveryOffersOnlyBeltToolsWithinTheCappedScopeSet() {
+        // #167 defense-in-depth (acceptance #5): when CURRENT_EFFECTIVE_SCOPES is bound, the model is offered
+        // ONLY belt tools whose required scope is within the cap. fs.write is in the belt but out of the
+        // FS_READ cap, so it must NOT be offered; fs.read is; the built-in spawn_worker is always offered.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("done"));
+        GraphTurnRequest request = new GraphTurnRequest("s-disc", new AgentId("main"), model,
+                List.of(FS_READ, FS_WRITE),
+                List.of(SystemMessage.from("sys"), UserMessage.from("hi")));
+
+        ScopedValue.where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, Set.of(PermissionScope.FS_READ))
+                .run(() -> graph.run(request));
+
+        List<String> offered = model.offeredToolSpecs.get(0).stream().map(ToolSpecification::name).toList();
+        assertTrue(offered.contains("fs.read"), "an in-cap belt tool is offered to the model: " + offered);
+        assertFalse(offered.contains("fs.write"), "an out-of-cap belt tool is NOT offered to the model: " + offered);
+        assertTrue(offered.contains("spawn_worker"), "the built-in spawn_worker is always offered: " + offered);
+    }
+
+    @Test
+    void toolDiscoveryOffersTheFullBeltWhenNoScopeIsBound() {
+        // A lower-level caller outside a turn entry binds no scopes — the full belt is offered (the executor
+        // remains the authoritative gate). Guards against the filter over-restricting unbound callers.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("done"));
+
+        graph.run(new GraphTurnRequest("s-disc2", new AgentId("main"), model, List.of(FS_READ, FS_WRITE),
+                List.of(SystemMessage.from("sys"), UserMessage.from("hi"))));
+
+        List<String> offered = model.offeredToolSpecs.get(0).stream().map(ToolSpecification::name).toList();
+        assertTrue(offered.contains("fs.read") && offered.contains("fs.write"),
+                "with no scope binding the full belt is offered: " + offered);
     }
 
     @Test

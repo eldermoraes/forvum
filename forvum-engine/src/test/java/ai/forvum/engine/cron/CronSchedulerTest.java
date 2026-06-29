@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.PermissionScope;
+import ai.forvum.core.Persona;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.agent.Agent;
 import ai.forvum.engine.agent.AgentRegistry;
@@ -149,6 +150,13 @@ class CronSchedulerTest {
         @Override
         public Agent getOrCreate(AgentId id) {
             return agent;
+        }
+
+        // #167: fire() reads the agent's role cap via persona(id). The stub agent declares no roles (no cap),
+        // so capScopes leaves the cron role's scopes unchanged and the delivery path is unaffected.
+        @Override
+        public Persona persona(AgentId id) {
+            return new Persona(id, "stub persona", List.of(), ModelRef.parse("fake:m"), null, null, null, null);
         }
     }
 

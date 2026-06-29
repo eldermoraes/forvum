@@ -88,6 +88,83 @@ class RoleRegistryTest {
         assertThrows(IllegalStateException.class, () -> roles.scopesFor("ghost-role"));
     }
 
+    // --- #167: capScopes — the AGENT-level role cap (caller scopes ∩ the agent roles' union). Unlike
+    // --- effectiveScopes (the caller's own roles, empty => permissive default), an empty agent role list
+    // --- is NO cap, and the cap can only ever RESTRICT — it never grants a scope the caller lacks (DP-8).
+
+    @Test
+    void capScopesWithNoAgentRolesLeavesCallerScopesUnchanged() {
+        Set<PermissionScope> caller = EnumSet.of(PermissionScope.FS_READ, PermissionScope.FS_WRITE);
+        assertEquals(caller, roles.capScopes(caller, List.of()),
+                "an agent that declares no roles imposes no cap — the caller's scopes pass through");
+        assertEquals(caller, roles.capScopes(caller, null),
+                "a null agent role list is no cap either");
+    }
+
+    @Test
+    void capScopesIntersectsCallerWithTheAgentRoleUnion() {
+        Set<PermissionScope> caller = EnumSet.of(
+                PermissionScope.FS_READ, PermissionScope.FS_WRITE, PermissionScope.SHELL_EXEC);
+        assertEquals(Set.of(PermissionScope.FS_READ), roles.capScopes(caller, List.of("restricted")),
+                "the agent's reader cap restricts a broad caller to FS_READ");
+    }
+
+    @Test
+    void capScopesUnionsMultipleAgentRolesBeforeIntersecting() {
+        Set<PermissionScope> caller = EnumSet.allOf(PermissionScope.class);
+        assertEquals(Set.of(PermissionScope.FS_READ, PermissionScope.FS_WRITE),
+                roles.capScopes(caller, List.of("restricted", "writer")),
+                "the cap is the UNION of the agent's roles, intersected with the caller");
+    }
+
+    @Test
+    void capScopesCannotGrantAScopeTheCallerLacks() {
+        Set<PermissionScope> caller = EnumSet.of(PermissionScope.FS_READ);
+        assertEquals(Set.of(), roles.capScopes(caller, List.of("writer")),
+                "an agent role is a CAP, never a grant — writer (FS_WRITE) cannot add a scope the caller lacks");
+    }
+
+    @Test
+    void capScopesWithAnEmptyCallerIsEmpty() {
+        assertEquals(Set.of(),
+                roles.capScopes(EnumSet.noneOf(PermissionScope.class), List.of("restricted")),
+                "an empty caller (the anonymous tail) capped by any agent role stays empty");
+    }
+
+    @Test
+    void capScopesWithAnUnknownAgentRoleFailsClosed() {
+        assertThrows(IllegalStateException.class,
+                () -> roles.capScopes(EnumSet.allOf(PermissionScope.class), List.of("ghost-role")),
+                "a named-but-undefined agent role is a security-sensitive config error — fail closed, never no-cap");
+    }
+
+    @Test
+    void capScopesReflectsAHotReloadedRoleFileButNeverMutatesAnAlreadyComputedSnapshot() throws IOException {
+        // #167 acceptance #6: a hot reload of a role file affects NEW turns (the cache is evicted), but the
+        // capped set already computed for an in-flight turn is an immutable snapshot — the reload can never
+        // widen a running turn's authorization (the engine binds this value once at turn entry).
+        Path roleFile = RoleHomeProfile.HOME.resolve("roles").resolve("restricted.json");
+        Set<PermissionScope> caller = EnumSet.allOf(PermissionScope.class);
+        try {
+            Set<PermissionScope> snapshot = roles.capScopes(caller, List.of("restricted"));
+            assertEquals(Set.of(PermissionScope.FS_READ), snapshot, "the cap before the reload is FS_READ");
+
+            Files.writeString(roleFile, "{\"scopes\":[\"FS_READ\",\"FS_WRITE\"]}");
+            configChanged.fire(new ConfigurationChangedEvent(
+                    Path.of("roles", "restricted.json"), ChangeType.CREATED));
+
+            assertEquals(Set.of(PermissionScope.FS_READ, PermissionScope.FS_WRITE),
+                    roles.capScopes(caller, List.of("restricted")),
+                    "a NEW turn's cap reflects the hot-reloaded, widened role file");
+            assertEquals(Set.of(PermissionScope.FS_READ), snapshot,
+                    "the snapshot computed for an in-flight turn is unchanged — the reload cannot widen it");
+        } finally {
+            Files.writeString(roleFile, "{ \"scopes\": [\"FS_READ\"] }");
+            configChanged.fire(new ConfigurationChangedEvent(
+                    Path.of("roles", "restricted.json"), ChangeType.CREATED));
+        }
+    }
+
     @Test
     void aRoleFileOverridesABuiltInAndHotReloadEvictsTheCache() throws IOException {
         Path roleFile = RoleHomeProfile.HOME.resolve("roles").resolve("cron.json");

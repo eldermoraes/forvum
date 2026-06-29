@@ -8,9 +8,11 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 import ai.forvum.core.MemoryHit;
 import ai.forvum.core.MemoryPolicy;
 import ai.forvum.core.MemoryQuery;
+import ai.forvum.core.PermissionScope;
 import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.routing.RetrievedMemory;
 import ai.forvum.engine.session.compaction.Summarizer;
@@ -47,6 +49,7 @@ import org.bsc.langgraph4j.StateGraph;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -134,7 +137,7 @@ public class SupervisorGraph {
             return runCycle(request); // #51: a declared reflection cycle compiles a different graph
         }
         Turn turn = new Turn(request, retrieveAndFrame(request),
-                toolCallBridge.specificationsFor(request.belt()));
+                toolCallBridge.specificationsFor(scopeVisibleBelt(request.belt())));
         String finalText;
         try {
             CompiledGraph<GraphState> graph = compile(turn);
@@ -147,6 +150,24 @@ public class SupervisorGraph {
                     + request.sessionId(), e);
         }
         return enforceOutputSchema(request, finalText);
+    }
+
+    /**
+     * The belt as the MODEL sees it (#167 defense-in-depth, acceptance #5): the agent's belt restricted to
+     * tools whose required scope is within the turn's capped effective scopes
+     * ({@link CurrentIdentity#CURRENT_EFFECTIVE_SCOPES}), so the model is never even offered a tool it could
+     * not execute. When the scope binding is absent (a lower-level caller outside a turn entry) the full belt
+     * is offered; the {@code ToolExecutor} stays the authoritative gate. The FULL belt ({@code request.belt()})
+     * is still handed to the executor, so a model that is coerced into calling an out-of-cap tool it was not
+     * offered is still denied + audited with the scope-specific message (R3) — discovery and execution observe
+     * one consistent capped set, defense in depth rather than the sole gate.
+     */
+    static List<ToolSpec> scopeVisibleBelt(List<ToolSpec> belt) {
+        if (!CurrentIdentity.CURRENT_EFFECTIVE_SCOPES.isBound()) {
+            return belt;
+        }
+        Set<PermissionScope> scopes = CurrentIdentity.CURRENT_EFFECTIVE_SCOPES.get();
+        return belt.stream().filter(tool -> scopes.contains(tool.requiredScope())).toList();
     }
 
     /**
