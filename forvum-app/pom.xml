@@ -215,6 +215,15 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-reactive-routes</artifactId>
         </dependency>
+        <!-- #165: authenticate + authorize the operator dashboards (approval / CAPR @Route handlers) and
+             the Web channel chat socket. quarkus-security supplies SecurityIdentity + the custom
+             HttpAuthenticationMechanism SPI (OperatorAuthMechanism) and the quarkus.http.auth.permission
+             path policy that gates /q/dashboard/* and /ws/chat. Version via the platform BOM (never pinned);
+             the extension is native-ready. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-security</artifactId>
+        </dependency>
         <!-- HttpClientFactorySelector references JaxRsHttpClientBuilderFactory.class to pin the LangChain4j
              HTTP client app-wide (it is otherwise only a transitive of the ai-gemini extension). Declared
              directly so a class-name drift on a BOM bump is a compile error, not a runtime surprise.
@@ -241,6 +250,22 @@
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- #165: @TestSecurity lets the authorization tests inject an authenticated principal with/without
+             the operator role to assert 200 vs 403 without minting real tokens (the custom mechanism + a
+             real Bearer token are covered separately by the HTTP-level E2E). Version via the platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-security</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- #165: REST Assured is the client @TestSecurity instruments to drive a request as an injected
+             principal (operator vs non-operator), so the 403 authorization path is asserted without minting
+             a real token. Version via the platform BOM. -->
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -326,6 +351,15 @@
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>
+                    <!-- #165: the forvum-app suite runs many @QuarkusMainTests that RELAUNCH the app in the
+                         single reused fork (SessionReplayCommandTest boots ~12×), so heap accumulates across
+                         the run. The JVM's default max heap is ~1/4 of detected RAM: ~4 GB on the 16 GB
+                         ubuntu runner (passes) but only ~1.75 GB on the 7 GB macos-14 runner, which OOMs
+                         ("Java heap space") once this PR's added boot footprint pushes the accumulation past
+                         it. Pin an explicit -Xmx so the fork has the same headroom on both platforms (3 GB
+                         fits comfortably in the macos runner's 7 GB). @{argLine} preserves the JaCoCo agent
+                         argLine (late property replacement). -->
+                    <argLine>@{argLine} -Xmx3g</argLine>
                 </configuration>
             </plugin>
             <plugin>

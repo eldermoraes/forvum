@@ -1,6 +1,7 @@
 package ai.forvum.e2e;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -32,6 +33,8 @@ import java.util.concurrent.TimeUnit;
 @TestProfile(WebScriptedTurnE2E.FakeBackedHomeProfile.class)
 class WebScriptedTurnE2E {
 
+    static final String OPERATOR_TOKEN = "test-operator-secret-165";
+
     @TestHTTPResource("/ws/chat")
     URI uri;
 
@@ -40,7 +43,7 @@ class WebScriptedTurnE2E {
         LinkedBlockingDeque<String> messages = new LinkedBlockingDeque<>();
 
         WebSocketClientConnection connection = BasicWebSocketConnector.create()
-                .baseUri(uri)
+                .baseUri(URI.create(uri + "?access_token=" + OPERATOR_TOKEN))
                 .onTextMessage((c, message) -> messages.add(message))
                 .connectAndAwait();
         try {
@@ -52,6 +55,15 @@ class WebScriptedTurnE2E {
         } finally {
             connection.closeAndAwait();
         }
+    }
+
+    @Test
+    void anonymousHandshakeIsRejected() {
+        // Without the operator token the /ws/chat upgrade is denied by the HTTP security policy (401), so
+        // connect fails — an unauthenticated client cannot open an operator chat socket (#165).
+        assertThrows(Exception.class,
+                () -> BasicWebSocketConnector.create().baseUri(uri).connectAndAwait(),
+                "an anonymous /ws/chat handshake must be rejected");
     }
 
     /** Seeds {@code main} pinned to the in-process {@code fake} provider so a real turn needs no LLM. */
@@ -74,7 +86,9 @@ class WebScriptedTurnE2E {
 
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("forvum.home", HOME.toString());
+            return Map.of(
+                    "forvum.home", HOME.toString(),
+                    "forvum.operator.token", OPERATOR_TOKEN);
         }
     }
 }

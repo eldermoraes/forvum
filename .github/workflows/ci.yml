@@ -32,6 +32,17 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
+      # GitHub macOS runners have no resolvable hostname, so InetAddress.getLocalHost() — which the
+      # OpenTelemetry host-resource detector and the Vert.x address resolver call at startup — stalls ~5 s
+      # PER @QuarkusTest boot. On this full-reactor JVM job that compounds across the whole suite into a
+      # multi-minute (observed: tens-of-minutes — SessionReplayCommandTest alone took ~35 min) slowdown and
+      # a timeout. Map the hostname to loopback so it resolves instantly (mirrors the native job's fix, which
+      # already carries it). Linux runners resolve fine, so guard on OS.
+      - name: Ensure hostname resolves (macOS runner getLocalHost stall)
+        if: runner.os == 'macOS'
+        run: |
+          echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts
+          echo "::1 $(hostname)" | sudo tee -a /etc/hosts
       # Concurrency discipline (CLAUDE.md section 11, ULTRAPLAN section 3.8): static scan for
       # `synchronized` / Mutiny imports in the engine + channel hot paths (allowlists at repo root).
       #

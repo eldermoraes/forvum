@@ -53,6 +53,8 @@ class CaprDashboardE2E {
 
     private static final int TURNS = 5;
 
+    static final String OPERATOR_TOKEN = "test-operator-secret-165";
+
     @Inject
     ChannelTurnDriver turns;
 
@@ -68,11 +70,11 @@ class CaprDashboardE2E {
         }
 
         HttpResponse<String> response = HttpClient.newHttpClient().send(
-                HttpRequest.newBuilder(caprUri).GET().build(),
+                HttpRequest.newBuilder(caprUri).header("Authorization", "Bearer " + OPERATOR_TOKEN).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, response.statusCode(),
-                () -> "GET /q/dashboard/capr must return 200; body: " + response.body());
+                () -> "GET /q/dashboard/capr must return 200 for the operator; body: " + response.body());
 
         JsonNode body = new ObjectMapper().readTree(response.body());
         assertTrue(body.isArray(), () -> "the endpoint must return a JSON array; got: " + response.body());
@@ -84,6 +86,16 @@ class CaprDashboardE2E {
         JsonNode first = body.get(0);
         assertEquals(1, first.get("passed").asInt(), "v0.1 records every completed turn as passed=1");
         assertEquals("none", first.get("judgeModel").asText(), "v0.1 judge mode is off (judgeModel=none)");
+    }
+
+    @Test
+    void anonymousCaprAccessIsRejected() throws Exception {
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(caprUri).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, response.statusCode(),
+                () -> "anonymous GET /q/dashboard/capr must be 401 (CAPR rows carry session/agent ids); body: "
+                        + response.body());
     }
 
     /** Seeds {@code main} pinned to the in-process {@code fake} provider so the five turns need no LLM. */
@@ -106,7 +118,9 @@ class CaprDashboardE2E {
 
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("forvum.home", HOME.toString());
+            return Map.of(
+                    "forvum.home", HOME.toString(),
+                    "forvum.operator.token", OPERATOR_TOKEN);
         }
     }
 }

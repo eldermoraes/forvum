@@ -121,9 +121,11 @@ unknown providers, and pending device scope upgrades.
   interactive yes/no, and are denied by default in non-interactive / cron contexts.
 - **Output guard** — a secret-redaction filter masks API keys and tokens on the way out of a turn
   (on by default).
-- **The Web channel has no built-in authentication** — bind it to localhost
-  (`QUARKUS_HTTP_HOST=127.0.0.1`) and front it with an authenticating reverse proxy (TLS) for public
-  access; never expose `0.0.0.0:8080` directly.
+- **The Web operator endpoints require an operator token** — the approval/CAPR dashboards and the chat
+  socket (`/ws/chat`) authenticate against `forvum.operator.token` (env `FORVUM_OPERATOR_TOKEN`) or
+  `$FORVUM_HOME/state/credentials/operator` (`0600`); a server **fails closed at startup** without one.
+  Clients send `Authorization: Bearer <token>` (or `?access_token=<token>` for the WebSocket). Still front
+  it with a TLS reverse proxy for public access, and bind to loopback if you don't need remote reach.
 
 ## Channels
 
@@ -140,7 +142,8 @@ channel** file flips the binary from one-shot command mode into a long-lived ser
   ```
 
 - **Web** — a browser chat UI over WebSocket. Drop an empty `channels/web.json` (`{}`) and Forvum
-  serves HTTP on port 8080. **No built-in auth** — see [Security defaults](#security-defaults).
+  serves HTTP on port 8080. The dashboards + chat socket require an **operator token** — see
+  [Security defaults](#security-defaults).
 - **Discord / Slack / WhatsApp** — enable with a `channels/<id>.json` carrying the bot credentials and
   an `allowedUserIds` allowlist.
 - **Matrix** — set `homeserver`, `accessToken`, and `userId` (the bot's own id, e.g.
