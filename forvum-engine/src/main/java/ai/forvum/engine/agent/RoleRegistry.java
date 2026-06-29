@@ -25,11 +25,13 @@ import java.util.concurrent.ConcurrentMap;
  * The cache mirrors {@link AgentRegistry} (a {@code ConcurrentMap} with file IO kept off the compute
  * lock — no carrier-thread pinning) and evicts on the M4 {@link ConfigurationChangedEvent}.
  *
- * <p>Built-ins: {@value #DEFAULT_USER} grants every registered scope — the permissive default for an
- * identity that declares no roles, mirroring OpenClaw's "no owner allowlist =&gt; everyone owner" so RBAC
- * is opt-in restriction and existing identities keep working with no migration. {@value #CRON} grants a
- * read-only subset — the distinguished restricted role bound for cron-fired turns. Both are overridable
- * by a same-named role file.
+ * <p>Built-ins: {@value #DEFAULT_USER} grants every registered scope — the permissive default for a
+ * RESOLVED identity that declares no roles, mirroring OpenClaw's "no owner allowlist =&gt; everyone owner"
+ * so RBAC is opt-in restriction and existing identities keep working with no migration. {@value #CRON}
+ * grants a read-only subset — the distinguished restricted role bound for cron-fired turns.
+ * {@value #ANONYMOUS} grants NO scopes — the deliberately restricted role bound for an UNRESOLVED session
+ * with no agent fallback (#168), so an unmapped user never escalates to the permissive default. All three
+ * are overridable by a same-named role file.
  */
 @ApplicationScoped
 public class RoleRegistry {
@@ -40,9 +42,13 @@ public class RoleRegistry {
     /** The distinguished restricted built-in role bound for cron-fired turns: read-only. */
     public static final String CRON = "cron";
 
+    /** The deliberately restricted built-in role for an unresolved/anonymous session (#168): no scopes. */
+    public static final String ANONYMOUS = "anonymous";
+
     private static final Map<String, Set<PermissionScope>> BUILT_INS = Map.of(
             DEFAULT_USER, EnumSet.allOf(PermissionScope.class),
-            CRON, EnumSet.of(PermissionScope.FS_READ));
+            CRON, EnumSet.of(PermissionScope.FS_READ),
+            ANONYMOUS, EnumSet.noneOf(PermissionScope.class));
 
     @Inject
     RoleReader reader;

@@ -1,6 +1,7 @@
 package ai.forvum.engine.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.quarkus.test.junit.QuarkusTest;
@@ -60,6 +61,39 @@ class IdentityResolverTest {
     @Test
     void rolesForIsEmptyForAnUnknownIdentity() {
         assertEquals(List.of(), resolver.rolesFor("nobody"));
+    }
+
+    @Test
+    void resolveEffectivePrefersTheResolvedChannelIdentityOverTheAgentFallback() {
+        // alice maps (telegram, 111); the resolved identity wins even when an agent fallback is supplied.
+        EffectiveIdentity effective = resolver.resolveEffective("telegram", "111", "carol");
+        assertEquals("alice", effective.identityId());
+        assertEquals(List.of("reader"), effective.roleNames());
+    }
+
+    @Test
+    void resolveEffectiveUsesTheAgentFallbackIdentityWhenUnresolved() {
+        // 999 is unmapped -> the agent fallback "carol" (a configured identity with no roles) is used.
+        EffectiveIdentity effective = resolver.resolveEffective("telegram", "999", "carol");
+        assertEquals("carol", effective.identityId());
+        assertEquals(List.of(), effective.roleNames());
+    }
+
+    @Test
+    void resolveEffectiveFallsToTheRestrictedAnonymousRoleWithoutAFallback() {
+        EffectiveIdentity effective = resolver.resolveEffective("telegram", "999", null);
+        assertEquals("anonymous", effective.identityId());
+        // The restricted anonymous ROLE — NOT an empty list, which RoleRegistry maps to the permissive
+        // default. The no-escalation invariant: the unresolved tail is the most restricted branch.
+        assertEquals(List.of("anonymous"), effective.roleNames());
+    }
+
+    @Test
+    void resolveEffectiveFailsClosedForAnUnknownAgentFallback() {
+        // The agent names a fallback identity that has no identities/<id>.json -> fail closed, never
+        // silently degrade to the permissive anonymous default.
+        assertThrows(IdentityResolutionException.class,
+                () -> resolver.resolveEffective("telegram", "999", "ghost"));
     }
 
     /** Seeds {@code identities/alice.json} (with roles) + {@code identities/carol.json} (no roles). */

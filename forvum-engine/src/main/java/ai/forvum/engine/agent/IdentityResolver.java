@@ -20,6 +20,9 @@ import java.util.Optional;
 @ApplicationScoped
 public class IdentityResolver {
 
+    /** The deliberately restricted identity bound for an unresolved user with no agent fallback (#168). */
+    public static final String ANONYMOUS_IDENTITY = "anonymous";
+
     @Inject
     IdentityReader identities;
 
@@ -57,5 +60,44 @@ public class IdentityResolver {
         List<String> roles = new ArrayList<>();
         rolesNode.forEach(role -> roles.add(role.asText()));
         return roles;
+    }
+
+    /**
+     * The identity a turn effectively runs as (#168 precedence), with the role names that cap its scopes:
+     *
+     * <ol>
+     *   <li>a RESOLVED channel identity ({@code channelAccounts[channelId] == nativeUserId}) — it always
+     *       wins, carrying its own declared roles;</li>
+     *   <li>else the agent's declared {@code fallbackIdentityId} (the {@code identityId} from the
+     *       persona), carrying THAT identity's roles — so an unmapped user runs as the operator's
+     *       configured fallback, not a free-for-all;</li>
+     *   <li>else the deliberately restricted {@link #ANONYMOUS_IDENTITY}, capped by the
+     *       {@link RoleRegistry#ANONYMOUS} role (no privileged scopes).</li>
+     * </ol>
+     *
+     * <p>A non-null {@code fallbackIdentityId} that names no configured {@code identities/<id>.json} FAILS
+     * CLOSED with an {@link IdentityResolutionException}: the caller surfaces an actionable error rather
+     * than degrade to the permissive anonymous default. This guarantees no flow gains scopes by becoming
+     * unresolved — the unresolved tail is the most restricted branch, never the most permissive.
+     *
+     * @param fallbackIdentityId the persona's {@code identityId} ({@code null} = no agent fallback)
+     */
+    public EffectiveIdentity resolveEffective(String channelId, String nativeUserId,
+            String fallbackIdentityId) {
+        Optional<String> resolved = resolveIdentityId(channelId, nativeUserId);
+        if (resolved.isPresent()) {
+            String id = resolved.get();
+            return new EffectiveIdentity(id, rolesFor(id));
+        }
+        if (fallbackIdentityId != null) {
+            if (identities.read(fallbackIdentityId).isEmpty()) {
+                throw new IdentityResolutionException(
+                    "Agent fallback identity '" + fallbackIdentityId + "' is not defined: no identities/"
+                  + fallbackIdentityId + ".json. Define it or remove 'identityId' from the agent spec. "
+                  + "Failing closed — an unresolved user is not granted the anonymous default.");
+            }
+            return new EffectiveIdentity(fallbackIdentityId, rolesFor(fallbackIdentityId));
+        }
+        return new EffectiveIdentity(ANONYMOUS_IDENTITY, List.of(RoleRegistry.ANONYMOUS));
     }
 }

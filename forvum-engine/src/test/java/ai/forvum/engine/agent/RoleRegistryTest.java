@@ -53,6 +53,19 @@ class RoleRegistryTest {
     }
 
     @Test
+    void builtInAnonymousGrantsNoScopes() {
+        assertEquals(Set.of(), roles.scopesFor(RoleRegistry.ANONYMOUS));
+    }
+
+    @Test
+    void effectiveScopesOfTheAnonymousRoleIsEmptyNotThePermissiveDefault() {
+        // [anonymous] is a NON-empty role list, so it unions the (empty) anonymous role — it must NOT
+        // collapse to the permissive empty-roles default (#168). This is what stops an unresolved user
+        // escalating to every scope by becoming anonymous.
+        assertEquals(Set.of(), roles.effectiveScopes(List.of(RoleRegistry.ANONYMOUS)));
+    }
+
+    @Test
     void aFileDefinedRoleResolvesToItsScopes() {
         assertEquals(Set.of(PermissionScope.FS_READ), roles.scopesFor("restricted"));
         assertEquals(Set.of(PermissionScope.FS_WRITE), roles.scopesFor("writer"));
