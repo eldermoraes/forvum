@@ -129,6 +129,35 @@ public class DeviceRegistry {
         return Optional.of(device);
     }
 
+    /**
+     * Resolve a presented token to the paired, non-revoked device it authenticates, by a constant-time
+     * compare against each declared device's token (#166). The Web transport layer
+     * ({@code OperatorAuthMechanism}) uses this to admit a connection presenting a device's own token
+     * (distinct from the #165 operator token) and mint a {@code device}-role principal. Returns
+     * {@link Optional#empty()} when the token is blank, pairing is disabled, or no non-revoked device
+     * declares a matching token; a tokenless device pairs by existence and is never matched here.
+     *
+     * <p>The per-device compare is constant-time ({@link MessageDigest#isEqual}); the count of declared
+     * devices is not a secret. Does blocking file IO (the lazy device load) — call OFF the Vert.x event
+     * loop.
+     */
+    public Optional<Device> authenticateByToken(String token) {
+        if (token == null || token.isBlank() || !pairingEnabled()) {
+            return Optional.empty();
+        }
+        for (String id : reader.ids()) {
+            Optional<Device> candidate = lookup(id);
+            if (candidate.isPresent()) {
+                Device device = candidate.get();
+                if (!device.revoked() && !device.token().isBlank()
+                        && constantTimeEquals(token, device.token())) {
+                    return candidate;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
     /** Constant-time secret compare (mirrors {@code OperatorCredentialStore}) so a wrong token cannot be timed. */
     private static boolean constantTimeEquals(String presented, String expected) {
         return MessageDigest.isEqual(

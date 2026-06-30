@@ -166,6 +166,19 @@ class DeviceRegistryTest {
                 "the local operator CLI is exempt even if a credential is somehow presented");
     }
 
+    @Test
+    void authenticateByTokenResolvesTheDeviceWhoseTokenMatches() {
+        Device device = devices.authenticateByToken("t-1").orElseThrow();
+        assertEquals("phone", device.id(), "the device declaring token t-1 is the phone");
+    }
+
+    @Test
+    void authenticateByTokenRejectsUnknownRevokedTokenlessAndBlankTokens() {
+        assertTrue(devices.authenticateByToken("no-such-token").isEmpty(), "no device declares this token");
+        assertTrue(devices.authenticateByToken("t-0").isEmpty(), "t-0 is the revoked oldphone's token — rejected");
+        assertTrue(devices.authenticateByToken("").isEmpty(), "a blank token never authenticates");
+    }
+
     /** Seeds a paired {@code phone} (identity alice) and a {@code revoked} {@code oldphone}. */
     public static class DeviceHomeProfile implements QuarkusTestProfile {
 

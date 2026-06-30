@@ -3,6 +3,7 @@ package ai.forvum.engine.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.forvum.core.ChannelMessage;
+import ai.forvum.core.DeviceCredential;
 import ai.forvum.engine.persistence.ToolInvocationEntity;
 
 import io.quarkus.test.junit.QuarkusTest;
@@ -47,7 +48,9 @@ class TurnServiceDeviceScopeIT {
 
     @Test
     void aDeviceApprovedScopeSetCapsTheTurnAndDeniesAToolOutsideIt() {
-        turns.dispatch(new ChannelMessage("web", "sess-d", "write something", Instant.now()), e -> { });
+        // The turn authenticates AS the web device (its token), so the device's approvedScopes intersect.
+        turns.dispatch(new ChannelMessage("web", "sess-d", "write something", Instant.now()),
+                new DeviceCredential("web", "w"), e -> { });
 
         assertEquals(1L, ToolInvocationEntity.count(
                 "sessionId = ?1 and status = ?2 and toolName = ?3", "web:sess-d", "denied", "fs.write"),

@@ -178,11 +178,15 @@ public class TurnService implements ChannelTurnDriver {
             try {
                 Set<PermissionScope> callerScopes = roles.effectiveScopes(effective.roleNames());
                 Set<PermissionScope> capped = roles.capScopes(callerScopes, persona.roles());
-                // #166: intersect the paired device's approvedScopes when the device opts into scope
-                // governance. A device that declares no requested/approved scopes does NOT cap (opt-in,
-                // backward compatible); only approvedScopes are intersected, so a PENDING upgrade
-                // (requested-but-not-approved) never appears in CURRENT_EFFECTIVE_SCOPES.
-                effectiveScopes = intersectDeviceApprovedScopes(capped, device);
+                // #166: when the turn authenticated AS A DEVICE (a credential was presented), additionally
+                // intersect that device's approvedScopes. approvedScopes govern a PAIRED DEVICE — not the
+                // host operator / local surface, which presents no device credential (the ABSENT path keeps
+                // its full caller/agent scopes). Opt-in-governed: a device declaring no scopes does not cap;
+                // only approvedScopes are intersected, so a PENDING upgrade (requested-but-not-approved)
+                // never appears in CURRENT_EFFECTIVE_SCOPES.
+                effectiveScopes = credential.present()
+                        ? intersectDeviceApprovedScopes(capped, device)
+                        : capped;
             } catch (IllegalStateException roleError) {
                 // The identity OR the agent names a role that resolves to no built-in and no
                 // roles/<name>.json. Fail CLOSED with an actionable config error rather than guess at scopes
