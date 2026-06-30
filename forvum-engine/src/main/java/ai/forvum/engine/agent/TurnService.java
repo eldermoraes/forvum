@@ -140,6 +140,29 @@ public class TurnService implements ChannelTurnDriver {
             EffectiveIdentity effective = identities.resolveEffective(
                     message.channelId(), message.nativeUserId(), persona.identityId());
             String identityId = effective.identityId();
+
+            // P2-11 RBAC + #168 + #167: the caller's effective scopes (#168: the restricted anonymous role
+            // for an unresolved/no-fallback session; the permissive default only for a RESOLVED identity
+            // that declares none), THEN capped by the selected agent's declared role ceiling (#167 / DR-8
+            // DP-8: effective = callerScopes ∩ the union of persona.roles()' scope-sets; an empty agent role
+            // list is no cap — the cap can only ever RESTRICT, never widen, so an agent cannot grant a scope
+            // the caller lacks). This single value is bound into CURRENT_EFFECTIVE_SCOPES, so tool discovery
+            // (the model-facing belt) and execution-time authorization observe ONE consistent capped set. It
+            // is resolved BEFORE any session/turn state is created so a misconfiguration touches nothing.
+            Set<PermissionScope> effectiveScopes;
+            try {
+                Set<PermissionScope> callerScopes = roles.effectiveScopes(effective.roleNames());
+                effectiveScopes = roles.capScopes(callerScopes, persona.roles());
+            } catch (IllegalStateException roleError) {
+                // The identity OR the agent names a role that resolves to no built-in and no
+                // roles/<name>.json. Fail CLOSED with an actionable config error rather than guess at scopes
+                // or leave the caller's full set in force (acceptance #4). The diagnostic names the offending
+                // role + file and carries no caller scopes. Nothing has run yet, so nothing escalated.
+                sink.accept(ErrorEvent.from(Instant.now(), turnId, "role_unresolved",
+                        roleError.getMessage(), roleError));
+                return;
+            }
+
             sessions.ensureSession(sessionId, agentId, identityId, message.channelId());
 
             // P2-COMPACT: eagerly compact the session BEFORE the turn runs, so the agent always reads a
@@ -147,12 +170,6 @@ public class TurnService implements ChannelTurnDriver {
             // reserve floor is a no-op; the prefix (id <= cachedPrefixEndIndex) is never mutated.
             compactor.compact(sessionId, agentId.value(),
                     new CompactionPolicy(reserveFloorTokens, retainTokens));
-
-            // P2-11 RBAC + #168: resolve the caller's effective scopes from the EFFECTIVE identity's roles
-            // (the restricted anonymous role for an unresolved/no-fallback session; the permissive default
-            // only for a RESOLVED identity that declares none) and bind them so ToolExecutor can gate each
-            // tool's required scope. Mirrors the CURRENT_AGENT/CURRENT_TURN binds.
-            Set<PermissionScope> effectiveScopes = roles.effectiveScopes(effective.roleNames());
 
             // P2-14 #39: bind the originating user message so a confirm-required tool parked this turn can
             // be re-dispatched from it after a restart (R1). ScopedValue forbids a null binding, so a

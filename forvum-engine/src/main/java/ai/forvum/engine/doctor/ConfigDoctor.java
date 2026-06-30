@@ -4,6 +4,8 @@ import ai.forvum.core.PermissionScope;
 import ai.forvum.core.Persona;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.agent.AgentSpecReader;
+import ai.forvum.engine.agent.RoleRegistry;
+import ai.forvum.engine.agent.RoleSpecReader;
 import ai.forvum.engine.config.AgentReader;
 import ai.forvum.engine.config.ChannelReader;
 import ai.forvum.engine.config.ConfigFileReader;
@@ -77,7 +79,9 @@ public final class ConfigDoctor {
 
         List<String> agentIds = checkAgents(findings);
         checkCrons(findings, agentIds);
+        checkRoleFiles(findings);
         checkRawJsonDirectory(findings, home.identities(), "identities");
+        checkIdentityRoles(findings);
         checkRawJsonDirectory(findings, home.channels(), "channels");
         checkRawJsonDirectory(findings, home.mcpServers(), "mcp-servers");
         checkDevices(findings);
@@ -91,6 +95,8 @@ public final class ConfigDoctor {
         AgentReader reader = new AgentReader(loader, home);
         AgentSpecReader specReader = new AgentSpecReader();
         List<String> ids = reader.ids();
+        // #167: the file-defined roles — an agent role resolves iff it is a built-in OR one of these.
+        Set<String> definedRoles = Set.copyOf(loader.listIds(home.roles(), ".json"));
 
         if (ids.isEmpty()) {
             findings.add(new Finding(Severity.WARNING, "agents",
@@ -118,6 +124,7 @@ public final class ConfigDoctor {
                 checkProvider(findings, location, p.primaryModel().provider(),
                         "primaryModel '" + p.primaryModel() + "'");
                 checkOutputSchema(findings, location, p.outputSchema());
+                checkRoles(findings, location, p.roles(), definedRoles);
             } catch (IllegalStateException e) {
                 findings.add(new Finding(Severity.ERROR, location, e.getMessage(),
                         "Fix " + location + " (or the agents/" + id + ".md persona it names)."));
@@ -256,6 +263,87 @@ public final class ConfigDoctor {
                     "Agent's outputSchema is not a usable JSON Schema: " + e.getMessage(),
                     "Fix the 'outputSchema' object in " + location + " (a valid JSON Schema)."));
         }
+    }
+
+    /**
+     * Add an ERROR for each role NAME (declared by an agent OR an identity) that resolves to neither a
+     * built-in nor a {@code roles/<name>.json} (#167, DR-8 DP-11). At runtime such a role fails the turn
+     * CLOSED through {@code RoleRegistry}; doctor surfaces it proactively. Reader-as-oracle: built-ins from
+     * {@link RoleRegistry}, file-defined roles from the loader listing of {@code roles/} — the same
+     * resolution the engine performs, no parallel schema.
+     */
+    private void checkRoles(List<Finding> findings, String location, List<String> roleNames,
+            Set<String> definedRoles) {
+        for (String role : roleNames) {
+            if (!RoleRegistry.BUILT_IN_ROLE_NAMES.contains(role) && !definedRoles.contains(role)) {
+                findings.add(new Finding(Severity.ERROR, location,
+                        "References an unknown role '" + role + "'",
+                        "Define roles/" + role + ".json, or fix the 'roles' array in " + location
+                      + " (built-in roles: " + RoleRegistry.BUILT_IN_ROLE_NAMES + ")."));
+            }
+        }
+    }
+
+    /**
+     * Parse-validate every {@code roles/<name>.json} through the SAME {@link RoleSpecReader} the engine's
+     * {@link RoleRegistry} loads with (#167, reader-as-oracle): a missing {@code scopes} array or an unknown
+     * scope name throws there and fails a turn closed at runtime, so doctor surfaces it proactively — the
+     * typed scope check beyond {@code checkRawJsonDirectory}'s JSON-syntax pass.
+     */
+    private void checkRoleFiles(List<Finding> findings) {
+        RoleSpecReader specReader = new RoleSpecReader();
+        for (String id : loader.listIds(home.roles(), ".json")) {
+            String location = "roles/" + id + ".json";
+            JsonNode node;
+            try {
+                node = loader.readJson(home.roles().resolve(id + ".json")).orElse(null);
+            } catch (UncheckedIOException e) {
+                findings.add(malformed(location, e));
+                continue;
+            }
+            if (node == null) {
+                continue; // listed by .json but not a readable regular file — treat as absent
+            }
+            try {
+                specReader.parse(id, node);
+            } catch (IllegalStateException e) {
+                findings.add(new Finding(Severity.ERROR, location, e.getMessage(), "Fix " + location + "."));
+            }
+        }
+    }
+
+    /**
+     * Validate that every role an {@code identities/<id>.json} declares resolves (#167) — identity roles feed
+     * the same {@link RoleRegistry} as agent roles and fail closed identically at runtime, so doctor checks
+     * both symmetrically. JSON syntax is covered by {@code checkRawJsonDirectory}; a file that failed to parse
+     * there is skipped here so the syntax error is reported once.
+     */
+    private void checkIdentityRoles(List<Finding> findings) {
+        Set<String> definedRoles = Set.copyOf(loader.listIds(home.roles(), ".json"));
+        for (String id : loader.listIds(home.identities(), ".json")) {
+            String location = "identities/" + id + ".json";
+            JsonNode node;
+            try {
+                node = loader.readJson(home.identities().resolve(id + ".json")).orElse(null);
+            } catch (UncheckedIOException e) {
+                continue; // malformed JSON already reported by checkRawJsonDirectory
+            }
+            if (node == null) {
+                continue;
+            }
+            checkRoles(findings, location, rolesOf(node), definedRoles);
+        }
+    }
+
+    /** The role names a raw config node declares in its {@code "roles"} array (agent or identity), else empty. */
+    private static List<String> rolesOf(JsonNode node) {
+        JsonNode rolesNode = node.get("roles");
+        if (rolesNode == null || !rolesNode.isArray()) {
+            return List.of();
+        }
+        List<String> roles = new ArrayList<>();
+        rolesNode.forEach(r -> roles.add(r.asText()));
+        return roles;
     }
 
     /** Add an ERROR when {@code provider} (the provider half of a model ref) is not on the classpath. */

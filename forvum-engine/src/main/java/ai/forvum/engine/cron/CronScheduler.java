@@ -158,12 +158,19 @@ public class CronScheduler {
         try {
             Agent agent = registry.getOrCreate(spec.agentId());
             ChatModel model = llmSelector.resolve(spec.primaryModel(), spec.agentId().value(), sessionId);
+            // #167 / DR-8 DP-8: the cron binds the read-only cron role, THEN caps it by the selected agent's
+            // declared role ceiling, so an unattended job is denied a tool outside BOTH the cron role AND the
+            // agent's roles (the same effective-scope calculation as an interactive turn). An agent with no
+            // roles imposes no cap (the cron role alone governs); an undefined agent role throws here and the
+            // catch below disables the fire (ERROR task), failing closed rather than running with wrong scopes.
             Set<PermissionScope> cronScopes = roleRegistry.scopesFor(RoleRegistry.CRON);
+            Set<PermissionScope> effectiveScopes =
+                    roleRegistry.capScopes(cronScopes, registry.persona(spec.agentId()).roles());
             // P2-14 #39: a cron turn has no human at the keyboard and no dashboard requester, so a
             // confirm-required tool must deny immediately rather than block for an approval that will never
             // arrive (mirrors forvum ask). The flag is read by ApprovalService via ApprovalContext.
             reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, spec.agentId())
-                    .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, cronScopes)
+                    .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, effectiveScopes)
                     .where(CurrentIdentity.CURRENT_IDENTITY_ID, CurrentIdentity.DEFAULT_IDENTITY)
                     .where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE)
                     .call(() -> agent.respond(sessionId, spec.prompt(), model));

@@ -1607,3 +1607,33 @@ Generalizable lessons from completed milestones; append here as milestones land.
   (the `validateSchema`/unusable-schema test paths) — noisy but harmless; in production a malformed schema is
   caught at config-read by `validateSchema`, never reaching `validate`. Manage the version in `forvum-bom`
   (`json-schema-validator.version`), never pinned in a module. [#124]
+- **An agent-level role CAP is `caller ∩ agent-roles`, applied at the SAME two `CURRENT_EFFECTIVE_SCOPES`
+  bind sites as the caller scopes — and "empty agent roles = no cap" is the security-load-bearing OPPOSITE
+  of `effectiveScopes`'s "empty = permissive default".** #167 enforced the DR-8 DP-8 ceiling the v0.5 code
+  parsed (`Persona.roles`) but never applied — `TurnService.dispatch`/`CronScheduler.fire` bound only the
+  CALLER's roles, so an operator-restricted persona still ran with the caller's full scope set. The
+  primitive is a NEW `RoleRegistry.capScopes(callerScopes, agentRoleNames)`: DO NOT reuse `effectiveScopes`,
+  whose empty branch returns the permissive `default-user` and would WIDEN an uncapped agent back to every
+  scope; `capScopes` returns `callerScopes` unchanged on an empty/absent list (no cap, never a grant — it
+  can only RESTRICT) and throws on an unknown role (fail-closed, via `scopesFor`). Bind the CAPPED set once
+  at the turn entry; a named-but-undefined role (identity OR agent) is caught right at that computation and
+  surfaced as a terminal `role_unresolved` ErrorEvent (dispatch) / disabled cron (the existing fire catch),
+  carrying the RoleRegistry diagnostic but NOT the caller's broader scopes (acceptance: audit without
+  leaking). **Approval-resume needs NO new code** — it re-dispatches through `TurnService.dispatch`, so it
+  inherits the cap (covered compositionally: `ApprovalServiceReDispatchTest` proves decide→dispatch +
+  `TurnServiceAgentRoleCapIT` proves dispatch-applies-cap; a heavy combined IT would re-test the same path).
+  **Spawned workers need NO runtime change** — a worker is one direct generation with no tool loop (M18,
+  `DefaultWorkerRunner`), so it never reaches the `ToolExecutor` and has no surface to exceed the cap (pinned
+  by a containment IT — even when the worker's model emits a tool call, no `tool_invocations` row is written
+  — NOT by enforcement code; role INHERITANCE onto the child is already proven by `AgentRegistryTest`).
+  **Defense-in-depth per the ratified acceptance #5:** `SupervisorGraph.scopeVisibleBelt` scope-filters the
+  model-facing belt so the model is never even OFFERED an out-of-cap tool, while the FULL belt still reaches
+  the executor so a coerced/injected out-of-cap call is still denied + audited with the scope-specific
+  message (the `spawn_worker` built-in is added AFTER the filtered belt, so it is unaffected; cycles are
+  generation-only, no discovery to filter). `ConfigDoctor` validates each agent role resolves
+  (reader-as-oracle: a new public `RoleRegistry.BUILT_IN_ROLE_NAMES` ∪ the `roles/` listing — no drifting
+  second list of built-ins), the proactive twin of the runtime fail-closed. **TRAP:** adding
+  `registry.persona(id)` to `CronScheduler.fire` broke `CronSchedulerTest` (a `@Vetoed StubRegistry` that
+  overrode only `getOrCreate` — `persona()` then threw, the fire caught it, and delivery silently dropped to
+  0): when a production method grows a collaborator call, every hand-built stub of that collaborator must
+  model the new call. [#167]

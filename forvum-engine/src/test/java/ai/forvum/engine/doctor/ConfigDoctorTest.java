@@ -126,6 +126,70 @@ class ConfigDoctorTest {
     }
 
     @Test
+    void anAgentWithAnUnknownRoleIsAnError() throws IOException {
+        // #167: a role cap an agent declares must resolve via RoleRegistry (a built-in or a roles/<name>.json),
+        // else a turn would fail closed at runtime — surface it proactively as a config ERROR naming the role.
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json",
+                "{\"primaryModel\":\"ollama:qwen3:1.7b\",\"allowedTools\":[],\"roles\":[\"ghost-role\"]}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(report.findings().stream().anyMatch(f ->
+                        f.severity() == Severity.ERROR
+                     && f.location().contains("agents/main.json")
+                     && f.problem().contains("ghost-role")),
+                () -> "an agent's unknown role must be an error naming the role; findings: " + report.findings());
+    }
+
+    @Test
+    void anAgentWithBuiltInAndFileDefinedRolesIsHealthy() throws IOException {
+        // A built-in role (cron) and a roles/<name>.json-defined role (analyst) both resolve — no error.
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json",
+                "{\"primaryModel\":\"ollama:qwen3:1.7b\",\"allowedTools\":[],\"roles\":[\"cron\",\"analyst\"]}");
+        write("roles/analyst.json", "{\"scopes\":[\"FS_READ\"]}");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.healthy(),
+                () -> "built-in + file-defined agent roles must be healthy; findings: " + report.findings());
+    }
+
+    @Test
+    void aMalformedRoleFileIsAnError() throws IOException {
+        // #167: doctor parse-validates each roles/<name>.json through the same RoleSpecReader the engine
+        // loads with — an invalid scope name fails closed at every turn that uses the role, so doctor must
+        // surface it proactively (reader-as-oracle), not just check that the role NAME resolves.
+        writeValidMainAgent();
+        write("roles/limited.json", "{\"scopes\":[\"FS_REED\"]}"); // typo: FS_REED is not a PermissionScope
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(hasError(report, "roles/limited.json"),
+                () -> "a role file with an invalid scope must be an error; findings: " + report.findings());
+    }
+
+    @Test
+    void anIdentityWithAnUnknownRoleIsAnError() throws IOException {
+        // #167: an identity's declared roles feed the SAME RoleRegistry and fail closed identically to an
+        // agent's — doctor validates identity role resolution too (symmetric with agent role validation).
+        writeValidMainAgent();
+        write("identities/alice.json", "{\"channelAccounts\":{},\"roles\":[\"analytst\"]}"); // typo
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(report.findings().stream().anyMatch(f ->
+                        f.severity() == Severity.ERROR
+                     && f.location().contains("identities/alice.json")
+                     && f.problem().contains("analytst")),
+                () -> "an identity's unknown role must be an error naming the role; findings: " + report.findings());
+    }
+
+    @Test
     void anAgentMissingItsPersonaMarkdownIsAnError() throws IOException {
         // No agents/lonely.md → AgentSpecReader/Persona reject a blank system prompt (the Persona invariant).
         write("agents/lonely.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\",\"allowedTools\":[]}");
