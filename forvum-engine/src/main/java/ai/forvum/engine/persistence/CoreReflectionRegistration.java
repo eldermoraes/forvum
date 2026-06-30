@@ -4,6 +4,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import ai.forvum.core.BlockType;
 import ai.forvum.core.ChannelMessage;
+import ai.forvum.core.DeviceCredential;
 import ai.forvum.core.MemoryHit;
 import ai.forvum.core.MemoryPolicy;
 import ai.forvum.core.MemoryQuery;
@@ -43,6 +44,7 @@ import ai.forvum.core.id.Identity;
         AgentId.class,
         Identity.class,
         ChannelMessage.class,
+        DeviceCredential.class,
         Persona.class,
         ToolSpec.class,
         RoleSpec.class,

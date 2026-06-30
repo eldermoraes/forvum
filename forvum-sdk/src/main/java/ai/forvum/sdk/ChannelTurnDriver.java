@@ -1,6 +1,7 @@
 package ai.forvum.sdk;
 
 import ai.forvum.core.ChannelMessage;
+import ai.forvum.core.DeviceCredential;
 import ai.forvum.core.event.AgentEvent;
 
 import java.util.function.Consumer;
@@ -29,4 +30,21 @@ public interface ChannelTurnDriver {
      * The sink is invoked synchronously on the caller's thread, once per emitted event, in order.
      */
     void dispatch(ChannelMessage message, Consumer<AgentEvent> sink);
+
+    /**
+     * Drive a single turn carrying the device credential the channel adapter authenticated the
+     * connection with (#166). The engine ({@code TurnService}) overrides this to authenticate the
+     * credential against the paired device (timing-safe token compare, channel bind, revocation) BEFORE
+     * the responder runs and to intersect the device's {@code approvedScopes} into the turn's effective
+     * scopes.
+     *
+     * <p>The default delegates to {@link #dispatch(ChannelMessage, Consumer)} <em>without</em> consuming
+     * the credential, so the many channel-test fakes that implement only the two-arg method keep working
+     * unchanged ({@link DeviceCredential#ABSENT} — the paired-by-existence / operator / local path).
+     * A channel that authenticates a per-connection device (the Web channel) calls this overload; a
+     * channel with no per-connection credential keeps calling the two-arg method.
+     */
+    default void dispatch(ChannelMessage message, DeviceCredential credential, Consumer<AgentEvent> sink) {
+        dispatch(message, sink);
+    }
 }

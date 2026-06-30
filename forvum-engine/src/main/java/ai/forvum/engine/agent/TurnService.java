@@ -1,6 +1,7 @@
 package ai.forvum.engine.agent;
 
 import ai.forvum.core.ChannelMessage;
+import ai.forvum.core.DeviceCredential;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
 import ai.forvum.core.PermissionScope;
@@ -11,6 +12,8 @@ import ai.forvum.core.event.TokenDelta;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.engine.context.CurrentIdentity;
+import ai.forvum.engine.pairing.Device;
+import ai.forvum.engine.pairing.DeviceNotPairedException;
 import ai.forvum.engine.pairing.DeviceRegistry;
 import ai.forvum.engine.security.OutputFilteredException;
 import ai.forvum.engine.security.OutputGuardChain;
@@ -31,6 +34,8 @@ import java.net.UnknownHostException;
 import java.net.http.HttpConnectTimeoutException;
 import java.nio.channels.ClosedChannelException;
 import java.time.Instant;
+import java.util.EnumSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -117,19 +122,39 @@ public class TurnService implements ChannelTurnDriver {
     @Override
     @ActivateRequestContext
     public void dispatch(ChannelMessage message, Consumer<AgentEvent> sink) {
+        // Backward-compatible entry: a channel with no per-connection credential (TUI, the long-poll bots,
+        // the operator/local surfaces) drives the turn with DeviceCredential.ABSENT — the P2-4
+        // paired-by-existence path. @ActivateRequestContext is on this public entry, so the private
+        // delegate runs inside the request context it activates (no self-re-interception needed).
+        dispatchAuthenticated(message, DeviceCredential.ABSENT, sink);
+    }
+
+    /**
+     * Drive a turn carrying the {@link DeviceCredential} the channel adapter authenticated the connection
+     * with (#166). The Web channel calls this overload; the credential is authenticated against the paired
+     * device (timing-safe token compare, channel bind {@code deviceId == channelId}, revocation) BEFORE the
+     * responder runs, and the device's {@code approvedScopes} are intersected into the turn's scopes.
+     */
+    @Override
+    @ActivateRequestContext
+    public void dispatch(ChannelMessage message, DeviceCredential credential, Consumer<AgentEvent> sink) {
+        dispatchAuthenticated(message, credential, sink);
+    }
+
+    private void dispatchAuthenticated(ChannelMessage message, DeviceCredential credential,
+            Consumer<AgentEvent> sink) {
         AgentId agentId = new AgentId(DEFAULT_AGENT);
         String sessionId = message.channelId() + ":" + message.nativeUserId();
         UUID turnId = UUID.randomUUID();
 
         try {
-            // P2-4 device pairing: reject an unpaired/revoked device BEFORE the responder runs. The
-            // channelId is the device endpoint id (one devices/<channelId>.json declares its pairing).
-            // A cheap no-op for a known-good device, and entirely disabled until devices/ is configured
-            // (opt-in, no migration). The cli device (forvum ask, the host's trusted primary surface) is
-            // exempt so enabling pairing never locks out the operator's own terminal. cron turns NEVER
-            // reach here — CronScheduler.fire calls agent.respond directly — so cron is exempt BY
-            // CONSTRUCTION; the cron/server entries in EXEMPT are a defensive belt should that ever change.
-            devices.requirePaired(message.channelId());
+            // #166 device authentication: authenticate the device the turn arrives on BEFORE the responder
+            // runs. ABSENT (the two-arg entry) keeps the backward-compatible P2-4 paired-by-existence path;
+            // a PRESENT credential (the Web channel) is bound to the channel + timing-safe token-checked.
+            // An unpaired/revoked/unauthenticated device throws DeviceNotPairedException (or its
+            // DeviceAuthenticationException subtype), surfaced below as a terminal ErrorEvent before any
+            // model/tool runs. Disabled until devices/ is configured (opt-in); cli/cron/server exempt.
+            Optional<Device> device = devices.authenticate(message.channelId(), credential);
 
             registry.getOrCreate(agentId);
             Persona persona = registry.persona(agentId);
@@ -152,7 +177,12 @@ public class TurnService implements ChannelTurnDriver {
             Set<PermissionScope> effectiveScopes;
             try {
                 Set<PermissionScope> callerScopes = roles.effectiveScopes(effective.roleNames());
-                effectiveScopes = roles.capScopes(callerScopes, persona.roles());
+                Set<PermissionScope> capped = roles.capScopes(callerScopes, persona.roles());
+                // #166: intersect the paired device's approvedScopes when the device opts into scope
+                // governance. A device that declares no requested/approved scopes does NOT cap (opt-in,
+                // backward compatible); only approvedScopes are intersected, so a PENDING upgrade
+                // (requested-but-not-approved) never appears in CURRENT_EFFECTIVE_SCOPES.
+                effectiveScopes = intersectDeviceApprovedScopes(capped, device);
             } catch (IllegalStateException roleError) {
                 // The identity OR the agent names a role that resolves to no built-in and no
                 // roles/<name>.json. Fail CLOSED with an actionable config error rather than guess at scopes
@@ -210,6 +240,12 @@ public class TurnService implements ChannelTurnDriver {
             // escalated.
             sink.accept(ErrorEvent.from(Instant.now(), turnId, "identity_unresolved",
                     unresolved.getMessage(), unresolved));
+        } catch (DeviceNotPairedException deviceRejected) {
+            // #166 + P2-4: the device is unpaired, revoked, or presented an invalid / missing /
+            // cross-channel credential (the DeviceAuthenticationException subtype). Rejected BEFORE the
+            // responder, so no model/provider/tool ran. The message carries no token (secret hygiene, #166).
+            sink.accept(ErrorEvent.from(Instant.now(), turnId, "device_unpaired",
+                    deviceRejected.getMessage(), deviceRejected));
         } catch (RuntimeException e) {
             // A failed turn (model/network failure, fallback exhaustion, a persistence error) must not
             // escape a self-driving channel's callback. Surface it as a terminal ErrorEvent; the failed
@@ -227,6 +263,32 @@ public class TurnService implements ChannelTurnDriver {
      */
     String tenantIdentity(String resolvedIdentity) {
         return multiUserEnabled ? resolvedIdentity : CurrentIdentity.DEFAULT_IDENTITY;
+    }
+
+    /**
+     * Intersect the turn's already-authorized scopes with the paired device's {@code approvedScopes}
+     * when the device opts into scope governance (#166, the ratified opt-in-governed semantics). A device
+     * that declares neither requested nor approved scopes does NOT cap — the scopes pass through unchanged
+     * (backward compatible with P2-4 device files); {@link Optional#empty()} (pairing disabled) likewise
+     * does not cap. A scope-governed device intersects, so a PENDING upgrade (in {@code requestedScopes}
+     * but not yet {@code approvedScopes}) never reaches {@code CURRENT_EFFECTIVE_SCOPES} — only
+     * {@code approvedScopes} are intersected. Package-private + static so the rule is unit-testable
+     * without booting a turn.
+     */
+    static Set<PermissionScope> intersectDeviceApprovedScopes(Set<PermissionScope> scopes,
+            Optional<Device> device) {
+        if (device.isEmpty()) {
+            return scopes; // pairing disabled — no device to cap by
+        }
+        Device d = device.get();
+        boolean scopeGoverned = !d.requestedScopes().isEmpty() || !d.approvedScopes().isEmpty();
+        if (!scopeGoverned) {
+            return scopes; // a device declaring no scope governance does not restrict (opt-in)
+        }
+        Set<PermissionScope> intersected = EnumSet.noneOf(PermissionScope.class);
+        intersected.addAll(scopes);
+        intersected.retainAll(d.approvedScopes()); // caller ∩ agent-cap ∩ device-approved
+        return intersected;
     }
 
     /**
