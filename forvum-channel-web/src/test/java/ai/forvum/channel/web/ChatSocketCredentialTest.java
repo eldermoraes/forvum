@@ -58,6 +58,16 @@ class ChatSocketCredentialTest {
     }
 
     @Test
+    void aQueryTokenIsStrippedToMirrorTheTransport() {
+        // OperatorAuthMechanism.extractToken strips the query token before matching; the engine compares
+        // byte-exact, so ChatSocket must strip too or a whitespace-padded token authenticates at the
+        // transport then fails the engine compare (a fail-closed inconsistency).
+        SecurityIdentity device = identity("web", ChatSocket.DEVICE_ROLE);
+        DeviceCredential credential = ChatSocket.credentialFor(device, handshake(null, "access_token=%20padded%20"));
+        assertEquals("padded", credential.token(), "the query token is stripped, mirroring the transport");
+    }
+
+    @Test
     void anAnonymousOrNullIdentityPropagatesAbsent() {
         assertSame(DeviceCredential.ABSENT,
                 ChatSocket.credentialFor(null, handshake(null, "access_token=x")));

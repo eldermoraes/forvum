@@ -110,7 +110,9 @@ public class ChatSocket {
             for (String pair : query.split("&")) {
                 int eq = pair.indexOf('=');
                 if (eq > 0 && "access_token".equals(pair.substring(0, eq))) {
-                    return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                    // .strip() mirrors OperatorAuthMechanism.extractToken: the transport strips the query
+                    // token before matching, so the engine must compare the same stripped value.
+                    return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8).strip();
                 }
             }
         }
