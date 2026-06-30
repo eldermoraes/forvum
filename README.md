@@ -112,8 +112,11 @@ Forvum can connect to real messaging surfaces, so treat inbound messages as **un
 defaults are conservative — run `forvum doctor` to validate your config and surface malformed files,
 unknown providers, and pending device scope upgrades.
 
-- **Channel allowlists** — every server channel (Telegram, Discord, Signal, …) takes an
-  `allowedUserIds`; an empty list on a public bot allows *anyone*, so always set it.
+- **Channel allowlists (fail-closed, #170)** — every remote channel (Telegram, Discord, Slack, Matrix,
+  Signal, WhatsApp, Voice) denies all senders unless its `allowedUserIds` lists them or it explicitly sets
+  `"allowAllUsers": true`. An empty or missing list now admits **no one** (the binary logs a startup
+  warning for an enabled-but-empty channel); an intentionally open bot opts in with `allowAllUsers`, and
+  those users run as the anonymous identity (no tool scopes).
 - **Device pairing & role-based scopes** — unknown devices are paired explicitly
   (`forvum pair approve …`); an identity's role maps to a set of permission scopes, and a tool outside
   an agent's belt is refused and audited.

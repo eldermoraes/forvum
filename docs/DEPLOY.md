@@ -91,8 +91,17 @@ Validate the config any time with `sudo -u forvum env FORVUM_HOME=/var/lib/forvu
    sudo chmod 0600 /var/lib/forvum/channels/telegram.json
    ```
 
-   `allowedUserIds` restricts the bot to those ids. **An empty list allows anyone** — only do that on a
-   throwaway bot.
+   `allowedUserIds` restricts the bot to those ids. **An empty or missing list now denies every user
+   (#170, fail-closed).** To intentionally run an open bot, set `"allowAllUsers": true` — those users run
+   as the anonymous identity (no tool scopes) unless you map them to an identity.
+
+> **Breaking change (#170 — fail-closed channel admission).** Every remote channel (Telegram, Discord,
+> Slack, Matrix, Signal, WhatsApp, Voice) now **denies all senders** unless its `channels/<id>.json`
+> either lists `allowedUserIds` or sets `"allowAllUsers": true`. This inverts the pre-#170 default where an
+> empty/absent list admitted everyone. **Migration:** an existing deployment that relied on the empty-list
+> default must add an `allowedUserIds` list (to restrict) or `"allowAllUsers": true` (to keep it open,
+> conspicuously — the binary logs a startup WARNING for every public channel). `forvum doctor` flags a
+> public or contradictory (`allowAllUsers` + `allowedUserIds`) channel.
 
 ### 5. Install and start the systemd service
 
@@ -180,7 +189,8 @@ Config (`agents/`, `channels/`, …) is plain text under `$FORVUM_HOME` — keep
 ## Security checklist
 
 - [ ] Run as a dedicated unprivileged user (`forvum`), never root — the systemd unit enforces this.
-- [ ] Set `allowedUserIds` on Telegram (or any chat channel) — never leave it empty on a public bot.
+- [ ] Set `allowedUserIds` on Telegram (or any chat channel). An empty/missing list now denies everyone
+      (#170 fail-closed); use `"allowAllUsers": true` only to run an intentionally open bot.
 - [ ] Never expose the Web channel directly; bind to `127.0.0.1` and use an authenticating reverse
       proxy with TLS.
 - [ ] Keep provider API keys in `/etc/forvum/forvum.env` (`0640`, group `forvum`), not in the unit file

@@ -1663,3 +1663,44 @@ Generalizable lessons from completed milestones; append here as milestones land.
   guess the method set; (4) red-check the scope intersection by mutating it OUT and watching the tool-denial
   IT flip to allowed (green-for-right-reason). #166 = HOW to authenticate a configured device (opt-in kept);
   WHEN device auth becomes mandatory for remote channels (fail-closed defaults) is #170. [#166]
+- **A cross-channel "fail-closed default" is a SHARED policy in `forvum-sdk` + a per-channel one-line
+  delegation, NOT seven hand-rolled predicates — and the breaking-default flip's real cost is the test
+  blast radius, not the production edit.** #170 inverted the seven remote channels' fail-OPEN admission
+  (`allowedUserIds.isEmpty() || contains(id)` = empty-list-allows-anyone) to fail-CLOSED
+  (`ChannelAdmissionPolicy.admits(allowedIds, allowAllUsers, id)`: empty/missing list DENIES unless an
+  explicit `allowAllUsers` opt-in). The decision (#170 A1) was admission-flip-ONLY: a remote channel with
+  no allowlist and no public flag denies every sender (the "fails closed" branch of the acceptance
+  criterion), and device pairing (#166) stays opt-in/orthogonal — NOT made mandatory. Where the policy
+  lives is the load-bearing call: a tiny pure `ChannelAdmissionPolicy` in `forvum-sdk` (Quarkus-free,
+  type-agnostic so Telegram's `Set<Long>` and the others' `Set<String>` both use it) reused by all seven
+  channel `Spec` records AND the engine `ConfigDoctor` AND the app `ChannelSecurityAudit` — one source of
+  truth, no seven-way drift, one contract test (the idiomatic Forvum "shared channel contract in the SDK",
+  cf. `ChannelTurnDriver`). **The "public mode does not grant privileged scopes" criterion needs ZERO new
+  scope machinery — it composes with #168**: a public-mode-admitted sender is unmapped → resolves to the
+  `anonymous` identity → empty scope set → `ToolExecutor` denies every scoped tool. Proven by a security
+  test driving an IN-belt `fs.write` (belt gate passes) that the SCOPE gate denies for the anonymous
+  principal (distinct from `PromptInjectionToolDeniedTest`'s empty-belt belt-miss). **Boot-audit vs doctor
+  split:** the app `ChannelSecurityAudit` (a `StartupEvent` observer gated on `CommandMode.isOneShot()` like
+  `OperatorAuthFailClosed`, so zero cold-start cost) knows the channel set (`ChannelLauncher.ADMISSION_GOVERNED_CHANNELS`
+  = `SERVER_CHANNELS` minus web), so it WARNs the deny-everyone nudge + public + contradictory; the engine
+  `ConfigDoctor.checkChannelSecurity` is channel-agnostic, so it keys on `allowAllUsers` being PRESENT
+  (only an admission-governed channel sets it) → flags public/contradictory with no false-positive on the
+  token-gated web channel. **Test blast radius (the real work):** adding `allowAllUsers` as a trailing
+  `Spec` record component breaks EVERY `new Spec(...)` call-site, and each channel had 2–5 coupled tests
+  beyond its config test — the processor IT, the poll-loop/sync-loop test, the log-redaction-wiring test —
+  that relied on empty-list-allows-anyone to drive an admitted turn; each must opt into public mode
+  (`, true` on the ctor, or `"allowAllUsers": true` in a config-FILE-backed fixture), while a populated-list
+  membership/deny test just appends `, false`. The `empty-list-allows` config-unit assertions INVERT to
+  deny + gain a public-mode case. A parallel one-agent-per-channel sweep (worktree-free, distinct modules,
+  no cross-file conflict) is the right tool — but tell each agent to run its FULL module suite and fix
+  every now-red test, not just the config test. **NPE trap the sweep surfaced (real bug, fixed centrally):**
+  the channels back the allowlist with an immutable `Set.copyOf(...)`, whose `contains(null)` THROWS in JDK
+  25 — the old WhatsApp/Voice predicates carried a `senderId != null` guard that naive delegation dropped,
+  so `admits` must itself guard the null id (`userId != null && allowedIds.contains(userId)`), centralizing
+  the guard for every channel. Two independent agents hit the same NPE and the shared-policy fix resolved
+  both. **Verify-under-saturation flake:** launching the full `./mvnw verify` while six build-agents were
+  still finishing saturated the box — the forvum-app `@QuarkusTest` boot ballooned to 122 s and the fork
+  failed with the app reporting only one test class and NO `<<< FAILURE` marker; re-running
+  `-pl forvum-app test` on the now-idle machine is the diagnostic (every other module was SUCCESS), mirroring
+  the documented macOS ApprovalServiceIT saturation flake — don't read a fork-killed-under-load app failure
+  as a code failure. [#170]
