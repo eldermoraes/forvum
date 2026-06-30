@@ -475,4 +475,43 @@ class ConfigDoctorTest {
                 () -> "a malformed outputSchema must be an error naming the file; findings: "
                         + report.findings());
     }
+
+    @Test
+    void flagsPublicModeChannelAsWarning() throws IOException {
+        write("channels/telegram.json",
+                "{ \"enabled\": true, \"botToken\": \"t\", \"allowAllUsers\": true }");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.findings().stream().anyMatch(f ->
+                        f.location().equals("channels/telegram.json")
+                                && f.severity() == Severity.WARNING
+                                && f.problem().toLowerCase().contains("public")),
+                () -> "an allowAllUsers channel must be flagged PUBLIC (#170); findings: " + report.findings());
+    }
+
+    @Test
+    void flagsContradictoryChannelAsWarning() throws IOException {
+        write("channels/discord.json",
+                "{ \"enabled\": true, \"allowAllUsers\": true, \"allowedUserIds\": [\"5\"] }");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.findings().stream().anyMatch(f ->
+                        f.location().equals("channels/discord.json")
+                                && f.problem().toLowerCase().contains("ignored")),
+                () -> "allowAllUsers + allowedUserIds is contradictory (#170); findings: " + report.findings());
+    }
+
+    @Test
+    void doesNotFlagARestrictedChannel() throws IOException {
+        write("channels/telegram.json",
+                "{ \"enabled\": true, \"botToken\": \"t\", \"allowedUserIds\": [\"5\"] }");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.findings().stream().anyMatch(f ->
+                        f.location().equals("channels/telegram.json")),
+                "a restricted (non-public) channel needs no channel-security finding (#170)");
+    }
 }

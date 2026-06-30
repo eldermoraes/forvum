@@ -19,6 +19,7 @@ import ai.forvum.engine.graph.OutputSchemaException;
 import ai.forvum.engine.graph.OutputSchemaValidator;
 import ai.forvum.engine.pairing.Device;
 import ai.forvum.engine.pairing.DeviceSpecReader;
+import ai.forvum.sdk.ChannelAdmissionPolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -83,6 +84,7 @@ public final class ConfigDoctor {
         checkRawJsonDirectory(findings, home.identities(), "identities");
         checkIdentityRoles(findings);
         checkRawJsonDirectory(findings, home.channels(), "channels");
+        checkChannelSecurity(findings);
         checkRawJsonDirectory(findings, home.mcpServers(), "mcp-servers");
         checkDevices(findings);
         checkRootConfig(findings);
@@ -194,6 +196,62 @@ public final class ConfigDoctor {
                 findings.add(malformed(location, e));
             }
         }
+    }
+
+    /**
+     * Flag a channel that opts into public mode (#170): {@code allowAllUsers:true} is a WARNING (any
+     * platform user is admitted; conspicuous by design), and {@code allowAllUsers:true} alongside a
+     * non-empty {@code allowedUserIds} is a contradictory config whose allow-list is dead. Keyed on the
+     * {@code allowAllUsers} field, so a token-gated channel (web) that carries no such field is never
+     * flagged, and the fail-closed deny-by-default state (no allow-list, no public flag) is the safe
+     * default the boot audit nudges, not an error. Reuses {@link ChannelAdmissionPolicy} so doctor and the
+     * runtime agree on the posture.
+     */
+    private void checkChannelSecurity(List<Finding> findings) {
+        ChannelReader reader = new ChannelReader(loader, home);
+        for (String id : reader.ids()) {
+            String location = "channels/" + id + ".json";
+            JsonNode node;
+            try {
+                node = reader.read(id).orElse(null);
+            } catch (UncheckedIOException e) {
+                continue; // malformed JSON already reported by checkRawJsonDirectory
+            }
+            if (node == null) {
+                continue;
+            }
+            JsonNode allowAllNode = node.get("allowAllUsers");
+            boolean publicMode = allowAllNode != null && allowAllNode.asBoolean(false);
+            if (!publicMode) {
+                continue; // only an explicit opt-in is auditable here; deny-by-default is the safe state
+            }
+            Set<String> allowed = channelAllowedUserIds(node);
+            if (ChannelAdmissionPolicy.isContradictory(allowed, true)) {
+                findings.add(new Finding(Severity.WARNING, location,
+                        "Channel '" + id + "' sets allowAllUsers AND allowedUserIds — public mode wins, the "
+                      + "allow-list is ignored",
+                        "Remove one of allowAllUsers / allowedUserIds in " + location + "."));
+            } else {
+                findings.add(new Finding(Severity.WARNING, location,
+                        "Channel '" + id + "' is PUBLIC (allowAllUsers): any platform user is admitted",
+                        "Remove allowAllUsers and list allowedUserIds to restrict, or keep it intentionally "
+                      + "public (users run as anonymous, no tool scopes). See docs/DEPLOY.md."));
+            }
+        }
+    }
+
+    /** The (possibly empty) string {@code allowedUserIds} of a raw channel spec — null-safe. */
+    private static Set<String> channelAllowedUserIds(JsonNode node) {
+        Set<String> ids = new java.util.LinkedHashSet<>();
+        JsonNode arr = node.get("allowedUserIds");
+        if (arr != null && arr.isArray()) {
+            arr.forEach(id -> {
+                if (!id.asText().isBlank()) {
+                    ids.add(id.asText().trim());
+                }
+            });
+        }
+        return ids;
     }
 
     /**
