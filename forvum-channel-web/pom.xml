@@ -49,6 +49,13 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-websockets-next</artifactId>
         </dependency>
+        <!-- #166: read the handshake-authenticated principal (SecurityIdentity) to tell an operator (#165)
+             from a paired device, so the device's credential is propagated into the turn. Provides the
+             SecurityIdentity producer the @WebSocket endpoint injects. Version via platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-security</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>

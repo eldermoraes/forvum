@@ -1,5 +1,6 @@
 package ai.forvum.engine.pairing;
 
+import ai.forvum.core.DeviceCredential;
 import ai.forvum.engine.config.ConfigurationChangedEvent;
 import ai.forvum.engine.config.DeviceReader;
 
@@ -7,7 +8,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -77,6 +80,88 @@ public class DeviceRegistry {
             return; // exempt device, or opt-in pairing not configured — let the turn through
         }
         resolve(deviceId); // declared + non-revoked, or throw
+    }
+
+    /**
+     * Authenticate the device a turn arrives on, BEFORE the responder runs (#166). Returns the paired
+     * {@link Device} to authorize the turn against (the caller intersects its {@code approvedScopes}),
+     * or {@link Optional#empty()} when pairing is disabled (opt-in — no device restriction).
+     *
+     * <ul>
+     *   <li>An exempt {@code cron}/{@code server}/{@code cli} device authenticates unconditionally — the
+     *       local/trusted surfaces (a presented credential, if any, is ignored).</li>
+     *   <li>Pairing disabled (no {@code devices/}) ⇒ {@link Optional#empty()} (P2-4 opt-in, backward
+     *       compatible; #170 decides when pairing becomes mandatory).</li>
+     *   <li>Otherwise the device must be declared and non-revoked ({@link #resolve}, else
+     *       {@link DeviceNotPairedException}).</li>
+     *   <li>A PRESENT credential ({@link DeviceCredential#present()}) is bound to the channel — its
+     *       {@code deviceId} MUST equal {@code channelId}, so a credential issued for one channel/device
+     *       cannot authorize another — and, when the device declares a {@code token}, the presented token
+     *       MUST match it in constant time ({@link MessageDigest#isEqual}); a wrong or missing token
+     *       throws {@link DeviceAuthenticationException}.</li>
+     *   <li>An ABSENT credential keeps the backward-compatible P2-4 paired-by-existence behavior (the
+     *       operator/local path).</li>
+     * </ul>
+     *
+     * <p><strong>Secret hygiene (#166).</strong> No token — presented or expected — ever appears in a
+     * thrown message; only the device id and the failure kind do.
+     */
+    public Optional<Device> authenticate(String channelId, DeviceCredential credential) {
+        if (EXEMPT.contains(channelId)) {
+            return Optional.of(resolve(channelId)); // local/trusted surface — always paired
+        }
+        if (!pairingEnabled()) {
+            return Optional.empty(); // opt-in: no device files ⇒ no device restriction (P2-4)
+        }
+        Device device = resolve(channelId); // declared + non-revoked, else DeviceNotPairedException (P2-4)
+        if (credential.present()) {
+            if (!channelId.equals(credential.deviceId())) {
+                throw new DeviceAuthenticationException(
+                        "Device credential for '" + credential.deviceId() + "' cannot authorize a turn on "
+                      + "channel '" + channelId + "' — a credential is bound to one device/channel.");
+            }
+            if (!device.token().isBlank() && !constantTimeEquals(credential.token(), device.token())) {
+                throw new DeviceAuthenticationException(
+                        "Device '" + channelId + "' presented an invalid or missing token. Re-pair it with "
+                      + "the token from devices/" + channelId + ".json.");
+            }
+        }
+        return Optional.of(device);
+    }
+
+    /**
+     * Resolve a presented token to the paired, non-revoked device it authenticates, by a constant-time
+     * compare against each declared device's token (#166). The Web transport layer
+     * ({@code OperatorAuthMechanism}) uses this to admit a connection presenting a device's own token
+     * (distinct from the #165 operator token) and mint a {@code device}-role principal. Returns
+     * {@link Optional#empty()} when the token is blank, pairing is disabled, or no non-revoked device
+     * declares a matching token; a tokenless device pairs by existence and is never matched here.
+     *
+     * <p>The per-device compare is constant-time ({@link MessageDigest#isEqual}); the count of declared
+     * devices is not a secret. Does blocking file IO (the lazy device load) — call OFF the Vert.x event
+     * loop.
+     */
+    public Optional<Device> authenticateByToken(String token) {
+        if (token == null || token.isBlank() || !pairingEnabled()) {
+            return Optional.empty();
+        }
+        for (String id : reader.ids()) {
+            Optional<Device> candidate = lookup(id);
+            if (candidate.isPresent()) {
+                Device device = candidate.get();
+                if (!device.revoked() && !device.token().isBlank()
+                        && constantTimeEquals(token, device.token())) {
+                    return candidate;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Constant-time secret compare (mirrors {@code OperatorCredentialStore}) so a wrong token cannot be timed. */
+    private static boolean constantTimeEquals(String presented, String expected) {
+        return MessageDigest.isEqual(
+                presented.getBytes(StandardCharsets.UTF_8), expected.getBytes(StandardCharsets.UTF_8));
     }
 
     /**

@@ -1,5 +1,7 @@
 package ai.forvum.app;
 
+import ai.forvum.engine.pairing.DeviceRegistry;
+
 import io.quarkus.security.AuthenticationFailedException;
 import io.quarkus.security.identity.IdentityProviderManager;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -11,6 +13,7 @@ import io.quarkus.vertx.http.runtime.security.HttpAuthenticationMechanism;
 import io.quarkus.vertx.http.runtime.security.HttpCredentialTransport;
 
 import io.smallrye.mutiny.Uni;
+import io.smallrye.mutiny.infrastructure.Infrastructure;
 import io.vertx.ext.web.RoutingContext;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -36,18 +39,25 @@ import java.util.Set;
  * <p><strong>No information leak:</strong> a missing token yields anonymous (the policy then challenges
  * with {@code 401}); a wrong token fails with {@link AuthenticationFailedException} ({@code 401}). The
  * challenge is a constant {@code Bearer} header — it never reveals whether a given approval/CAPR id
- * exists. An authenticated principal lacking the {@code operator} role is rejected with {@code 403} by the
- * policy (the standard {@code @TestSecurity}-covered path; this mechanism only ever mints operators).
+ * exists. An authenticated principal whose role the path's policy does not allow is rejected with
+ * {@code 403} (the standard {@code @TestSecurity}-covered path).
  *
- * <p>This is the web authenticated-principal seam #166 (device-token pairing) and #170 (fail-open default
- * removal) reuse — a later device token resolves to a {@code SecurityIdentity} with the device's
- * {@code approvedScopes} through this same mechanism.
+ * <p><strong>Device tokens (#166).</strong> A token that is not the operator secret is matched, off the
+ * event loop, against every paired device's own token ({@link DeviceRegistry#authenticateByToken}); a
+ * match mints a {@code device}-role {@link SecurityIdentity} whose principal is the device id. The
+ * {@code /ws/chat} policy admits the {@code device} role alongside {@code operator}; the dashboards stay
+ * {@code operator}-only. This is the web authenticated-principal/device boundary #166 reuses — the engine
+ * then re-authenticates the device + intersects its {@code approvedScopes} at the turn. #170 (fail-open
+ * default removal) reuses the same seam.
  */
 @ApplicationScoped
 public class OperatorAuthMechanism implements HttpAuthenticationMechanism {
 
     /** The role the dashboard/socket HTTP security policy requires. */
     static final String OPERATOR_ROLE = "operator";
+
+    /** The role a paired-device token mints (#166); the {@code /ws/chat} policy admits it alongside operator. */
+    static final String DEVICE_ROLE = "device";
 
     /** The custom authentication scheme name (selected per path via {@code auth-mechanism=operator}). */
     static final String SCHEME = "operator";
@@ -57,6 +67,9 @@ public class OperatorAuthMechanism implements HttpAuthenticationMechanism {
     @Inject
     OperatorCredentialStore credentials;
 
+    @Inject
+    DeviceRegistry devices;
+
     @Override
     public Uni<SecurityIdentity> authenticate(RoutingContext context, IdentityProviderManager identityProviderManager) {
         String presented = extractToken(context);
@@ -64,14 +77,27 @@ public class OperatorAuthMechanism implements HttpAuthenticationMechanism {
             // No credential: stay anonymous so the policy can issue a 401 challenge.
             return Uni.createFrom().nullItem();
         }
-        if (!credentials.matches(presented)) {
-            return Uni.createFrom().failure(new AuthenticationFailedException());
+        if (credentials.matches(presented)) {
+            return Uni.createFrom().item(buildIdentity(OPERATOR_ROLE, OPERATOR_ROLE));
         }
-        SecurityIdentity identity = QuarkusSecurityIdentity.builder()
-                .setPrincipal(new QuarkusPrincipal(OPERATOR_ROLE))
-                .addRole(OPERATOR_ROLE)
+        // #166: not the operator token — try to authenticate it as a paired device's OWN token. The
+        // device lookup does blocking file IO (it reads devices/), so it runs OFF the Vert.x event loop
+        // on a worker thread. A match mints a `device`-role SecurityIdentity whose principal is the
+        // device id, which the /ws/chat policy admits; no match fails with 401. The token never leaves
+        // this mechanism — only the device id rides the identity.
+        return Uni.createFrom().item(presented)
+                .map(devices::authenticateByToken)
+                .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
+                .map(maybe -> maybe
+                        .map(device -> buildIdentity(device.id(), DEVICE_ROLE))
+                        .orElseThrow(AuthenticationFailedException::new));
+    }
+
+    private static SecurityIdentity buildIdentity(String principal, String role) {
+        return QuarkusSecurityIdentity.builder()
+                .setPrincipal(new QuarkusPrincipal(principal))
+                .addRole(role)
                 .build();
-        return Uni.createFrom().item(identity);
     }
 
     @Override

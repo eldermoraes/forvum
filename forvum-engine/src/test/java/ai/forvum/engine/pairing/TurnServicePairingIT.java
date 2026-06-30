@@ -1,17 +1,21 @@
 package ai.forvum.engine.pairing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.ChannelMessage;
+import ai.forvum.core.DeviceCredential;
 import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.Done;
 import ai.forvum.core.event.ErrorEvent;
 import ai.forvum.engine.agent.TurnService;
+import ai.forvum.engine.persistence.ProviderCallEntity;
 import ai.forvum.engine.persistence.SessionEntity;
+import ai.forvum.engine.persistence.ToolInvocationEntity;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -124,6 +128,69 @@ class TurnServicePairingIT {
             assertNotNull(SessionEntity.findById(exempt + ":svc"),
                     "the exempt '" + exempt + "' turn ran the responder and created its session");
         }
+    }
+
+    // ---- #166 device-token authentication at the turn entry ----
+
+    @Test
+    void aValidDeviceTokenAuthenticatesAndCompletesTheTurn() {
+        List<AgentEvent> events = new ArrayList<>();
+
+        // The Web channel presents the device's token; it matches devices/web.json, so the turn runs.
+        turns.dispatch(new ChannelMessage("web", "sess-a", "hello", Instant.now()),
+                new DeviceCredential("web", "w-secret"), events::add);
+
+        assertInstanceOf(Done.class, events.get(events.size() - 1),
+                "a valid device token completes the turn with a terminal Done");
+        assertNotNull(SessionEntity.findById("web:sess-a"), "the authenticated turn created its session");
+    }
+
+    @Test
+    void aWrongDeviceTokenIsRejectedBeforeTheResponderWithZeroProviderAndToolCalls() {
+        List<AgentEvent> events = new ArrayList<>();
+
+        turns.dispatch(new ChannelMessage("web", "sess-bad", "hello", Instant.now()),
+                new DeviceCredential("web", "WRONG-secret-value"), events::add);
+
+        assertEquals(1, events.size(), "an unauthenticated device yields a single terminal ErrorEvent");
+        ErrorEvent error = assertInstanceOf(ErrorEvent.class, events.get(0),
+                "an invalid token surfaces as a terminal ErrorEvent, never a TokenDelta/Done");
+        assertEquals(DeviceAuthenticationException.class.getName(), error.exceptionClass());
+        assertFalse(error.message().contains("WRONG-secret-value"),
+                "secret hygiene: the presented token must never leak into the surfaced error");
+        assertNull(SessionEntity.findById("web:sess-bad"),
+                "the responder never ran — no session row for the rejected device");
+        assertEquals(0L, ProviderCallEntity.count("sessionId = ?1", "web:sess-bad"),
+                "a rejected authentication performs zero provider invocations");
+        assertEquals(0L, ToolInvocationEntity.count("sessionId = ?1", "web:sess-bad"),
+                "a rejected authentication performs zero tool invocations");
+    }
+
+    @Test
+    void aMissingDeviceTokenIsRejectedWhenTheDeviceRequiresOne() {
+        List<AgentEvent> events = new ArrayList<>();
+
+        // A present credential with no token, against a device that declares one, is a missing-token failure.
+        turns.dispatch(new ChannelMessage("web", "sess-missing", "hello", Instant.now()),
+                new DeviceCredential("web", ""), events::add);
+
+        ErrorEvent error = assertInstanceOf(ErrorEvent.class, events.get(0));
+        assertEquals(DeviceAuthenticationException.class.getName(), error.exceptionClass());
+        assertNull(SessionEntity.findById("web:sess-missing"));
+    }
+
+    @Test
+    void aCrossChannelDeviceCredentialIsRejected() {
+        List<AgentEvent> events = new ArrayList<>();
+
+        // A credential claiming device 'oldphone' presented on channel 'web' must not authorize the turn.
+        turns.dispatch(new ChannelMessage("web", "sess-cross", "hello", Instant.now()),
+                new DeviceCredential("oldphone", "w-secret"), events::add);
+
+        ErrorEvent error = assertInstanceOf(ErrorEvent.class, events.get(0));
+        assertEquals(DeviceAuthenticationException.class.getName(), error.exceptionClass(),
+                "a credential bound to one device/channel cannot authorize another");
+        assertNull(SessionEntity.findById("web:sess-cross"));
     }
 
     /** Seeds {@code main} on the fake provider, a paired {@code web} device (identity alice), a revoked

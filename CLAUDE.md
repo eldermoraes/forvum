@@ -1637,3 +1637,29 @@ Generalizable lessons from completed milestones; append here as milestones land.
   overrode only `getOrCreate` — `persona()` then threw, the fire caught it, and delivery silently dropped to
   0): when a production method grows a collaborator call, every hand-built stub of that collaborator must
   model the new call. [#167]
+- **A PRIOR seam often already names its successor — read the related javadoc before inventing an approach.**
+  #166 authenticated device tokens (P2-4 parsed `token`/`approvedScopes` but never compared/intersected
+  them — a configured device was authorized by mere existence). The #165 `OperatorAuthMechanism` javadoc
+  EXPLICITLY said "a device token resolves to a `SecurityIdentity` through this same mechanism," and the
+  issue's "coordinate with #165, not a second credential mechanism" confirmed it — so the web path EXTENDS
+  that mechanism (a non-operator token → `device`-role identity, `/ws/chat` policy admits operator OR
+  device, dashboards stay operator-only) rather than building a parallel one. The credential is a
+  transport-neutral `DeviceCredential(deviceId, token)` `forvum-core` record with a **redacted `toString()`**
+  (secret never enters a log/error/ledger), carried on a NEW `ChannelTurnDriver.dispatch` overload added as
+  a **default delegating to the 2-arg method** — a new *abstract* method would have broken all 10+ channel-test
+  fakes; only `TurnService` + the web fake override it. Engine auth = `DeviceRegistry.authenticate` (constant-time
+  `MessageDigest.isEqual` + `deviceId==channelId` bind + revocation, throwing a `DeviceNotPairedException`
+  subtype with no token in the message), BEFORE the responder. **The `approvedScopes` intersection is
+  PRESENT-only:** apply it iff the turn authenticated AS a device (a credential was presented), so the host
+  operator / local surface (the ABSENT path, kept for P2-4 backward-compat) is NEVER device-capped — `approvedScopes`
+  govern a paired device, not the host; a pending upgrade never appears because only `approvedScopes` (not
+  `requestedScopes`) are intersected. TRAPS: (1) `@Inject SecurityIdentity` in a `@WebSocket` endpoint needs
+  `quarkus-security` AS A DIRECT dep on the Layer-3 web channel — the transitive api alone gives no producer,
+  so the module's own `@QuarkusTest` fails boot with `UnsatisfiedResolutionException` (masked in the assembled
+  app, which has the mechanism); (2) the mechanism's device lookup does blocking file IO, so run it OFF the
+  Vert.x event loop (`Uni...runSubscriptionOn(Infrastructure.getDefaultWorkerPool())`) — the `Uni` boundary is
+  already framework-mandated; (3) a `SecurityIdentity` test fake needs `getPermissions(): Set<Permission>`
+  (not just `checkPermission`) — `javap` it via the real test classpath (`dependency:build-classpath`), don't
+  guess the method set; (4) red-check the scope intersection by mutating it OUT and watching the tool-denial
+  IT flip to allowed (green-for-right-reason). #166 = HOW to authenticate a configured device (opt-in kept);
+  WHEN device auth becomes mandatory for remote channels (fail-closed defaults) is #170. [#166]
