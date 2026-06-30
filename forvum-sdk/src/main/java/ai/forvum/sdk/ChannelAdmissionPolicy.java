@@ -23,11 +23,15 @@ public final class ChannelAdmissionPolicy {
 
     /**
      * Fail-closed admission: a non-empty allowlist decides by membership; an empty or {@code null}
-     * allowlist admits {@code userId} only when {@code publicMode} is explicitly enabled.
+     * allowlist admits {@code userId} only when {@code publicMode} is explicitly enabled. A {@code null}
+     * {@code userId} is never a member, so it is denied against a non-empty allowlist (the
+     * {@code senderId != null} guard the per-channel predicates carried, preserved here — and required
+     * because the channels back the allowlist with an immutable {@code Set.copyOf(...)} whose
+     * {@code contains(null)} throws).
      */
     public static <T> boolean admits(Set<T> allowedIds, boolean publicMode, T userId) {
         if (allowedIds != null && !allowedIds.isEmpty()) {
-            return allowedIds.contains(userId);
+            return userId != null && allowedIds.contains(userId);
         }
         return publicMode;
     }

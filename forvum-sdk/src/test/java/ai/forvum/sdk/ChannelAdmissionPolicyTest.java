@@ -56,4 +56,15 @@ class ChannelAdmissionPolicyTest {
         assertTrue(ChannelAdmissionPolicy.admits(Set.of(42L, 99L), false, 42L));
         assertFalse(ChannelAdmissionPolicy.admits(Set.of(42L), false, 7L));
     }
+
+    @Test
+    void nullUserIdIsDeniedAgainstANonEmptyAllowlistWithoutThrowing() {
+        // The channels back the allowlist with an immutable Set.copyOf(...), whose contains(null) throws;
+        // admits must guard the null id and deny it (the per-channel senderId != null guard, centralized).
+        assertFalse(ChannelAdmissionPolicy.admits(Set.of("u1"), false, null),
+                "a null user id is never a member of a non-empty allowlist (no NPE)");
+        // With an empty allowlist the membership branch is skipped, so public mode still decides.
+        assertTrue(ChannelAdmissionPolicy.admits(Set.of(), true, null));
+        assertFalse(ChannelAdmissionPolicy.admits(Set.of(), false, null));
+    }
 }
