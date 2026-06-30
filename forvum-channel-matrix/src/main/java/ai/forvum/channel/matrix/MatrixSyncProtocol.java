@@ -110,8 +110,9 @@ final class MatrixSyncProtocol {
 
     /**
      * Whether the channel should auto-join {@code invite}: only when the inviter is identifiable AND
-     * passes {@code allowedUserIds} (an unidentifiable inviter is never trusted, even with an empty
-     * "allow any" list). The ignore log line is the caller's concern.
+     * passes {@code allowedUserIds} (an unidentifiable inviter is never trusted; since #170 an empty
+     * allow-list denies every inviter unless {@code allowAllUsers} is set). The ignore log line is the
+     * caller's concern.
      */
     static boolean shouldJoin(Invite invite, Spec spec) {
         return invite.inviter() != null && spec.isUserAllowed(invite.inviter());

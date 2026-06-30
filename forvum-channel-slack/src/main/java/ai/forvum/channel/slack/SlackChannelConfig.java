@@ -1,5 +1,7 @@
 package ai.forvum.channel.slack;
 
+import ai.forvum.sdk.ChannelAdmissionPolicy;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -96,6 +98,9 @@ public class SlackChannelConfig {
         JsonNode enabledNode = root.get("enabled");
         boolean enabled = enabledNode == null || enabledNode.asBoolean(true);
 
+        JsonNode allowAllNode = root.get("allowAllUsers");
+        boolean allowAllUsers = allowAllNode != null && allowAllNode.asBoolean(false);
+
         Set<String> allowed = new LinkedHashSet<>();
         JsonNode allowedNode = root.get("allowedUserIds");
         if (allowedNode != null && allowedNode.isArray()) {
@@ -105,7 +110,8 @@ public class SlackChannelConfig {
                 }
             }
         }
-        return new Spec(enabled, token(root, "botToken"), token(root, "appToken"), Set.copyOf(allowed));
+        return new Spec(enabled, token(root, "botToken"), token(root, "appToken"), Set.copyOf(allowed),
+                allowAllUsers);
     }
 
     /** A token field's value, absent when missing or blank (a blank credential is no credential). */
@@ -126,22 +132,25 @@ public class SlackChannelConfig {
      * @param appToken       the app-level ({@code xapp-}) token authorizing
      *                       {@code apps.connections.open}, absent when unset (same no-op contract).
      * @param allowedUserIds the Slack user ids (e.g. {@code U0123ABC}) permitted to use the bot; an
-     *                       EMPTY set means "allow any user" (single-user convenience), a non-empty set
-     *                       RESTRICTS to exactly those ids.
+     *                       EMPTY set now DENIES every user unless {@code allowAllUsers} is true (#170
+     *                       fail-closed), a non-empty set RESTRICTS to exactly those ids.
+     * @param allowAllUsers  the explicit public-mode opt-in: when {@code allowedUserIds} is empty, admit
+     *                       any user instead of denying everyone.
      */
     public record Spec(boolean enabled, Optional<String> botToken, Optional<String> appToken,
-                       Set<String> allowedUserIds) {
+                       Set<String> allowedUserIds, boolean allowAllUsers) {
 
         static Spec empty() {
-            return new Spec(false, Optional.empty(), Optional.empty(), Set.of());
+            return new Spec(false, Optional.empty(), Optional.empty(), Set.of(), false);
         }
 
         /**
-         * Whether {@code userId} may use the bot: any user when {@code allowedUserIds} is empty,
-         * otherwise only ids in the set. The friendly refusal is the caller's concern.
+         * Whether {@code userId} may use the bot: a non-empty {@code allowedUserIds} restricts to its
+         * members; an empty one admits a user only under {@code allowAllUsers}. The friendly refusal is
+         * the caller's concern.
          */
         public boolean isUserAllowed(String userId) {
-            return allowedUserIds.isEmpty() || allowedUserIds.contains(userId);
+            return ChannelAdmissionPolicy.admits(allowedUserIds, allowAllUsers, userId);
         }
     }
 }

@@ -10,9 +10,11 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +45,9 @@ class SignalSseStreamTest {
 
     private HttpServer server;
 
+    @TempDir
+    static Path wireHome;
+
     @BeforeEach
     void startServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -64,8 +69,22 @@ class SignalSseStreamTest {
 
         SignalChannel channel = new SignalChannel();
         channel.processor = processor;
-        channel.config = new SignalChannelConfig(Path.of("/nonexistent/signal.json"));
+        channel.config = publicModeConfig();
         return channel;
+    }
+
+    /**
+     * A config bound to a {@code channels/signal.json} that admits any sender (#170 public mode): an empty
+     * allow-list now denies by default, so the streamed fixture's sender needs {@code allowAllUsers}.
+     */
+    private static SignalChannelConfig publicModeConfig() {
+        try {
+            Path file = Files.createDirectories(wireHome.resolve("channels")).resolve("signal.json");
+            Files.writeString(file, "{ \"allowAllUsers\": true }");
+            return new SignalChannelConfig(file);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Test
@@ -193,8 +212,10 @@ class SignalSseStreamTest {
         });
 
         Path channels = Files.createDirectories(home.resolve("channels"));
+        // #170: an empty allow-list now denies by default, so opt into public mode to admit the sender.
         Files.writeString(channels.resolve("signal.json"),
-                "{ \"baseUrl\": \"" + baseUrl() + "\", \"account\": \"+15559990000\" }");
+                "{ \"baseUrl\": \"" + baseUrl() + "\", \"account\": \"+15559990000\","
+                        + " \"allowAllUsers\": true }");
 
         FakeTurnDriver driver = new FakeTurnDriver();
         EnvelopeProcessor processor = new EnvelopeProcessor();

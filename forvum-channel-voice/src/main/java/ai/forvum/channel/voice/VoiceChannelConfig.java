@@ -1,5 +1,7 @@
 package ai.forvum.channel.voice;
 
+import ai.forvum.sdk.ChannelAdmissionPolicy;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -108,6 +110,9 @@ public class VoiceChannelConfig {
         JsonNode enabledNode = root.get("enabled");
         boolean enabled = enabledNode == null || enabledNode.asBoolean(true);
 
+        JsonNode allowAllNode = root.get("allowAllUsers");
+        boolean allowAllUsers = allowAllNode != null && allowAllNode.asBoolean(false);
+
         Set<String> allowed = new LinkedHashSet<>();
         JsonNode allowedNode = root.get("allowedUserIds");
         if (allowedNode != null && allowedNode.isArray()) {
@@ -132,7 +137,7 @@ public class VoiceChannelConfig {
                 nonBlank(root, "whisperBin"), nonBlank(root, "whisperModel"),
                 nonBlank(root, "piperBin"), nonBlank(root, "piperVoice"),
                 nonBlank(root, "ffmpegPath"),
-                inbox, outbox, Set.copyOf(allowed), timeoutSeconds);
+                inbox, outbox, Set.copyOf(allowed), timeoutSeconds, allowAllUsers);
     }
 
     /**
@@ -177,17 +182,21 @@ public class VoiceChannelConfig {
      *                       {@code home/channels/voice/inbox}).
      * @param outboxDir      the directory the synthesized reply WAV is moved into (default
      *                       {@code home/channels/voice/outbox}).
-     * @param allowedUserIds the native user ids permitted to use the assistant; an EMPTY set means "allow
-     *                       any" (single-user convenience), a non-empty set RESTRICTS to those ids.
+     * @param allowedUserIds the native user ids permitted to use the assistant; a non-empty set RESTRICTS
+     *                       to those ids. Fail-closed since #170: an EMPTY set now DENIES every sender
+     *                       unless {@code allowAllUsers} is set (no more "empty = allow any").
      * @param timeoutSeconds the per-subprocess timeout in seconds (default {@code 120}).
+     * @param allowAllUsers  public mode (#170): when {@code true}, an empty {@code allowedUserIds} admits
+     *                       any sender (the single-user convenience), opted into explicitly.
      */
     public record Spec(boolean enabled, Optional<String> whisperBin, Optional<String> whisperModel,
                        Optional<String> piperBin, Optional<String> piperVoice, Optional<String> ffmpegPath,
-                       Path inboxDir, Path outboxDir, Set<String> allowedUserIds, long timeoutSeconds) {
+                       Path inboxDir, Path outboxDir, Set<String> allowedUserIds, long timeoutSeconds,
+                       boolean allowAllUsers) {
 
         static Spec empty() {
             return new Spec(false, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                    Optional.empty(), Path.of(""), Path.of(""), Set.of(), DEFAULT_TIMEOUT_SECONDS);
+                    Optional.empty(), Path.of(""), Path.of(""), Set.of(), DEFAULT_TIMEOUT_SECONDS, false);
         }
 
         /**
@@ -200,11 +209,12 @@ public class VoiceChannelConfig {
         }
 
         /**
-         * Whether a sender carrying {@code senderId} may use the assistant: any sender when
-         * {@code allowedUserIds} is empty, otherwise only a listed id.
+         * Whether a sender carrying {@code senderId} may use the assistant (fail-closed, #170): a listed id
+         * when {@code allowedUserIds} is non-empty, else any sender only when {@code allowAllUsers} is set —
+         * an empty allow-list with no public mode DENIES everyone (via {@link ChannelAdmissionPolicy}).
          */
         public boolean isSenderAllowed(String senderId) {
-            return allowedUserIds.isEmpty() || (senderId != null && allowedUserIds.contains(senderId));
+            return ChannelAdmissionPolicy.admits(allowedUserIds, allowAllUsers, senderId);
         }
     }
 }

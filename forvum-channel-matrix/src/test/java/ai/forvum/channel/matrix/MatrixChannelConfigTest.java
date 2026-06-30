@@ -18,9 +18,9 @@ import java.util.Set;
 
 /**
  * {@code MatrixChannelConfig} reads {@code channels/matrix.json}: homeserver/accessToken/userId +
- * allowedUserIds parsing, the empty-list "allow any" convention, and the absent-file → empty/disabled
- * spec (so the channel boots gracefully with no {@code ~/.forvum/}). Plain POJO tests — no Quarkus boot
- * needed.
+ * allowedUserIds parsing, the #170 fail-closed admission (an empty/absent allow-list DENIES every user
+ * unless {@code allowAllUsers} opts into public mode), and the absent-file → empty/disabled spec (so the
+ * channel boots gracefully with no {@code ~/.forvum/}). Plain POJO tests — no Quarkus boot needed.
  */
 class MatrixChannelConfigTest {
 
@@ -41,19 +41,30 @@ class MatrixChannelConfigTest {
     }
 
     @Test
-    void emptyAllowListAllowsAnyUser() throws Exception {
+    void emptyAllowListDeniesAnyUser() throws Exception {
         Spec spec = MatrixChannelConfig.parse(MAPPER.readTree(
                 "{ \"homeserver\": \"https://m.org\", \"accessToken\": \"t\", \"allowedUserIds\": [] }"));
 
-        assertTrue(spec.isUserAllowed("@anyone:example.org"), "an empty allow-list permits any user");
+        assertFalse(spec.isUserAllowed("@anyone:example.org"),
+                "#170 fail-closed: an empty allow-list denies every user");
     }
 
     @Test
-    void absentAllowListAllowsAnyUser() throws Exception {
+    void absentAllowListDeniesAnyUser() throws Exception {
         Spec spec = MatrixChannelConfig.parse(MAPPER.readTree(
                 "{ \"homeserver\": \"https://m.org\", \"accessToken\": \"t\" }"));
 
-        assertTrue(spec.isUserAllowed("@anyone:example.org"), "an absent allow-list permits any user");
+        assertFalse(spec.isUserAllowed("@anyone:example.org"),
+                "#170 fail-closed: an absent allow-list denies every user");
+    }
+
+    @Test
+    void publicModeWithAnEmptyAllowListAdmitsAnyUser() throws Exception {
+        Spec spec = MatrixChannelConfig.parse(MAPPER.readTree(
+                "{ \"homeserver\": \"https://m.org\", \"accessToken\": \"t\", \"allowAllUsers\": true }"));
+
+        assertTrue(spec.isUserAllowed("@anyone:example.org"),
+                "public mode (allowAllUsers) opts an empty allow-list back into admitting any user");
     }
 
     @Test

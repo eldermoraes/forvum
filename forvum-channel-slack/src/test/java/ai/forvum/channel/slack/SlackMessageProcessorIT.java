@@ -56,7 +56,8 @@ class SlackMessageProcessorIT {
     }
 
     private static Spec anyUserSpec() {
-        return new Spec(true, Optional.of("xoxb-t"), Optional.of("xapp-t"), Set.of());
+        // Empty allow-list + explicit public mode (#170): admits any user, the pre-#170 "empty = allow all".
+        return new Spec(true, Optional.of("xoxb-t"), Optional.of("xapp-t"), Set.of(), true);
     }
 
     private static MessageEvent userMessage(String userId, String channelId, String text) {
@@ -90,7 +91,7 @@ class SlackMessageProcessorIT {
 
     @Test
     void aDisallowedUserIsRefusedWithAFriendlyMessageAndNoTurnRuns() {
-        Spec spec = new Spec(true, Optional.of("xoxb-t"), Optional.of("xapp-t"), Set.of("U42"));
+        Spec spec = new Spec(true, Optional.of("xoxb-t"), Optional.of("xapp-t"), Set.of("U42"), false);
 
         processor.process(userMessage("U999", "C888", "let me in"), spec, rest, AUTH);
 
@@ -102,7 +103,7 @@ class SlackMessageProcessorIT {
 
     @Test
     void anAllowedListedUserDrivesATurn() {
-        Spec spec = new Spec(true, Optional.of("xoxb-t"), Optional.of("xapp-t"), Set.of("U42"));
+        Spec spec = new Spec(true, Optional.of("xoxb-t"), Optional.of("xapp-t"), Set.of("U42"), false);
 
         processor.process(userMessage("U42", "C999", "hi"), spec, rest, AUTH);
 

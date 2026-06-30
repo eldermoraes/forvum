@@ -80,10 +80,11 @@ class MatrixChannelSyncLoopTest {
         };
     }
 
-    /** A {@code channels/matrix.json} carrying the serve-required keys incl. the bot's own user id. */
+    /** A {@code channels/matrix.json} carrying the serve-required keys incl. the bot's own user id.
+     * Public mode ({@code allowAllUsers}) so an empty allow-list still admits the test users (#170). */
     private static Path credentialedConfig(Path home) throws IOException {
         return configFile(home, "{ \"homeserver\": \"https://m.example.org\", "
-                + "\"accessToken\": \"syt_tok\", \"userId\": \"" + BOT + "\" }");
+                + "\"accessToken\": \"syt_tok\", \"userId\": \"" + BOT + "\", \"allowAllUsers\": true }");
     }
 
     @Test

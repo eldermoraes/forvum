@@ -52,7 +52,7 @@ class MessageProcessorIT {
 
     @Test
     void anAllowedUserDrivesATurnAndTheReplyIsPostedBack() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of()); // empty allow-list => any user allowed
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(), true); // public mode => any user allowed (#170)
 
         processor.process(userMessage("42", "777", "hello"), spec, rest, AUTH);
 
@@ -71,7 +71,7 @@ class MessageProcessorIT {
 
     @Test
     void aDisallowedUserIsRefusedWithAFriendlyMessageAndNoTurnRuns() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L)); // only 42 allowed
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L), false); // only 42 allowed
 
         processor.process(userMessage("999", "888", "let me in"), spec, rest, AUTH);
 
@@ -83,7 +83,7 @@ class MessageProcessorIT {
 
     @Test
     void anAllowedListedUserDrivesATurn() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L));
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L), false);
 
         processor.process(userMessage("42", "999", "hi"), spec, rest, AUTH);
 
@@ -93,7 +93,7 @@ class MessageProcessorIT {
 
     @Test
     void aBotMessageIsIgnored() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of());
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(), false);
 
         processor.process(new MessageCreate(new Author("42", true), "777", "I am a bot"), spec, rest, AUTH);
 
@@ -103,7 +103,7 @@ class MessageProcessorIT {
 
     @Test
     void anEmptyContentMessageIsIgnored() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of());
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(), false);
 
         processor.process(userMessage("42", "777", ""), spec, rest, AUTH);
 
@@ -113,7 +113,7 @@ class MessageProcessorIT {
 
     @Test
     void aMessageWithoutAChannelIdIsIgnored() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of());
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(), false);
 
         // A malformed MESSAGE_CREATE with a null channel_id: there is nowhere to reply, so the guard drops
         // it before any dispatch — no turn, no post (the channelId == null defensive branch).
@@ -125,7 +125,7 @@ class MessageProcessorIT {
 
     @Test
     void aMessageFromANonNumericAuthorIdIsIgnored() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of());
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(), false);
 
         // A non-numeric author.id (a malformed/unexpected snowflake) hits the NumberFormatException warn
         // path: the attempt is logged and dropped — no turn, no post.

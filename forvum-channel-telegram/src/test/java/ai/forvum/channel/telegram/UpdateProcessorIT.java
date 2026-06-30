@@ -53,8 +53,8 @@ class UpdateProcessorIT {
 
     @Test
     void anAllowedUserDrivesATurnAndTheReplyIsSentBack() {
-        // empty allow-list => any user allowed
-        Spec spec = new Spec(true, Optional.of("token"), Set.of());
+        // public mode (allowAllUsers) => any user allowed (#170: empty allow-list now denies)
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(), true);
 
         processor.process(textUpdate(1L, 42L, 7L, "hello"), spec, api, "http://base");
 
@@ -72,7 +72,7 @@ class UpdateProcessorIT {
 
     @Test
     void aDisallowedUserIsRefusedWithAFriendlyMessageAndNoTurnRuns() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L)); // only 42 allowed
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L), false); // only 42 allowed
 
         processor.process(textUpdate(2L, 999L, 8L, "let me in"), spec, api, "http://base");
 
@@ -84,7 +84,7 @@ class UpdateProcessorIT {
 
     @Test
     void anAllowedListedUserDrivesATurn() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L));
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L), false);
 
         processor.process(textUpdate(3L, 42L, 9L, "hi"), spec, api, "http://base");
 
@@ -94,7 +94,7 @@ class UpdateProcessorIT {
 
     @Test
     void anUpdateWithoutATextMessageIsSkipped() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of());
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(), false);
 
         processor.process(new TelegramUpdate(4L, null), spec, api, "http://base");
 

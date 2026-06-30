@@ -59,7 +59,7 @@ class TelegramAllowDenyE2E {
 
     @Test
     void anAllowedUserConversesAndADeniedUserIsRefusedWithNoTurn() {
-        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L)); // only user 42 allowed
+        Spec spec = new Spec(true, Optional.of("token"), Set.of(42L), false); // only user 42 allowed
         RecordingBotApi api = new RecordingBotApi();
 
         // Allowed user 42 -> a real turn through the fake model, reply sent to chat 7.

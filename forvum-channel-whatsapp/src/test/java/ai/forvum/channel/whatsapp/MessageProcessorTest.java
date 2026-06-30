@@ -36,9 +36,9 @@ class MessageProcessorTest {
 
     private static final ModelRef MODEL = ModelRef.parse("fake:test-model");
 
-    private static Spec spec(Set<String> allowed) {
+    private static Spec spec(Set<String> allowed, boolean allowAllUsers) {
         return new Spec(true, Optional.of("vt"), Optional.of("as"), Optional.of("at"),
-                Optional.of("PNID"), "v21.0", allowed);
+                Optional.of("PNID"), "v21.0", allowed, allowAllUsers);
     }
 
     private static InboundMessage msg(String from, String text) {
@@ -75,7 +75,7 @@ class MessageProcessorTest {
         };
         RecordingGraphApi api = new RecordingGraphApi();
 
-        processor.process(msg("15550001111", "hi"), spec(Set.of()), api);
+        processor.process(msg("15550001111", "hi"), spec(Set.of(), true), api);
 
         assertEquals(1, dispatched.size(), "an allowed sender drives exactly one turn");
         assertEquals("whatsapp", dispatched.get(0).channelId());
@@ -96,7 +96,7 @@ class MessageProcessorTest {
         processor.turns = (message, sink) -> dispatched.add(message);
         RecordingGraphApi api = new RecordingGraphApi();
 
-        processor.process(msg("15557772222", "let me in"), spec(Set.of("15550001111")), api);
+        processor.process(msg("15557772222", "let me in"), spec(Set.of("15550001111"), false), api);
 
         assertTrue(dispatched.isEmpty(), "a refused sender must NOT drive a turn");
         assertEquals(1, api.sent.size(), "the refusal is sent back");
@@ -122,7 +122,7 @@ class MessageProcessorTest {
         };
         RecordingGraphApi api = new RecordingGraphApi();
 
-        processor.process(msg("15550001111", "hi"), spec(Set.of()), api);
+        processor.process(msg("15550001111", "hi"), spec(Set.of(), true), api);
 
         assertTrue(api.sent.stream().anyMatch(s -> "the model is unavailable".equals(s.text().body())),
                 "the failed turn's ErrorEvent message must reach the user (the M16 render arm)");
@@ -140,7 +140,7 @@ class MessageProcessorTest {
         api.response = JsonNodeFactory.instance.objectNode()
                 .set("error", JsonNodeFactory.instance.objectNode().put("code", 131).put("message", "x"));
 
-        assertDoesNotThrow(() -> processor.process(msg("15550001111", "hi"), spec(Set.of()), api));
+        assertDoesNotThrow(() -> processor.process(msg("15550001111", "hi"), spec(Set.of(), true), api));
         assertEquals(1, dispatched.size(), "the turn ran; the send error is logged, never thrown");
     }
 
@@ -151,7 +151,7 @@ class MessageProcessorTest {
         RecordingGraphApi api = new RecordingGraphApi();
         api.toThrow = new RuntimeException("connect failed; Authorization: Bearer at-secret");
 
-        assertDoesNotThrow(() -> processor.process(msg("15550001111", "hi"), spec(Set.of()), api));
+        assertDoesNotThrow(() -> processor.process(msg("15550001111", "hi"), spec(Set.of(), true), api));
     }
 
     @Test

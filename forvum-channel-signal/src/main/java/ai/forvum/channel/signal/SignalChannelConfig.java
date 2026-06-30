@@ -93,6 +93,9 @@ public class SignalChannelConfig {
         JsonNode enabledNode = root.get("enabled");
         boolean enabled = enabledNode == null || enabledNode.asBoolean(true);
 
+        JsonNode allowAllNode = root.get("allowAllUsers");
+        boolean allowAllUsers = allowAllNode != null && allowAllNode.asBoolean(false);
+
         Set<String> allowed = new LinkedHashSet<>();
         JsonNode allowedNode = root.get("allowedUserIds");
         if (allowedNode != null && allowedNode.isArray()) {
@@ -103,7 +106,8 @@ public class SignalChannelConfig {
                 }
             }
         }
-        return new Spec(enabled, nonBlank(root, "baseUrl"), nonBlank(root, "account"), Set.copyOf(allowed));
+        return new Spec(enabled, nonBlank(root, "baseUrl"), nonBlank(root, "account"), Set.copyOf(allowed),
+                allowAllUsers);
     }
 
     private static Optional<String> nonBlank(JsonNode root, String field) {
@@ -125,26 +129,30 @@ public class SignalChannelConfig {
      *                       {@code account} parameter on every JSON-RPC {@code send} and on the events
      *                       stream subscription. Absent when unset (warn + no-op, like {@code baseUrl}).
      * @param allowedUserIds the Signal sender ids (phone numbers and/or source UUIDs as signal-cli emits
-     *                       them) permitted to use the assistant; an EMPTY set means "allow any sender"
-     *                       (single-user convenience), a non-empty set RESTRICTS to exactly those ids.
+     *                       them) permitted to use the assistant; an EMPTY set now DENIES every sender
+     *                       unless {@code allowAllUsers} is set (#170 fail-closed), a non-empty set
+     *                       RESTRICTS to exactly those ids.
+     * @param allowAllUsers  opt-in public mode (#170): when {@code true}, an EMPTY {@code allowedUserIds}
+     *                       admits any sender; ignored when {@code allowedUserIds} is non-empty.
      */
     public record Spec(boolean enabled, Optional<String> baseUrl, Optional<String> account,
-                       Set<String> allowedUserIds) {
+                       Set<String> allowedUserIds, boolean allowAllUsers) {
 
         static Spec empty() {
-            return new Spec(false, Optional.empty(), Optional.empty(), Set.of());
+            return new Spec(false, Optional.empty(), Optional.empty(), Set.of(), false);
         }
 
         /**
          * Whether a sender carrying any of {@code senderIds} (its phone number, its source UUID — nulls
-         * skipped) may use the assistant: any sender when {@code allowedUserIds} is empty, otherwise only
-         * a sender with at least one id in the set. Ids are compared exactly as signal-cli emits them
-         * (E.164 numbers like {@code +15550001111}; lowercase UUIDs). The friendly refusal is the
-         * caller's concern.
+         * skipped) may use the assistant: when {@code allowedUserIds} is empty this DENIES every sender
+         * unless {@code allowAllUsers} opts into public mode (#170 fail-closed), otherwise only a sender
+         * with at least one id in the set. Ids are compared exactly as signal-cli emits them (E.164
+         * numbers like {@code +15550001111}; lowercase UUIDs). The friendly refusal is the caller's
+         * concern.
          */
         public boolean isSenderAllowed(String... senderIds) {
             if (allowedUserIds.isEmpty()) {
-                return true;
+                return allowAllUsers; // #170: empty allow-list denies unless public mode (was: return true)
             }
             for (String id : senderIds) {
                 if (id != null && allowedUserIds.contains(id)) {

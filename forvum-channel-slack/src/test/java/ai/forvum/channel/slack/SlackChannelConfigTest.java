@@ -18,8 +18,9 @@ import java.util.Set;
 /**
  * {@code SlackChannelConfig} reads {@code channels/slack.json}: the two-token parsing (botToken +
  * appToken, BOTH required to serve), allowedUserIds as opaque Slack user-id strings, the empty-list
- * "allow any" convention, and the absent-file → empty/disabled spec (so the channel boots gracefully
- * with no {@code ~/.forvum/}). Plain POJO tests — no Quarkus boot needed.
+ * fail-closed convention (#170, public-mode opt-in via {@code allowAllUsers}), and the absent-file →
+ * empty/disabled spec (so the channel boots gracefully with no {@code ~/.forvum/}). Plain POJO tests —
+ * no Quarkus boot needed.
  */
 class SlackChannelConfigTest {
 
@@ -38,20 +39,29 @@ class SlackChannelConfigTest {
     }
 
     @Test
-    void emptyAllowListAllowsAnyUser() throws Exception {
+    void emptyAllowListDeniesAnyUser() throws Exception {
         Spec spec = SlackChannelConfig.parse(MAPPER.readTree(
                 "{ \"botToken\": \"xoxb-1\", \"appToken\": \"xapp-1\", \"allowedUserIds\": [] }"));
 
-        assertTrue(spec.isUserAllowed("U1"), "an empty allow-list permits any user");
-        assertTrue(spec.isUserAllowed("UANY"));
+        assertFalse(spec.isUserAllowed("U1"), "an empty allow-list now denies every user (#170 fail-closed)");
+        assertFalse(spec.isUserAllowed("UANY"));
     }
 
     @Test
-    void absentAllowListAllowsAnyUser() throws Exception {
+    void absentAllowListDeniesAnyUser() throws Exception {
         Spec spec = SlackChannelConfig.parse(MAPPER.readTree(
                 "{ \"botToken\": \"xoxb-1\", \"appToken\": \"xapp-1\" }"));
 
-        assertTrue(spec.isUserAllowed("U7"), "an absent allow-list permits any user");
+        assertFalse(spec.isUserAllowed("U7"), "an absent allow-list now denies every user (#170 fail-closed)");
+    }
+
+    @Test
+    void allowAllUsersAdmitsAnyUser() throws Exception {
+        Spec spec = SlackChannelConfig.parse(MAPPER.readTree(
+                "{ \"botToken\": \"xoxb-1\", \"appToken\": \"xapp-1\", \"allowAllUsers\": true }"));
+
+        assertTrue(spec.isUserAllowed("U1"), "explicit allowAllUsers admits any user");
+        assertTrue(spec.isUserAllowed("UANY"));
     }
 
     @Test

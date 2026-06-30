@@ -42,7 +42,8 @@ class EnvelopeProcessorReplyTest {
     }
 
     private static Spec anySender() {
-        return new Spec(true, Optional.of(BASE), Optional.of(ACCOUNT), Set.of());
+        // #170: an empty allow-list now denies by default, so opt into public mode to admit any sender.
+        return new Spec(true, Optional.of(BASE), Optional.of(ACCOUNT), Set.of(), true);
     }
 
     // --- Fix 1 / finding 13: the refusal audit carries the SIZE only, never PII -------------------

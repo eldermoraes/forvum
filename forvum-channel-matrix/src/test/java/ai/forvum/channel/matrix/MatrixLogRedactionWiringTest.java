@@ -40,7 +40,7 @@ class MatrixLogRedactionWiringTest {
     private static final String LEAKY_MESSAGE =
             "HTTP 401 M_UNKNOWN_TOKEN for Authorization: Bearer " + SECRET;
     private static final Spec SPEC = new Spec(true, Optional.of("https://m.example.org"),
-            Optional.of(SECRET), Optional.of("@bot:example.org"), Set.of());
+            Optional.of(SECRET), Optional.of("@bot:example.org"), Set.of(), true);
 
     /** Run {@code action} while capturing the formatted records of {@code loggerClass}'s logger. */
     private static List<String> capturedLogs(Class<?> loggerClass, Runnable action) {

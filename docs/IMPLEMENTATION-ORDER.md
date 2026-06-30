@@ -58,7 +58,7 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 4. **#168** *(root)* `security(identity)`: honor AgentSpec identity fallback, **fail closed** for unresolved users — today an unresolved user becomes permissive `anonymous`. The scope-identity root #167/#166 build on.
 5. **#167** `security(rbac)`: enforce AgentSpec role caps across interactive + cron turns — defines the *documented order* in which device/identity/role restrictions are intersected once.
 6. **#166** `security(pairing)`: authenticate device tokens & intersect `approvedScopes` — reuses #165's principal seam; composes the intersection with #167/#168.
-7. **#170** `security(channels)`: replace fail-open authz defaults with explicit opt-in — the **integration layer** that composes #166 + #167 + #168; **must come after them**.
+7. **#170** ✅ `security(channels)`: replace fail-open authz defaults with explicit opt-in — the **integration layer** that composes #166 + #167 + #168; **must come after them**. *Done:* the seven remote channels are fail-closed by default (empty/missing `allowedUserIds` denies; explicit `allowAllUsers` opt-in), via a shared `forvum-sdk` `ChannelAdmissionPolicy`, a `ChannelLauncher` startup audit, and `forvum doctor` validation. Device pairing stays opt-in (A1). **Wave 1 — the authorization spine #165→#168→#167→#166→#170 — is complete.**
 
 ## Wave 2 — Remaining hardening *(after the spine; several parallel)*
 
