@@ -17,8 +17,9 @@ import java.util.Set;
 
 /**
  * {@code TelegramChannelConfig} reads {@code channels/telegram.json}: token + allowedUserIds parsing, the
- * empty-list "allow any" convention, and the absent-file → empty/disabled spec (so the channel boots
- * gracefully with no {@code ~/.forvum/}). Plain POJO tests — no Quarkus boot needed.
+ * #170 fail-closed admission (empty/absent allow-list denies unless {@code allowAllUsers}), and the
+ * absent-file → empty/disabled spec (so the channel boots gracefully with no {@code ~/.forvum/}). Plain
+ * POJO tests — no Quarkus boot needed.
  */
 class TelegramChannelConfigTest {
 

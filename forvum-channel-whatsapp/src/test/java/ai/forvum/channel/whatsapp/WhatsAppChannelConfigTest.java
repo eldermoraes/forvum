@@ -15,8 +15,9 @@ import java.util.Set;
 
 /**
  * {@link WhatsAppChannelConfig#parse} and {@link Spec#isSenderAllowed}: the file-driven config maps to a
- * Spec, the API version defaults when unset, and the allow-list gate behaves (empty = any sender, a
- * non-empty set restricts). A plain unit test — no Quarkus, no file IO.
+ * Spec, the API version defaults when unset, and the allow-list gate behaves (empty = denies every sender
+ * unless {@code allowAllUsers}, #170 fail-closed; a non-empty set restricts). A plain unit test — no
+ * Quarkus, no file IO.
  */
 class WhatsAppChannelConfigTest {
 
@@ -69,13 +70,21 @@ class WhatsAppChannelConfigTest {
     }
 
     @Test
-    void anEmptyAllowListAdmitsAnySenderButARestrictedOneGatesByWaId() {
+    void anEmptyAllowListDeniesAnySenderButARestrictedOneGatesByWaId() {
         Spec open = parse("{ \"verifyToken\": \"vt\" }");
-        assertTrue(open.isSenderAllowed("15559998888"), "empty allow-list admits any sender");
+        assertFalse(open.isSenderAllowed("15559998888"),
+                "#170 fail-closed: an empty allow-list denies any sender");
 
         Spec restricted = parse("{ \"allowedUserIds\": [\"15550001111\"] }");
         assertTrue(restricted.isSenderAllowed("15550001111"));
         assertFalse(restricted.isSenderAllowed("15557772222"), "an unlisted wa_id is refused");
         assertFalse(restricted.isSenderAllowed(null), "a null sender is never allowed when restricted");
+    }
+
+    @Test
+    void anEmptyAllowListWithAllowAllUsersAdmitsAnySender() {
+        Spec open = parse("{ \"allowAllUsers\": true }");
+        assertTrue(open.isSenderAllowed("15559998888"),
+                "explicit public mode opts back into admitting any sender (#170)");
     }
 }

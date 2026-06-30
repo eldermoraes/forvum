@@ -1,5 +1,7 @@
 package ai.forvum.channel.whatsapp;
 
+import ai.forvum.sdk.ChannelAdmissionPolicy;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -95,6 +97,9 @@ public class WhatsAppChannelConfig {
         JsonNode enabledNode = root.get("enabled");
         boolean enabled = enabledNode == null || enabledNode.asBoolean(true);
 
+        JsonNode allowAllNode = root.get("allowAllUsers");
+        boolean allowAllUsers = allowAllNode != null && allowAllNode.asBoolean(false);
+
         Set<String> allowed = new LinkedHashSet<>();
         JsonNode allowedNode = root.get("allowedUserIds");
         if (allowedNode != null && allowedNode.isArray()) {
@@ -108,7 +113,7 @@ public class WhatsAppChannelConfig {
         String apiVersion = nonBlank(root, "apiVersion").orElse(DEFAULT_API_VERSION);
         return new Spec(enabled, nonBlank(root, "verifyToken"), nonBlank(root, "appSecret"),
                 nonBlank(root, "accessToken"), nonBlank(root, "phoneNumberId"), apiVersion,
-                Set.copyOf(allowed));
+                Set.copyOf(allowed), allowAllUsers);
     }
 
     private static Optional<String> nonBlank(JsonNode root, String field) {
@@ -133,25 +138,29 @@ public class WhatsAppChannelConfig {
      *                       {@code {phone-number-id}/messages} path segment). Absent → does not serve.
      * @param apiVersion     the Graph API version segment (default {@value #DEFAULT_API_VERSION}).
      * @param allowedUserIds the WhatsApp sender ids ({@code wa_id} phone numbers, as Meta delivers them)
-     *                       permitted to drive a turn; an EMPTY set means "allow any sender" (single-user
-     *                       convenience), a non-empty set RESTRICTS to exactly those ids.
+     *                       permitted to drive a turn; a non-empty set RESTRICTS to exactly those ids. An
+     *                       EMPTY set DENIES every sender unless {@code allowAllUsers} is set (fail-closed,
+     *                       #170).
+     * @param allowAllUsers  opt-in public mode: with an empty {@code allowedUserIds}, {@code true} admits
+     *                       any sender (the pre-#170 single-user convenience, now explicit).
      */
     public record Spec(boolean enabled, Optional<String> verifyToken, Optional<String> appSecret,
                        Optional<String> accessToken, Optional<String> phoneNumberId, String apiVersion,
-                       Set<String> allowedUserIds) {
+                       Set<String> allowedUserIds, boolean allowAllUsers) {
 
         static Spec empty() {
             return new Spec(false, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                    DEFAULT_API_VERSION, Set.of());
+                    DEFAULT_API_VERSION, Set.of(), false);
         }
 
         /**
-         * Whether {@code senderId} (a WhatsApp {@code wa_id}) may use the assistant: any sender when
-         * {@code allowedUserIds} is empty, otherwise only a sender in the set. Compared exactly as Meta
+         * Whether {@code senderId} (a WhatsApp {@code wa_id}) may use the assistant: a sender in a non-empty
+         * {@code allowedUserIds}, or any sender when {@code allowAllUsers} opts into public mode. An empty
+         * allow-list with no public mode DENIES everyone (fail-closed, #170). Compared exactly as Meta
          * delivers the id. The friendly refusal is the caller's concern.
          */
         public boolean isSenderAllowed(String senderId) {
-            return allowedUserIds.isEmpty() || (senderId != null && allowedUserIds.contains(senderId));
+            return ChannelAdmissionPolicy.admits(allowedUserIds, allowAllUsers, senderId);
         }
     }
 }

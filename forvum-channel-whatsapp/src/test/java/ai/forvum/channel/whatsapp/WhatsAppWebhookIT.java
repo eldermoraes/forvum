@@ -79,8 +79,11 @@ class WhatsAppWebhookIT {
 
     private static void writeConfig() throws Exception {
         Files.createDirectories(CONFIG.getParent());
+        // allowAllUsers: opt into public mode (#170 fail-closed) so the configured sender drives a turn —
+        // these tests exercise the verification/signature/turn paths, not the user-admission gate.
         Files.writeString(CONFIG, "{ \"verifyToken\": \"" + VERIFY_TOKEN + "\", \"appSecret\": \""
-                + APP_SECRET + "\", \"accessToken\": \"at\", \"phoneNumberId\": \"PNID\" }");
+                + APP_SECRET + "\", \"accessToken\": \"at\", \"phoneNumberId\": \"PNID\","
+                + " \"allowAllUsers\": true }");
     }
 
     private static String sign(String body, String secret) throws Exception {

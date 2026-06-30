@@ -1,5 +1,7 @@
 package ai.forvum.channel.matrix;
 
+import ai.forvum.sdk.ChannelAdmissionPolicy;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -92,6 +94,9 @@ public class MatrixChannelConfig {
         JsonNode enabledNode = root.get("enabled");
         boolean enabled = enabledNode == null || enabledNode.asBoolean(true);
 
+        JsonNode allowAllNode = root.get("allowAllUsers");
+        boolean allowAllUsers = allowAllNode != null && allowAllNode.asBoolean(false);
+
         Set<String> allowed = new LinkedHashSet<>();
         JsonNode allowedNode = root.get("allowedUserIds");
         if (allowedNode != null && allowedNode.isArray()) {
@@ -106,7 +111,7 @@ public class MatrixChannelConfig {
                 optionalText(root, "homeserver"),
                 optionalText(root, "accessToken"),
                 optionalText(root, "userId"),
-                Set.copyOf(allowed));
+                Set.copyOf(allowed), allowAllUsers);
     }
 
     /** A string field's value, absent when the field is missing or blank. */
@@ -131,22 +136,26 @@ public class MatrixChannelConfig {
      *                       REQUIRED to serve: {@code /sync} echoes the bot's own sends, so without it
      *                       the channel warns + no-ops (it would otherwise reply to itself in a loop).
      * @param allowedUserIds the Matrix user ids (e.g. {@code @alice:example.org}) permitted to use the
-     *                       bot; an EMPTY set means "allow any user" (single-user convenience), a
-     *                       non-empty set RESTRICTS to exactly those ids.
+     *                       bot; a non-empty set RESTRICTS to exactly those ids. An EMPTY set DENIES
+     *                       every user unless {@code allowAllUsers} opts into public mode (#170
+     *                       fail-closed; the inversion of the pre-#170 "empty = allow any" default).
+     * @param allowAllUsers  public mode: when {@code true} and {@code allowedUserIds} is empty, admit any
+     *                       user; ignored when the allow-list is non-empty. Defaults to {@code false}.
      */
     public record Spec(boolean enabled, Optional<String> homeserver, Optional<String> accessToken,
-                       Optional<String> userId, Set<String> allowedUserIds) {
+                       Optional<String> userId, Set<String> allowedUserIds, boolean allowAllUsers) {
 
         static Spec empty() {
-            return new Spec(false, Optional.empty(), Optional.empty(), Optional.empty(), Set.of());
+            return new Spec(false, Optional.empty(), Optional.empty(), Optional.empty(), Set.of(), false);
         }
 
         /**
-         * Whether {@code userId} may use the bot: any user when {@code allowedUserIds} is empty,
-         * otherwise only ids in the set. The friendly refusal is the caller's concern.
+         * Whether {@code userId} may use the bot: membership in a non-empty {@code allowedUserIds},
+         * else only when {@code allowAllUsers} enables public mode (#170 fail-closed). The friendly
+         * refusal is the caller's concern.
          */
         public boolean isUserAllowed(String userId) {
-            return allowedUserIds.isEmpty() || allowedUserIds.contains(userId);
+            return ChannelAdmissionPolicy.admits(allowedUserIds, allowAllUsers, userId);
         }
     }
 }

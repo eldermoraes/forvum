@@ -69,11 +69,14 @@ class VoicePipelineIT {
     }
 
     private Spec spec(Set<String> allowed, Optional<String> ffmpeg, String piper) {
+        // #170 fail-closed: an empty allow-list now denies every sender, so these pipeline tests opt into
+        // public mode (allowAllUsers=true) exactly when they pass no allow-list — reproducing the old
+        // "empty = allow any" single-user scaffolding; a non-empty allow-list stays a strict restrict.
         return new Spec(true,
                 Optional.of(whisperBin.toString()), Optional.of("/model/ggml.bin"),
                 Optional.of(piper), Optional.of("/voice/en.onnx"),
                 ffmpeg,
-                work.resolve("inbox"), work.resolve("outbox"), allowed, 30);
+                work.resolve("inbox"), work.resolve("outbox"), allowed, 30, allowed.isEmpty());
     }
 
     private Path dropWav(String name) throws IOException {
@@ -96,7 +99,7 @@ class VoicePipelineIT {
     void aDroppedWavIsTranscribedTurnedAndSynthesizedToTheOutbox() throws IOException {
         Path wav = dropWav("hello.wav");
 
-        pipeline.process(wav, spec(Set.of())); // empty allow-list => any sender
+        pipeline.process(wav, spec(Set.of())); // no allow-list + public mode => any sender (#170)
 
         // The transcript (from the whisper stub) reached the turn as a voice ChannelMessage.
         assertEquals(1, driver.dispatched().size(), "the transcript must drive exactly one turn");

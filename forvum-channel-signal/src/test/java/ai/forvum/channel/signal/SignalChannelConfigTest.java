@@ -24,7 +24,8 @@ import java.util.Set;
 /**
  * {@code channels/signal.json} parsing and the {@link Spec} semantics: enabled-by-default, absent file
  * disabled, blank {@code baseUrl}/{@code account} treated as unset (warn + no-op upstream), and the
- * {@code allowedUserIds} allow-list (empty = any sender; ids match the sender's number OR uuid).
+ * {@code allowedUserIds} allow-list (empty now DENIES every sender unless {@code allowAllUsers} opts
+ * into public mode, #170 fail-closed; ids match the sender's number OR uuid).
  */
 class SignalChannelConfigTest {
 
@@ -99,10 +100,20 @@ class SignalChannelConfigTest {
     }
 
     @Test
-    void anEmptyAllowListAllowsAnySender() {
+    void anEmptyAllowListDeniesAnySender() {
         Spec spec = SignalChannelConfig.parse(json("{}"));
 
-        assertTrue(spec.isSenderAllowed("+15550001111", null));
+        assertFalse(spec.isSenderAllowed("+15550001111", null),
+                "#170 fail-closed: an empty allow-list denies every sender");
+        assertFalse(spec.isSenderAllowed((String) null, null), "even an id-less sender");
+    }
+
+    @Test
+    void anEmptyAllowListInPublicModeAllowsAnySender() {
+        Spec spec = SignalChannelConfig.parse(json("{ \"allowAllUsers\": true }"));
+
+        assertTrue(spec.isSenderAllowed("+15550001111", null),
+                "#170: allowAllUsers opts an empty allow-list back into public mode");
         assertTrue(spec.isSenderAllowed((String) null, null), "even an id-less sender (defensive)");
     }
 

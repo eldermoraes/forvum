@@ -79,7 +79,7 @@ public class EnvelopeProcessor {
             // or a linked-device transcript) — NOT always wrapped in syncMessage, so the parse-time
             // syncMessage filter does not catch it. Replying would send the bot's message back to
             // itself and re-ingest it: an unbounded self-reply loop. Drop it before the allow-list
-            // check (an empty allow-list would otherwise "allow" the bot's own number) and any reply.
+            // check and any reply, independent of whether the account is allow-listed.
             LOG.debug("Signal: ignoring the bot's own message (self-echo); no turn, no reply.");
             return;
         }

@@ -225,16 +225,16 @@ class MatrixSyncProtocolTest {
     @Test
     void joinsOnlyWhenTheInviterPassesAllowedUserIds() {
         Spec restricted = new Spec(true, Optional.of("https://m.org"), Optional.of("t"),
-                Optional.of(BOT), Set.of("@alice:example.org"));
+                Optional.of(BOT), Set.of("@alice:example.org"), false);
         Spec allowAny = new Spec(true, Optional.of("https://m.org"), Optional.of("t"),
-                Optional.of(BOT), Set.of());
+                Optional.of(BOT), Set.of(), true);
 
         assertTrue(MatrixSyncProtocol.shouldJoin(new Invite("!r:x", "@alice:example.org"), restricted));
         assertFalse(MatrixSyncProtocol.shouldJoin(new Invite("!r:x", "@mallory:example.org"), restricted),
                 "an invite from a disallowed user is ignored");
         assertTrue(MatrixSyncProtocol.shouldJoin(new Invite("!r:x", "@anyone:example.org"), allowAny),
-                "an empty allow-list permits any identifiable inviter");
+                "public mode permits any identifiable inviter");
         assertFalse(MatrixSyncProtocol.shouldJoin(new Invite("!r:x", null), allowAny),
-                "an unidentifiable inviter is never trusted, even with an empty allow-list");
+                "an unidentifiable inviter is never trusted, even in public mode");
     }
 }

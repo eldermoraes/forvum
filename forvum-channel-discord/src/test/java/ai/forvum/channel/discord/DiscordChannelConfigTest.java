@@ -17,9 +17,9 @@ import java.util.Set;
 
 /**
  * {@code DiscordChannelConfig} reads {@code channels/discord.json}: token + allowedUserIds parsing
- * (snowflakes as numbers or strings), the empty-list "allow any" convention, and the absent-file →
- * empty/disabled spec (so the channel boots gracefully with no {@code ~/.forvum/}). Plain POJO tests — no
- * Quarkus boot needed.
+ * (snowflakes as numbers or strings), the empty-list fail-closed default (#170: empty/absent denies every
+ * user unless {@code allowAllUsers} opts into public mode), and the absent-file → empty/disabled spec (so
+ * the channel boots gracefully with no {@code ~/.forvum/}). Plain POJO tests — no Quarkus boot needed.
  */
 class DiscordChannelConfigTest {
 
@@ -46,19 +46,28 @@ class DiscordChannelConfigTest {
     }
 
     @Test
-    void emptyAllowListAllowsAnyUser() throws Exception {
+    void emptyAllowListDeniesAnyUser() throws Exception {
         Spec spec = DiscordChannelConfig.parse(MAPPER.readTree(
                 "{ \"botToken\": \"t\", \"allowedUserIds\": [] }"));
 
-        assertTrue(spec.isUserAllowed(1L), "an empty allow-list permits any user");
-        assertTrue(spec.isUserAllowed(999_999L));
+        assertFalse(spec.isUserAllowed(1L), "#170 fail-closed: an empty allow-list denies every user");
+        assertFalse(spec.isUserAllowed(999_999L), "#170 fail-closed");
     }
 
     @Test
-    void absentAllowListAllowsAnyUser() throws Exception {
+    void absentAllowListDeniesAnyUser() throws Exception {
         Spec spec = DiscordChannelConfig.parse(MAPPER.readTree("{ \"botToken\": \"t\" }"));
 
-        assertTrue(spec.isUserAllowed(7L), "an absent allow-list permits any user");
+        assertFalse(spec.isUserAllowed(7L), "#170 fail-closed: an absent allow-list denies every user");
+    }
+
+    @Test
+    void allowAllUsersOptsIntoPublicModeWhenAllowListEmpty() throws Exception {
+        Spec spec = DiscordChannelConfig.parse(MAPPER.readTree(
+                "{ \"botToken\": \"t\", \"allowedUserIds\": [], \"allowAllUsers\": true }"));
+
+        assertTrue(spec.isUserAllowed(1L), "an explicit allowAllUsers admits any user (#170 public mode)");
+        assertTrue(spec.isUserAllowed(999_999L));
     }
 
     @Test

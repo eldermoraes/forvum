@@ -1,5 +1,7 @@
 package ai.forvum.channel.discord;
 
+import ai.forvum.sdk.ChannelAdmissionPolicy;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -92,6 +94,9 @@ public class DiscordChannelConfig {
         JsonNode enabledNode = root.get("enabled");
         boolean enabled = enabledNode == null || enabledNode.asBoolean(true);
 
+        JsonNode allowAllNode = root.get("allowAllUsers");
+        boolean allowAllUsers = allowAllNode != null && allowAllNode.asBoolean(false);
+
         JsonNode tokenNode = root.get("botToken");
         Optional<String> token = tokenNode == null || tokenNode.asText().isBlank()
                 ? Optional.empty()
@@ -105,7 +110,7 @@ public class DiscordChannelConfig {
                 allowed.add(id.isTextual() ? Long.parseLong(id.asText().trim()) : id.asLong());
             }
         }
-        return new Spec(enabled, token, Set.copyOf(allowed));
+        return new Spec(enabled, token, Set.copyOf(allowed), allowAllUsers);
     }
 
     /**
@@ -114,22 +119,26 @@ public class DiscordChannelConfig {
      * @param enabled        whether the channel is enabled (a channel is enabled unless {@code "enabled":
      *                       false}); an absent file is treated as disabled by {@link Spec#empty()}.
      * @param botToken       the bot token, absent when unset (channel must warn + no-op, never crash).
-     * @param allowedUserIds the Discord user (snowflake) ids permitted to use the bot; an EMPTY set means
-     *                       "allow any user" (single-user convenience), a non-empty set RESTRICTS to
-     *                       exactly those ids.
+     * @param allowedUserIds the Discord user (snowflake) ids permitted to use the bot; a non-empty set
+     *                       RESTRICTS to exactly those ids, and an EMPTY set now DENIES every user unless
+     *                       {@code allowAllUsers} is set (#170 fail-closed — the inverted pre-#170 default).
+     * @param allowAllUsers  the explicit public-mode opt-in: admits any user when {@code allowedUserIds}
+     *                       is empty (otherwise the allowlist decides).
      */
-    public record Spec(boolean enabled, Optional<String> botToken, Set<Long> allowedUserIds) {
+    public record Spec(boolean enabled, Optional<String> botToken, Set<Long> allowedUserIds,
+                       boolean allowAllUsers) {
 
         static Spec empty() {
-            return new Spec(false, Optional.empty(), Set.of());
+            return new Spec(false, Optional.empty(), Set.of(), false);
         }
 
         /**
-         * Whether {@code userId} may use the bot: any user when {@code allowedUserIds} is empty, otherwise
-         * only ids in the set. The friendly refusal is the caller's concern.
+         * Whether {@code userId} may use the bot (#170 fail-closed): membership when {@code allowedUserIds}
+         * is non-empty, otherwise only when {@code allowAllUsers} opts into public mode (an empty allowlist
+         * with no public flag DENIES everyone). The friendly refusal is the caller's concern.
          */
         public boolean isUserAllowed(long userId) {
-            return allowedUserIds.isEmpty() || allowedUserIds.contains(userId);
+            return ChannelAdmissionPolicy.admits(allowedUserIds, allowAllUsers, userId);
         }
     }
 }

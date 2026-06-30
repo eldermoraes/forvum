@@ -7,7 +7,11 @@ import ai.forvum.core.ChannelMessage;
 import ai.forvum.sdk.ChannelTurnDriver;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -22,19 +26,36 @@ import java.util.stream.Stream;
  */
 class SignalChannelConsumeTest {
 
+    @TempDir
+    static Path home;
+
     private static final String TEXT_EVENT_DATA =
             "{\"envelope\":{\"sourceNumber\":\"+15550001111\","
                     + "\"dataMessage\":{\"message\":\"ping\",\"timestamp\":1}},\"account\":\"+1999\"}";
 
-    /** Wire a {@code SignalChannel} with the given turn driver + a config pointing at an absent file. */
+    /**
+     * Wire a {@code SignalChannel} with the given turn driver + a config that opts into #170 public mode:
+     * an empty allow-list now denies by default, so the fixture's senders need {@code allowAllUsers}.
+     */
     private static SignalChannel wiredChannel(ChannelTurnDriver driver) {
         EnvelopeProcessor processor = new EnvelopeProcessor();
         processor.turns = driver;
 
         SignalChannel channel = new SignalChannel();
         channel.processor = processor;
-        channel.config = new SignalChannelConfig(Path.of("/nonexistent/signal.json"));
+        channel.config = publicModeConfig();
         return channel;
+    }
+
+    /** A config bound to a {@code channels/signal.json} that admits any sender (#170 public mode). */
+    private static SignalChannelConfig publicModeConfig() {
+        try {
+            Path file = Files.createDirectories(home.resolve("channels")).resolve("signal.json");
+            Files.writeString(file, "{ \"allowAllUsers\": true }");
+            return new SignalChannelConfig(file);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Test
@@ -50,7 +71,7 @@ class SignalChannelConsumeTest {
                 "data:" + TEXT_EVENT_DATA,
                 ""), api, "http://localhost:8080", "+1999");
 
-        // The default config (absent file) yields an empty allow-list => any sender allowed.
+        // The wired config opts into #170 public mode (allowAllUsers), so the sender is admitted.
         assertEquals(1, driver.dispatched().size(), "the text event drove exactly one turn");
         ChannelMessage dispatched = driver.dispatched().get(0);
         assertEquals("signal", dispatched.channelId());

@@ -24,8 +24,8 @@ import java.util.Set;
 /**
  * {@code channels/voice.json} parsing and the {@link Spec} semantics: enabled-by-default, absent file
  * disabled, blank binaries treated as unset (warn + no-op upstream), inbox/outbox defaults + overrides,
- * the {@code allowedUserIds} allow-list (empty = any sender), and the {@link Spec#isReady()} readiness
- * gate.
+ * the {@code allowedUserIds} allow-list (fail-closed since #170: empty = deny all unless
+ * {@code allowAllUsers}), and the {@link Spec#isReady()} readiness gate.
  */
 class VoiceChannelConfigTest {
 
@@ -140,10 +140,18 @@ class VoiceChannelConfigTest {
     }
 
     @Test
-    void anEmptyAllowListAllowsAnySender(@TempDir Path home) {
+    void anEmptyAllowListDeniesAnySender(@TempDir Path home) {
         Spec spec = parse("{}", home);
 
-        assertTrue(spec.isSenderAllowed("voice-local"));
+        assertFalse(spec.isSenderAllowed("voice-local"), "#170 fail-closed: no allow-list denies every sender");
+        assertFalse(spec.isSenderAllowed(null), "#170 fail-closed: an id-less sender is denied too");
+    }
+
+    @Test
+    void anEmptyAllowListWithPublicModeAllowsAnySender(@TempDir Path home) {
+        Spec spec = parse("{ \"allowAllUsers\": true }", home);
+
+        assertTrue(spec.isSenderAllowed("voice-local"), "public mode (#170) admits any sender");
         assertTrue(spec.isSenderAllowed(null), "even an id-less sender (defensive)");
     }
 
@@ -153,7 +161,8 @@ class VoiceChannelConfigTest {
 
         assertTrue(spec.isSenderAllowed("alice"));
         assertFalse(spec.isSenderAllowed("bob"));
-        assertFalse(spec.isSenderAllowed(null));
+        assertFalse(spec.isSenderAllowed(null),
+                "a null sender id is denied against a populated allow-list (ChannelAdmissionPolicy is null-safe, #170)");
     }
 
     @Test

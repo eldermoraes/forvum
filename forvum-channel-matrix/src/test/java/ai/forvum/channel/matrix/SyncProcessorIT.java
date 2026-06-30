@@ -59,9 +59,9 @@ class SyncProcessorIT {
         api = new RecordingMatrixClientApi();
     }
 
-    private static Spec spec(Set<String> allowedUserIds) {
+    private static Spec spec(Set<String> allowedUserIds, boolean allowAllUsers) {
         return new Spec(true, Optional.of(BASE), Optional.of("syt_test"),
-                Optional.of("@bot:example.org"), allowedUserIds);
+                Optional.of("@bot:example.org"), allowedUserIds, allowAllUsers);
     }
 
     @Test
@@ -75,9 +75,9 @@ class SyncProcessorIT {
 
     @Test
     void anAllowedUserDrivesATurnAndTheReplyIsSentBackWithUniqueTxnIds() {
-        // empty allow-list => any user allowed
+        // public mode (empty allow-list + allowAllUsers) => any user admitted (#170)
         processor.process(new InboundMessage("!room:example.org", "@alice:example.org", "hello"),
-                spec(Set.of()), api, BASE, AUTH);
+                spec(Set.of(), true), api, BASE, AUTH);
 
         assertEquals(1, driver.dispatched().size(), "an allowed user must drive exactly one turn");
         ChannelMessage dispatched = driver.dispatched().get(0);
@@ -93,7 +93,7 @@ class SyncProcessorIT {
 
         // A second turn's send must carry a DIFFERENT txnId (the homeserver dedupes on it).
         processor.process(new InboundMessage("!room:example.org", "@alice:example.org", "again"),
-                spec(Set.of()), api, BASE, AUTH);
+                spec(Set.of(), true), api, BASE, AUTH);
         assertEquals(2, api.sent.size());
         assertNotEquals(api.sent.get(0).txnId(), api.sent.get(1).txnId(),
                 "every send must use a unique transaction id");
@@ -102,7 +102,7 @@ class SyncProcessorIT {
     @Test
     void aDisallowedUserIsRefusedWithAFriendlyMessageAndNoTurnRuns() {
         processor.process(new InboundMessage("!room:example.org", "@mallory:example.org", "let me in"),
-                spec(Set.of("@alice:example.org")), api, BASE, AUTH);
+                spec(Set.of("@alice:example.org"), false), api, BASE, AUTH);
 
         assertTrue(driver.dispatched().isEmpty(), "a refused user must NOT drive a turn");
         assertEquals(1, api.sent.size(), "the refusal must be sent back to the room");
@@ -113,7 +113,7 @@ class SyncProcessorIT {
     @Test
     void anAllowedListedUserDrivesATurn() {
         processor.process(new InboundMessage("!r:x", "@alice:example.org", "hi"),
-                spec(Set.of("@alice:example.org")), api, BASE, AUTH);
+                spec(Set.of("@alice:example.org"), false), api, BASE, AUTH);
 
         assertEquals(1, driver.dispatched().size());
         assertEquals("echo:hi", api.sent.get(0).body().body());
@@ -121,7 +121,7 @@ class SyncProcessorIT {
 
     @Test
     void anInviteFromAnAllowedUserIsJoinedAndOneFromADisallowedUserIsIgnored() {
-        Spec spec = spec(Set.of("@alice:example.org"));
+        Spec spec = spec(Set.of("@alice:example.org"), false);
 
         processor.processInvite(new Invite("!good:example.org", "@alice:example.org"),
                 spec, api, BASE, AUTH);

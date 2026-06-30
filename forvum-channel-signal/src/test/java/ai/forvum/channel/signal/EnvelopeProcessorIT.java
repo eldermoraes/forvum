@@ -61,8 +61,10 @@ class EnvelopeProcessorIT {
     }
 
     private static Spec spec(Set<String> allowed) {
+        // #170: an empty allow-list now denies by default; opt those fixtures into public mode so they
+        // still exercise admission (allowAllUsers is ignored for a non-empty list).
         return new Spec(true, Optional.of("http://localhost:8080"), Optional.of("+15559990000"),
-                allowed);
+                allowed, allowed.isEmpty());
     }
 
     @Test
@@ -75,7 +77,7 @@ class EnvelopeProcessorIT {
 
     @Test
     void anAllowedSenderDrivesATurnAndTheReplyIsSentBack() {
-        // empty allow-list => any sender allowed
+        // empty allow-list + public mode (allowAllUsers, #170) => any sender admitted
         processor.process(text("+15550001111", null, "hello"), spec(Set.of()), api,
                 "http://localhost:8080", "+15559990000");
 
@@ -96,9 +98,9 @@ class EnvelopeProcessorIT {
     @Test
     void anOwnAccountMessageIsNeitherDispatchedNorReplied() {
         // The daemon surfaced the bot's OWN account as a plain dataMessage (a Note to Self / a
-        // linked-device echo, NOT wrapped in syncMessage). With an empty allow-list it would otherwise
-        // be "allowed" and the reply would be sent back to the bot itself, re-ingested as another
-        // inbound message — an unbounded self-reply loop. It must be dropped: no turn, no send.
+        // linked-device echo, NOT wrapped in syncMessage). In public mode (allowAllUsers, #170) it
+        // would otherwise be "allowed" and the reply would be sent back to the bot itself, re-ingested
+        // as another inbound message — an unbounded self-reply loop. It must be dropped: no turn, no send.
         processor.process(text("+15559990000", null, "loop me"), spec(Set.of()), api,
                 "http://localhost:8080", "+15559990000");
 

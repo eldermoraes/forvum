@@ -38,7 +38,7 @@ class WhatsAppLogRedactionWiringTest {
     private static final String SECRET = "EAAtoken-graph-secret-xyz";
     private static final String LEAKY = "HTTP 401 OAuthException for Authorization: Bearer " + SECRET;
     private static final Spec SPEC = new Spec(true, Optional.of("vt"), Optional.of("as"),
-            Optional.of("at"), Optional.of("PNID"), "v21.0", Set.of());
+            Optional.of("at"), Optional.of("PNID"), "v21.0", Set.of(), true);
 
     private static InboundMessage msg() {
         return new InboundMessage("15550001111", "hi", "wamid.1", 1L);
