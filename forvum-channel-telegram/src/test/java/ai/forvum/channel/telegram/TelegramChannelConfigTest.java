@@ -35,19 +35,28 @@ class TelegramChannelConfigTest {
     }
 
     @Test
-    void emptyAllowListAllowsAnyUser() throws Exception {
+    void emptyAllowListDeniesAnyUser() throws Exception {
         Spec spec = TelegramChannelConfig.parse(MAPPER.readTree(
                 "{ \"botToken\": \"t\", \"allowedUserIds\": [] }"));
 
-        assertTrue(spec.isUserAllowed(1L), "an empty allow-list permits any user");
-        assertTrue(spec.isUserAllowed(999_999L));
+        assertFalse(spec.isUserAllowed(1L), "an empty allow-list now denies every user (#170 fail-closed)");
+        assertFalse(spec.isUserAllowed(999_999L));
     }
 
     @Test
-    void absentAllowListAllowsAnyUser() throws Exception {
+    void absentAllowListDeniesAnyUser() throws Exception {
         Spec spec = TelegramChannelConfig.parse(MAPPER.readTree("{ \"botToken\": \"t\" }"));
 
-        assertTrue(spec.isUserAllowed(7L), "an absent allow-list permits any user");
+        assertFalse(spec.isUserAllowed(7L), "an absent allow-list now denies every user (#170 fail-closed)");
+    }
+
+    @Test
+    void allowAllUsersAdmitsAnyUser() throws Exception {
+        Spec spec = TelegramChannelConfig.parse(MAPPER.readTree(
+                "{ \"botToken\": \"t\", \"allowAllUsers\": true }"));
+
+        assertTrue(spec.isUserAllowed(1L), "explicit allowAllUsers admits any user");
+        assertTrue(spec.isUserAllowed(999_999L));
     }
 
     @Test

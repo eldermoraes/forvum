@@ -50,9 +50,14 @@ class TelegramChannelPollLoopTest {
     }
 
     @Test
-    void aPollCycleDrivesTheTurnAndSendsTheReplyThenAdvancesOffsetAndStops() {
+    void aPollCycleDrivesTheTurnAndSendsTheReplyThenAdvancesOffsetAndStops(@TempDir Path home)
+            throws IOException {
         FakeTurnDriver driver = new FakeTurnDriver();
         TelegramChannel channel = wiredChannel(driver);
+        // #170: an empty allow-list now DENIES, so the channel must opt into public mode to admit user 42.
+        Path channels = Files.createDirectories(home.resolve("channels"));
+        Files.writeString(channels.resolve("telegram.json"), "{ \"allowAllUsers\": true }");
+        channel.config = new TelegramChannelConfig(channels.resolve("telegram.json"));
 
         // A stopping API: scripts one batch with a real update, then stops the loop on the next poll so
         // the while(running) terminates deterministically.
@@ -70,8 +75,8 @@ class TelegramChannelPollLoopTest {
         api.scriptedResponses.add(new GetUpdatesResponse(true,
                 List.of(textUpdate(100L, 42L, 7L, "ping"))));
 
-        // The default config (absent file) yields an empty allow-list => any user allowed, so the turn
-        // runs; that the loop ran is the assertion.
+        // The public-mode config (allowAllUsers) admits any user, so the turn runs; that the loop ran is
+        // the assertion.
         channel.running = true;
         channel.pollLoop(api, "http://base");
 
