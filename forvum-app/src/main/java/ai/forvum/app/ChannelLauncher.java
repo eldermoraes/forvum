@@ -95,6 +95,15 @@ public class ChannelLauncher {
             Set.of("web", TELEGRAM_ID, DISCORD_ID, SLACK_ID, MATRIX_ID, SIGNAL_ID, WHATSAPP_ID, VOICE_ID);
 
     /**
+     * Server channels whose user admission is governed by an {@code allowedUserIds}/{@code allowAllUsers}
+     * policy (#170) — every {@link #SERVER_CHANNELS} entry except the Web channel, which is token/role
+     * gated at the transport ({@code OperatorAuthMechanism}, #165/#166) and carries no allow-list. The
+     * local foreground TUI is not a server channel, so it is excluded by construction.
+     */
+    static final Set<String> ADMISSION_GOVERNED_CHANNELS =
+            Set.of(TELEGRAM_ID, DISCORD_ID, SLACK_ID, MATRIX_ID, SIGNAL_ID, WHATSAPP_ID, VOICE_ID);
+
+    /**
      * Channel ids whose enablement runs an interactive foreground loop instead of a background server.
      * v0.1's only one is the TUI (M15): its stdin REPL blocks the foreground, so the binary runs it
      * directly rather than {@code Quarkus.waitForExit()}.
