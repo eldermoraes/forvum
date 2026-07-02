@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.Persona;
+import ai.forvum.core.budget.CostBudget;
+import ai.forvum.core.budget.DayWindow;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.agent.Agent;
 import ai.forvum.engine.agent.AgentRegistry;
@@ -23,6 +25,7 @@ import jakarta.enterprise.inject.Vetoed;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -94,6 +97,24 @@ class CronSchedulerTest {
         assertTrue(sink.delivered.isEmpty(), "a failed turn has no reply to deliver — the sink is never invoked");
     }
 
+    @Test
+    void fireResolvesTheCronModelGatedByTheAgentsCostBudget() {
+        // #169: the cron path must hand the fired agent's costBudget to the budget-gated resolve overload
+        // — a fire that dropped it would run the cron model uncapped (the DISTINCT-value discipline: the
+        // budget below is only observable if fire really forwards the persona's own budget).
+        RecordingSink sink = new RecordingSink();
+        CronScheduler cron = fireScheduler(sink, new ScriptedAgent("reply", false));
+        CostBudget agentBudget = new CostBudget(null, 1234L, new DayWindow(ZoneId.of("UTC")));
+        ((StubRegistry) cron.registry).costBudget = agentBudget;
+        CronSpec spec = new CronSpec("brief", "0 * * * * ?", new AgentId("faker"),
+                ModelRef.parse("fake:m"), "summarize the day", new Delivery(DeliveryMode.LAST, null));
+
+        cron.fire(spec);
+
+        assertEquals(agentBudget, ((StubLlmSelector) cron.llmSelector).resolvedBudget,
+                "fire must resolve the cron model through the budget-gated overload with the agent's budget");
+    }
+
     /** A scheduler whose {@code fire()} collaborators are all stubbed: registry/llmSelector/roleRegistry + sink. */
     private static CronScheduler fireScheduler(RecordingSink sink, ScriptedAgent agent) {
         CronScheduler cron = new CronScheduler();
@@ -142,6 +163,7 @@ class CronSchedulerTest {
     @Vetoed
     static final class StubRegistry extends AgentRegistry {
         private final Agent agent;
+        CostBudget costBudget; // #169: null = uncapped; a test sets it to prove fire forwards it
 
         StubRegistry(Agent agent) {
             this.agent = agent;
@@ -156,14 +178,18 @@ class CronSchedulerTest {
         // so capScopes leaves the cron role's scopes unchanged and the delivery path is unaffected.
         @Override
         public Persona persona(AgentId id) {
-            return new Persona(id, "stub persona", List.of(), ModelRef.parse("fake:m"), null, null, null, null);
+            return new Persona(id, "stub persona", List.of(), ModelRef.parse("fake:m"), null, costBudget,
+                    null, null);
         }
     }
 
     @Vetoed
     static final class StubLlmSelector extends LlmSelector {
+        CostBudget resolvedBudget; // #169: captures what fire() hands the budget-gated overload
+
         @Override
-        public ChatModel resolve(ModelRef ref, String agentId, String sessionId) {
+        public ChatModel resolve(ModelRef ref, String agentId, String sessionId, CostBudget budget) {
+            this.resolvedBudget = budget;
             return null; // the scripted agent ignores the model override
         }
     }

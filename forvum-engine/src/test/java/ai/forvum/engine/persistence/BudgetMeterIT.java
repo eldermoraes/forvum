@@ -135,4 +135,46 @@ class BudgetMeterIT {
                 "only the (s1,a1) row counts — both predicates of the conjunction must apply");
         assertFalse(u.exhausted());
     }
+
+    @Test
+    @Transactional
+    void dayWindowScopedToAnAgentCountsOnlyThatAgentsSpend() {
+        // #169 / Decision 10: spend is tracked independently per agent, so the per-agent read must not
+        // let one agent's day spend exhaust another's budget.
+        ProviderCallEntity.deleteAll();
+        call("s", "worker-1", null, 30, 30); // 60 tokens for worker-1
+        call("s", "other", null, 500, 500);  // another agent's day spend — must not count
+
+        Usage scoped = meter.usage(new CostBudget(null, 100L, TODAY), "worker-1");
+
+        assertEquals(60L, scoped.spent().tokens(), "only worker-1's rows aggregate");
+        assertFalse(scoped.exhausted(), "the other agent's 1000 tokens must not exhaust worker-1's budget");
+    }
+
+    @Test
+    @Transactional
+    void dayWindowWithoutAnAgentKeepsTheUnscopedRead() {
+        ProviderCallEntity.deleteAll();
+        call("s", "a1", null, 30, 30);
+        call("s", "a2", null, 40, 40);
+
+        Usage unscoped = meter.usage(new CostBudget(null, 100L, TODAY), null);
+
+        assertEquals(140L, unscoped.spent().tokens(), "a null agent id aggregates every row in the day");
+        assertTrue(unscoped.exhausted());
+    }
+
+    @Test
+    @Transactional
+    void sessionWindowIgnoresTheCallingAgentParameter() {
+        // A SessionWindow already carries its own (sessionId, agentId) pair — the per-agent parameter
+        // must not narrow (or widen) it further.
+        ProviderCallEntity.deleteAll();
+        call("s1", "a1", null, 50, 50);
+
+        Usage u = meter.usage(new CostBudget(null, 60L, new SessionWindow("s1", "a1")), "someone-else");
+
+        assertEquals(100L, u.spent().tokens(), "the window's own pair governs, not the parameter");
+        assertTrue(u.exhausted());
+    }
 }

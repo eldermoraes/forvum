@@ -1,6 +1,7 @@
 package ai.forvum.engine.cron;
 
 import ai.forvum.core.PermissionScope;
+import ai.forvum.core.Persona;
 import ai.forvum.engine.agent.Agent;
 import ai.forvum.engine.agent.AgentRegistry;
 import ai.forvum.engine.agent.RoleRegistry;
@@ -157,7 +158,12 @@ public class CronScheduler {
         String reply;
         try {
             Agent agent = registry.getOrCreate(spec.agentId());
-            ChatModel model = llmSelector.resolve(spec.primaryModel(), spec.agentId().value(), sessionId);
+            Persona persona = registry.persona(spec.agentId());
+            // #169: a cron turn is governed by the SAME per-agent costBudget as a channel turn — the
+            // cron's own model is resolved budget-gated, so an exhausted agent cannot keep burning spend
+            // through its schedule (the catch below records the ERROR task and skips delivery).
+            ChatModel model = llmSelector.resolve(spec.primaryModel(), spec.agentId().value(), sessionId,
+                    persona.costBudget());
             // #167 / DR-8 DP-8: the cron binds the read-only cron role, THEN caps it by the selected agent's
             // declared role ceiling, so an unattended job is denied a tool outside BOTH the cron role AND the
             // agent's roles (the same effective-scope calculation as an interactive turn). An agent with no
@@ -165,7 +171,7 @@ public class CronScheduler {
             // catch below disables the fire (ERROR task), failing closed rather than running with wrong scopes.
             Set<PermissionScope> cronScopes = roleRegistry.scopesFor(RoleRegistry.CRON);
             Set<PermissionScope> effectiveScopes =
-                    roleRegistry.capScopes(cronScopes, registry.persona(spec.agentId()).roles());
+                    roleRegistry.capScopes(cronScopes, persona.roles());
             // P2-14 #39: a cron turn has no human at the keyboard and no dashboard requester, so a
             // confirm-required tool must deny immediately rather than block for an approval that will never
             // arrive (mirrors forvum ask). The flag is read by ApprovalService via ApprovalContext.
