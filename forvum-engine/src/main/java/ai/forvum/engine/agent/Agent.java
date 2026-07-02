@@ -23,7 +23,6 @@ import io.opentelemetry.instrumentation.annotations.WithSpan;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * The {@code @AgentScoped} facade for a live agent: it aggregates the agent's {@link Persona}, its
@@ -120,17 +119,12 @@ public class Agent {
         String reply = persona.toolBudget() == null
                 ? supervisorGraph.run(request)
                 : ScopedValue.where(TurnToolBudget.CURRENT_TOOL_BUDGET,
-                                new TurnToolBudget(persona.toolBudget(), currentTurnOrNull()))
+                                new TurnToolBudget(persona.toolBudget(), CurrentAgent.currentTurnOrNull()))
                         .call(() -> supervisorGraph.run(request));
 
         long turnId = memory.recordTurn(sessionId, userText, reply);
         caprRecorder.recordPassed(sessionId, id.value(), turnId);
         return reply;
-    }
-
-    /** The bound turn id for budget-exhaustion correlation, or null on entries that bind none (cron). */
-    private static UUID currentTurnOrNull() {
-        return CurrentAgent.CURRENT_TURN.isBound() ? CurrentAgent.CURRENT_TURN.get() : null;
     }
 
     /** Identity of the resolved per-agent instance — lets tests assert per-agent isolation/caching. */

@@ -24,7 +24,6 @@ import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Resolves an agent's declared {@link FallbackChain} (its {@link Persona#primaryModel()} +
@@ -115,8 +114,7 @@ public class LlmSelector {
         if (budget == null) {
             return null;
         }
-        UUID turnId = CurrentAgent.CURRENT_TURN.isBound() ? CurrentAgent.CURRENT_TURN.get() : null;
-        return new BudgetGate(budget, budgetMeter, turnId);
+        return new BudgetGate(budget, budgetMeter, CurrentAgent.currentTurnOrNull());
     }
 
     /**

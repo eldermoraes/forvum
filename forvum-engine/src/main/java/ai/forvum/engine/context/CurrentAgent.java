@@ -31,6 +31,16 @@ public final class CurrentAgent {
      */
     public static final ScopedValue<String> CURRENT_USER_MESSAGE = ScopedValue.newInstance();
 
+    /**
+     * The bound {@link #CURRENT_TURN} id, or {@code null} on entries that bind none (cron fires; worker
+     * virtual threads, where {@code ScopedValue} does not inherit) — the #169 budget-exhaustion
+     * correlation read, shared by the cost gate and the tool-budget counter so both paths always carry
+     * the same turn id. ({@code ScopedValue.orElse(null)} throws, so the bound-check form is required.)
+     */
+    public static UUID currentTurnOrNull() {
+        return CURRENT_TURN.isBound() ? CURRENT_TURN.get() : null;
+    }
+
     private CurrentAgent() {
     }
 }
