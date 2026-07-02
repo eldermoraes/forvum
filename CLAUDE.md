@@ -1733,3 +1733,26 @@ Generalizable lessons from completed milestones; append here as milestones land.
   red-check injects `root.getMessage()` into `safeFailureMessage` (passing `e.getMessage()` raw does NOT leak
   and gives a false-green red-check). Verified: injecting the root message flips the e2e to fail on the
   nested-cause path assertion. [#172]
+- **Budget enforcement is TWO different seams — cost by decorator construction, tool count by ScopedValue
+  — and a LangGraph4j node's exception emerges from `graph.invoke()` wrapped in `ExecutionException`, so a
+  typed catch without an unwrap-walk is dead code.** #169 activated the dormant §4.3.5.2 Decisions 8/9/10:
+  the `costBudget` gate rides `FallbackChatModel` BY CONSTRUCTION (`LlmSelector.select` builds a
+  `BudgetGate` from `persona.costBudget()`; a new budget-gated `resolve` overload serves the cron path —
+  update `CronSchedulerTest`'s `StubLlmSelector` to the new signature, the [#167] stub-models-the-new-call
+  trap), checked BEFORE EVERY attempt so a failed link's ledger row is seen by the next check; `toolBudget`
+  is a per-turn `AtomicLong` grant counter (`TurnToolBudget`, the `CURRENT_EFFECTIVE_SCOPES` enforce-iff-
+  bound pattern) bound by `Agent.respond` and consumed by `ToolExecutor` AFTER belt/RBAC/approval and
+  BEFORE the action — the issue's coordination rule "denied actions must not consume tool budget, while
+  authorized attempted actions must" falls out of that gate order for free. `BudgetExhaustedException` must
+  abort the turn AS ITSELF (TurnService maps it to `code=budget_exhausted`): `runTool` rethrows it ahead of
+  the render-back-to-model arms (else the loop burns generate rounds on an exhausted budget), and `run()`'s
+  catch walks the cause chain (hop-capped) — the tests' error logs proved invoke() delivers the node's
+  exception inside `ExecutionException`, so the pre-existing `catch (SupervisorGraphException) rethrow`
+  idiom never fires for node-thrown types. Decision-10 per-agent day scoping = an ADDITIVE default overload
+  `BudgetMeter.usage(budget, agentId)` (core interface unchanged for implementors), where the filter value
+  IS the decorator's own ledger-attribution `agentId` — the aggregation filters by exactly what the rows
+  were written with, no ScopedValue divergence possible. And a zero cap (`maxTokens: 0`) makes the
+  enforcement path a DETERMINISTIC OFFLINE native E2E: the pre-call gate fires before any provider HTTP, so
+  `BudgetExhaustedAskNativeIT` runs the full parse→meter→gate→error surface in the DEFAULT native leg
+  against the real `ollama:`-pinned provider with no live model ([Risk#5]'s fake-not-in-image trap never
+  applies because the provider never has to answer). [#169]

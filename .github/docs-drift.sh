@@ -11,8 +11,9 @@
 #     Phase-3 (v1.0+) is next. Live sequencing: docs/IMPLEMENTATION-ORDER.md.
 #   - JaCoCo 80% line / 75% branch coverage gates are wired + ENFORCED in `./mvnw verify`.
 #   - Known as-built gaps in shipped v0.5 are flagged inline as `as-built ... #NNN`, never stated as a
-#     delivered/enforced runtime boundary (budget #169, memory #175, compression #176, spawn #177,
-#     CAPR verdict #195, web/dashboard auth #165).
+#     delivered/enforced runtime boundary (memory #175, compression #176, spawn #177, CAPR verdict #195,
+#     web/dashboard auth #165). The cost/tool budget hard-stop (#169) is ENFORCED at runtime — no doc may
+#     claim it is parsed-but-not-enforced.
 #
 # `docs/ISSUES.md` is deliberately NOT scanned: it preserves each step's ORIGINAL proposal as historical
 # text, distinguished from as-built reality by the marker legend at the top of that file.
@@ -53,6 +54,10 @@ ban "docs claim only M1 shipped, M2 onward planned" \
 # 4. The QA/scenario doc must not pin v0.1 as the current shipping version.
 ban "v0.1 pinned as current shipping version" \
     'v0\.1 ships only'
+
+# 5. The #169 budget hard-stop is enforced at runtime — no doc may claim it is parsed-but-not-enforced.
+ban "budget hard-stop stated as not-yet-enforced" \
+    '(budget|hard-stop)[^.|]{0,120}not (yet )?enforced at runtime'
 
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."
