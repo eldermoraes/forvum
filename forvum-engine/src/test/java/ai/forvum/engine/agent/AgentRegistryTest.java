@@ -15,6 +15,10 @@ import jakarta.inject.Inject;
 
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
+import ai.forvum.core.budget.CostBudget;
+import ai.forvum.core.budget.DayWindow;
+import ai.forvum.core.budget.SessionWindow;
+import ai.forvum.core.budget.SpawnConfigurationException;
 import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.config.ChangeType;
@@ -26,6 +30,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -197,5 +202,47 @@ class AgentRegistryTest {
         assertEquals(parent.identityId(), childPersona.identityId());
         // The declared cycle is NOT inherited — a worker runs a single direct generation (M18).
         assertNull(registry.spec(child).cycle());
+    }
+
+    // ---- #169 / Decision 10: spawn-time CostBudget override + the SessionWindow guard ----
+
+    @Test
+    void spawnAcceptsAnExplicitCostBudgetOverrideAndInheritsItDownTheTree() {
+        AgentId main = new AgentId("main");
+        registry.getOrCreate(main);
+        CostBudget override = new CostBudget(null, 500L, new DayWindow(ZoneId.of("UTC")));
+
+        AgentId child = registry.spawn(main, new AgentId("capped-child"), List.of("fs.read"), override);
+
+        assertEquals(override, registry.persona(child).costBudget(),
+                "an explicit override replaces the parent's (null) budget");
+
+        // A DayWindow budget inherits verbatim into a grandchild: the record is immutable and the meter
+        // scopes the day aggregation per agent, so the grandchild's spend is tracked independently.
+        AgentId grandchild = registry.spawn(child, new AgentId("capped-grandchild"), List.of());
+        assertEquals(override, registry.persona(grandchild).costBudget());
+    }
+
+    @Test
+    void spawnRejectsInheritingASessionWindowBudgetWithoutAnOverride() {
+        // A SessionWindow filters by the PARENT's (sessionId, agentId) pair — inherited verbatim, the
+        // child's own calls would be invisible to its budget SUM (effectively uncapped). The guard
+        // surfaces the misconfiguration at spawn time (Decision 10, dormant since M7 — activated by #169).
+        AgentId main = new AgentId("main");
+        registry.getOrCreate(main);
+        CostBudget sessionScoped = new CostBudget(null, 500L, new SessionWindow("sess-1", "session-parent"));
+        AgentId parent = registry.spawn(main, new AgentId("session-parent"), List.of(), sessionScoped);
+
+        SpawnConfigurationException e = assertThrows(SpawnConfigurationException.class,
+                () -> registry.spawn(parent, new AgentId("orphaned-budget-child"), List.of()),
+                "inheriting a SessionWindow parent budget without an override must be rejected");
+
+        assertEquals("session-parent", e.parentAgentId());
+        assertEquals("orphaned-budget-child", e.childAgentId());
+
+        // An explicit override IS the documented remedy — the same spawn succeeds with one.
+        AgentId child = registry.spawn(parent, new AgentId("overridden-budget-child"), List.of(),
+                new CostBudget(null, 100L, new DayWindow(ZoneId.of("UTC"))));
+        assertEquals(100L, registry.persona(child).costBudget().maxTokens());
     }
 }

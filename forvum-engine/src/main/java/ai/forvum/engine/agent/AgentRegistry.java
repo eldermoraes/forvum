@@ -4,6 +4,10 @@ import ai.forvum.core.Persona;
 import ai.forvum.core.TaskRecord;
 import ai.forvum.core.TaskStatus;
 import ai.forvum.core.TaskType;
+import ai.forvum.core.budget.CostBudget;
+import ai.forvum.core.budget.DayWindow;
+import ai.forvum.core.budget.SessionWindow;
+import ai.forvum.core.budget.SpawnConfigurationException;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.config.AgentReader;
 import ai.forvum.engine.config.ConfigurationChangedEvent;
@@ -87,14 +91,26 @@ public class AgentRegistry {
      * model, and budgets, with {@code allowedTools} that must be a subset of the parent's (a child can
      * never gain a capability the parent lacks). Registers and returns the child id. The child id must
      * differ from the parent and must not collide with an already-registered agent — spawn never
-     * silently overwrites a spec.
-     *
-     * <p>TODO (ULTRAPLAN section 4.3.5.2, Decision 10): when cost-budget parsing lands, add an optional
-     * {@code CostBudget} override parameter (absent ⇒ inherit, present ⇒ replace) and throw
-     * {@code SpawnConfigurationException} on inheriting a {@code SessionWindow}-scoped parent budget
-     * without an override. Inert today — {@link AgentSpecReader} leaves {@code costBudget} null.
+     * silently overwrites a spec. Inherits the parent's {@code costBudget} verbatim (Decision 10 — an
+     * immutable record, and the meter scopes a day window per agent, so the child's spend is tracked
+     * independently); use {@link #spawn(AgentId, AgentId, List, CostBudget)} to replace it.
      */
     public AgentId spawn(AgentId parentId, AgentId childId, List<String> allowedTools) {
+        return spawn(parentId, childId, allowedTools, null);
+    }
+
+    /**
+     * As {@link #spawn(AgentId, AgentId, List)} with an explicit {@code costBudget} override for the
+     * child (ULTRAPLAN section 4.3.5.2 Decision 10, activated by #169): absent ({@code null}) inherits
+     * the parent's budget, present replaces it.
+     *
+     * @throws SpawnConfigurationException when inheriting would carry a {@code SessionWindow}-scoped
+     *         parent budget into the child — that window filters by the PARENT's
+     *         {@code (sessionId, agentId)} pair, so the child's own calls would be invisible to its
+     *         budget aggregation, leaving it effectively uncapped with no warning
+     */
+    public AgentId spawn(AgentId parentId, AgentId childId, List<String> allowedTools,
+            CostBudget budgetOverride) {
         if (childId.equals(parentId)) {
             throw new IllegalStateException(
                     "spawn: child id '" + childId.value() + "' must differ from its parent.");
@@ -106,13 +122,16 @@ public class AgentRegistry {
                   + " must be a subset of parent '" + parentId.value() + "' tool belt "
                   + parent.allowedTools() + ".");
         }
+        CostBudget childBudget = budgetOverride != null
+                ? budgetOverride
+                : inheritedBudget(parentId, childId, parent.costBudget());
         // The child inherits the parent's fallback chain, memory policy, role cap, and identity pointer
         // verbatim (like its system prompt/model/budgets) — it can never gain anything the parent lacks.
         // It does NOT inherit the parent's output schema (P2-12: a worker's output is a digest merged
         // back as a tool result, never the top-level final answer the SupervisorGraph validates) nor a
         // declared cycle (a worker runs a single direct generation — DefaultWorkerRunner, M18).
         Persona child = new Persona(childId, parent.systemPrompt(), allowedTools,
-                parent.primaryModel(), parentId, parent.costBudget(), parent.toolBudget(), null,
+                parent.primaryModel(), parentId, childBudget, parent.toolBudget(), null,
                 parent.fallbackModels(), parent.memoryPolicy(), parent.roles(), parent.identityId());
         if (specs.putIfAbsent(childId, new AgentSpec(child, null)) != null) {
             throw new IllegalStateException(
@@ -121,6 +140,24 @@ public class AgentRegistry {
         }
         recordSpawnTask(parentId, childId);
         return childId;
+    }
+
+    /**
+     * The Decision-10 spawn guard: a {@link DayWindow} (or absent) parent budget inherits verbatim —
+     * the per-agent meter scoping keeps the child's spend independent — but a {@link SessionWindow}
+     * budget must not, since its {@code (sessionId, agentId)} pair points at the PARENT and the child
+     * would appear to have unlimited budget. Surfaced at spawn time, not silently at runtime.
+     */
+    private static CostBudget inheritedBudget(AgentId parentId, AgentId childId, CostBudget parentBudget) {
+        if (parentBudget != null && parentBudget.window() instanceof SessionWindow) {
+            throw new SpawnConfigurationException(parentId.value(), childId.value(),
+                    "spawn: parent '" + parentId.value() + "' declares a SessionWindow-scoped costBudget, "
+                  + "which filters by the parent's own (sessionId, agentId) pair — inheriting it verbatim "
+                  + "would make child '" + childId.value() + "' invisible to its own budget aggregation "
+                  + "(effectively uncapped). Pass an explicit CostBudget override to spawn "
+                  + "(ULTRAPLAN section 4.3.5.2, Decision 10).");
+        }
+        return parentBudget;
     }
 
     /**
