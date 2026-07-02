@@ -99,6 +99,23 @@ class ConfigDoctorTest {
     }
 
     @Test
+    void anInvalidCostBudgetIsAnErrorNamingTheFile() throws IOException {
+        // #169 reader-as-oracle: doctor validates through the SAME AgentSpecReader that materializes the
+        // agent, so an unparseable costBudget (a "session" window is file-illegal, DR-8 DP-6) is a
+        // finding for free — a spec doctor passes is exactly one the engine can load.
+        write("agents/overspender.md", "persona");
+        write("agents/overspender.json",
+                "{\"primaryModel\":\"ollama:qwen3:1.7b\","
+              + "\"costBudget\":{\"maxUsd\":1,\"window\":\"session\"}}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.healthy());
+        assertTrue(hasError(report, "agents/overspender"),
+                () -> "an invalid costBudget must be an error naming the file; findings: " + report.findings());
+    }
+
+    @Test
     void anAgentMissingPrimaryModelIsAnError() throws IOException {
         write("agents/nomodel.md", "persona");
         write("agents/nomodel.json", "{\"allowedTools\":[]}");
