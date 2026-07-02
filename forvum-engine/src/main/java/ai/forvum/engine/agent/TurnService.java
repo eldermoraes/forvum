@@ -17,6 +17,7 @@ import ai.forvum.engine.pairing.DeviceNotPairedException;
 import ai.forvum.engine.pairing.DeviceRegistry;
 import ai.forvum.engine.security.OutputFilteredException;
 import ai.forvum.engine.security.OutputGuardChain;
+import ai.forvum.engine.security.SecretRedactor;
 import ai.forvum.engine.session.compaction.CompactionPolicy;
 import ai.forvum.engine.session.compaction.SessionCompactor;
 import ai.forvum.sdk.ChannelTurnDriver;
@@ -28,7 +29,10 @@ import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.ConnectException;
 import java.net.UnknownHostException;
 import java.net.http.HttpConnectTimeoutException;
@@ -343,6 +347,49 @@ public class TurnService implements ChannelTurnDriver {
             return registry.persona(agentId).primaryModel().toString();
         } catch (RuntimeException ignored) {
             return "unknown";
+        }
+    }
+
+    /**
+     * The SAFE user-facing message for a failed turn (#172): built ONLY from non-sensitive components — a
+     * stable phrase, the root cause's simple CLASS name (a code identifier, never user data), and the
+     * curated connection hint. It deliberately excludes {@code e.getMessage()}/cause messages, which can
+     * carry provider bodies, tool arguments, paths, prompt fragments, or secrets. Defensive: any failure
+     * walking a pathological cause chain falls back to the stable generic phrase (never throws into the
+     * dispatch catch arm). Package-private + static for the unit test.
+     */
+    static String safeFailureMessage(Throwable e, String modelHint) {
+        try {
+            Throwable root = e;
+            for (int hops = 0; hops < 50 && root.getCause() != null && root.getCause() != root; hops++) {
+                root = root.getCause();
+            }
+            String message = "The turn could not be completed (cause: " + root.getClass().getSimpleName() + ")";
+            if (isConnectionFailure(root)) {
+                message += ". Is the model provider running? (model: " + modelHint + ")";
+            }
+            return message;
+        } catch (RuntimeException defensive) {
+            return "The turn could not be completed";
+        }
+    }
+
+    /**
+     * The full internal diagnostic for the PROTECTED operator log (#172): the cause chain's stack trace
+     * (class + message + causes), run through {@link SecretRedactor} so even the log follows the redaction
+     * boundary. Keyed by {@code turnId} at the call site, it is how an operator walks from the {@code ref}
+     * the user received to the real exception. Null/failure safe.
+     */
+    static String redactedDiagnostic(Throwable cause) {
+        if (cause == null) {
+            return "(no cause)";
+        }
+        try {
+            StringWriter sw = new StringWriter();
+            cause.printStackTrace(new PrintWriter(sw));
+            return SecretRedactor.redact(sw.toString()).content();
+        } catch (RuntimeException defensive) {
+            return "<diagnostic unavailable>";
         }
     }
 }
