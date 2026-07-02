@@ -3,6 +3,7 @@ package ai.forvum.engine.tools;
 import ai.forvum.core.InvocationStatus;
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.ToolSpec;
+import ai.forvum.core.budget.BudgetExhaustedException;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.approval.ApprovalGate;
 import ai.forvum.engine.context.CurrentIdentity;
@@ -46,6 +47,12 @@ import java.util.function.Supplier;
  * {@link ApprovalDeniedException} (a {@link PermissionDeniedException} subtype, so the tool loop renders it
  * back to the model and the turn completes). Ordering matters — there is no point parking a call the
  * identity may not make at all, so belt + scope are enforced before the approval gate.
+ *
+ * <p><strong>#169 tool budget:</strong> after every gate passes and immediately before the action runs,
+ * one unit of the turn's {@link TurnToolBudget} is consumed (enforce-iff-bound, the P2-11 pattern) — the
+ * execution boundary, so no graph path (tool loop, spawn-adjacent belt call, approval resume) can bypass
+ * the {@code toolBudget} cap. A denied/declined call never consumes; exhaustion audits {@code denied} and
+ * hard-stops the turn with {@code BudgetExhaustedException}.
  */
 @ApplicationScoped
 public class ToolExecutor {
@@ -105,6 +112,20 @@ public class ToolExecutor {
             throw new ApprovalDeniedException(
                     "Tool '" + toolName + "' requires user confirmation and the request was declined or "
                   + "timed out.");
+        }
+        // #169 per-turn tool budget (§5.5): consumed AFTER every gate passes and BEFORE the action runs —
+        // a denied/declined call above never consumed, and an authorized attempt consumes exactly once
+        // (even if the action then fails). Exhaustion audits `denied` and hard-stops the turn: unlike a
+        // belt/scope miss, BudgetExhaustedException is NOT rendered back to the model (the graph rethrows
+        // it), or an exhausted loop would keep burning generate rounds.
+        if (TurnToolBudget.CURRENT_TOOL_BUDGET.isBound()) {
+            try {
+                TurnToolBudget.CURRENT_TOOL_BUDGET.get().consumeOne();
+            } catch (BudgetExhaustedException exhausted) {
+                recorder.record(new ToolInvocation(sessionId, agentId.value(), toolName, arguments,
+                        null, InvocationStatus.DENIED, null, createdAt));
+                throw exhausted;
+            }
         }
         long start = System.nanoTime();
         try {

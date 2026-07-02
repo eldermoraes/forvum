@@ -11,6 +11,7 @@ import ai.forvum.core.MemoryQuery;
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
+import ai.forvum.core.budget.BudgetExhaustedException;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.routing.MemorySelector;
@@ -143,13 +144,31 @@ public class SupervisorGraph {
             CompiledGraph<GraphState> graph = compile(turn);
             Optional<GraphState> result = graph.invoke(Map.of());
             finalText = result.flatMap(GraphState::finalText).orElseGet(turn::lastAssistantText);
-        } catch (SupervisorGraphException e) {
-            throw e;
         } catch (Exception e) {
+            rethrowBudgetExhaustion(e);
+            if (e instanceof SupervisorGraphException graphFailure) {
+                throw graphFailure;
+            }
             throw new SupervisorGraphException("Supervisor graph failed for session "
                     + request.sessionId(), e);
         }
         return enforceOutputSchema(request, finalText);
+    }
+
+    /**
+     * Re-throw the {@link BudgetExhaustedException} buried anywhere in {@code failure}'s cause chain
+     * (#169): the hard stop must abort the turn AS ITSELF — {@code TurnService} surfaces it with
+     * {@code code = "budget_exhausted"} — never wrapped in a generic graph failure. The walk covers
+     * however the exception emerges from {@code graph.invoke()} (raw, completion-wrapped, or inside the
+     * worker-failure wrapper), hop-capped against a pathological cause cycle.
+     */
+    private static void rethrowBudgetExhaustion(Exception failure) {
+        Throwable t = failure;
+        for (int hops = 0; t != null && hops < 50; hops++, t = t.getCause()) {
+            if (t instanceof BudgetExhaustedException budget) {
+                throw budget;
+            }
+        }
     }
 
     /**
@@ -300,9 +319,11 @@ public class SupervisorGraph {
             // Every cycleStep sets FINAL (on both "done" and "continue"), so the graph always carries the
             // latest pass as the final answer; "" is an unreachable belt-and-suspenders fallback.
             finalText = result.flatMap(GraphState::finalText).orElse("");
-        } catch (SupervisorGraphException e) {
-            throw e;
         } catch (Exception e) {
+            rethrowBudgetExhaustion(e); // #169: a cycle generation is budget-gated like any other
+            if (e instanceof SupervisorGraphException graphFailure) {
+                throw graphFailure;
+            }
             throw new SupervisorGraphException(
                 "Cyclic-agent graph failed for session " + request.sessionId(), e);
         }
@@ -416,6 +437,10 @@ public class SupervisorGraph {
         try {
             return toolCallBridge.dispatch(turn.sessionId, turn.agentId, turn.belt,
                     request.name(), request.arguments());
+        } catch (BudgetExhaustedException exhausted) {
+            // #169 hard stop: unlike a belt/scope/approval miss, exhaustion is NOT rendered back to the
+            // model (which would keep the loop burning generate rounds) — it aborts the turn as itself.
+            throw exhausted;
         } catch (ApprovalDeniedException declined) {
             // P2-14 #39: the tool was permitted (belt + scope) but the owner declined/timed out the
             // confirmation. Feed a clear, distinct result back so the model explains it was declined — the
