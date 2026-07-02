@@ -1704,3 +1704,29 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `-pl forvum-app test` on the now-idle machine is the diagnostic (every other module was SUCCESS), mirroring
   the documented macOS ApprovalServiceIT saturation flake — don't read a fork-killed-under-load app failure
   as a code failure. [#170]
+- **Sanitize a channel-visible failure at its ONE construction seam, not at the N renderers — and for an
+  UNTRUSTED message "genericize" beats "redact" when the redactor only knows secret SHAPES.** #172 closed
+  the `codex-review` "error responses bypass the OutputGuard" gap: the success reply ran through
+  `OutputGuardChain` but the five `ErrorEvent.from(...)` sites (ALL in `TurnService.dispatchAuthenticated`)
+  did not, and ten surfaces (8 channels + CLI + Voice-TTS) each render `ErrorEvent.message()` verbatim
+  (byte-identical copies; module isolation forbids a shared renderer). So a provider/tool/network exception
+  leaked secrets/paths/tool-args/prompt-fragments. The fix is ONE `emitError(sink, turnId, code, userMessage,
+  cause)` helper at the single construction seam — sanitize once, zero channel changes (they already read
+  `.message()`). **Genericize vs redact (the load-bearing call):** `SecretRedactor` masks only secret-SHAPED
+  tokens (`sk-`/`xox`/`gh_`/`AIza`/`AKIA`/`Bearer <opaque>`/…), NOT arbitrary private paths, tool arguments,
+  or prompt fragments — so "no channel-visible path/arg/prompt" is satisfiable ONLY by dropping the raw
+  exception text, not by redacting it. The untrusted `turn_failed` message becomes a stable category + the
+  root-cause simple CLASS name (a code identifier, safe) + the curated connection hint (safe — the model
+  ref) + a `turnId` correlation `ref`; the curated config-error categories (author-controlled, no untrusted
+  content) pass through the `SecretRedactor` and stay actionable. Use the pure `SecretRedactor`, NOT the full
+  `OutputGuardChain`, on the error path — a `Blocked` disposition THROWS, and an error must always surface as
+  a category, never be blocked/re-thrown into the dispatch catch arm (make `safeFailureMessage`/`emitError`
+  defensive: a pathological cause chain falls back to a stable generic phrase). Null the event's
+  `exceptionClass`/`stackTraceText` (a LATENT serialization leak — no renderer reads them today, but a future
+  JSON path would); log the FULL detail (redacted) at WARN keyed by `turnId` — the protected operator
+  diagnostic that walks the user's `ref` back to the exception. **Red-check trap:** at the `catch (RuntimeException
+  e)`, `e` is the WRAPPER (e.g. the supervisor-graph exception, generic message) — the leak is the DEEPEST
+  cause's message. So the leak fixture must seed the secret/path in a NESTED cause, and the meaningful
+  red-check injects `root.getMessage()` into `safeFailureMessage` (passing `e.getMessage()` raw does NOT leak
+  and gives a false-green red-check). Verified: injecting the root message flips the e2e to fail on the
+  nested-cause path assertion. [#172]
