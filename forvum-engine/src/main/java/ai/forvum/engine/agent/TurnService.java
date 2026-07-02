@@ -66,6 +66,8 @@ public class TurnService implements ChannelTurnDriver {
     /** v0.1 routes every channel turn to the canonical {@code main} agent. */
     static final String DEFAULT_AGENT = "main";
 
+    private static final Logger LOG = Logger.getLogger(TurnService.class);
+
     @Inject
     AgentRegistry registry;
 
@@ -196,8 +198,7 @@ public class TurnService implements ChannelTurnDriver {
                 // roles/<name>.json. Fail CLOSED with an actionable config error rather than guess at scopes
                 // or leave the caller's full set in force (acceptance #4). The diagnostic names the offending
                 // role + file and carries no caller scopes. Nothing has run yet, so nothing escalated.
-                sink.accept(ErrorEvent.from(Instant.now(), turnId, "role_unresolved",
-                        roleError.getMessage(), roleError));
+                emitError(sink, turnId, "role_unresolved", roleError.getMessage(), roleError);
                 return;
             }
 
@@ -239,28 +240,24 @@ public class TurnService implements ChannelTurnDriver {
         } catch (OutputFilteredException filtered) {
             // An OutputGuard suppressed the egress rather than leak a secret/PII. Surface the turn on the
             // FallbackReasons.FILTERED path as a terminal output_filtered ErrorEvent — never the candidate.
-            sink.accept(ErrorEvent.from(Instant.now(), turnId, "output_filtered",
-                    filtered.getMessage(), filtered));
+            emitError(sink, turnId, "output_filtered", filtered.getMessage(), filtered);
         } catch (IdentityResolutionException unresolved) {
             // #168: the agent's declared identityId fallback names no configured identity. Fail CLOSED with
             // an actionable terminal error rather than degrade an unresolved user to the permissive
             // anonymous default. Thrown before any session/scope binding, so nothing ran and nothing
             // escalated.
-            sink.accept(ErrorEvent.from(Instant.now(), turnId, "identity_unresolved",
-                    unresolved.getMessage(), unresolved));
+            emitError(sink, turnId, "identity_unresolved", unresolved.getMessage(), unresolved);
         } catch (DeviceNotPairedException deviceRejected) {
             // #166 + P2-4: the device is unpaired, revoked, or presented an invalid / missing /
             // cross-channel credential (the DeviceAuthenticationException subtype). Rejected BEFORE the
             // responder, so no model/provider/tool ran. The message carries no token (secret hygiene, #166).
-            sink.accept(ErrorEvent.from(Instant.now(), turnId, "device_unpaired",
-                    deviceRejected.getMessage(), deviceRejected));
+            emitError(sink, turnId, "device_unpaired", deviceRejected.getMessage(), deviceRejected);
         } catch (RuntimeException e) {
             // A failed turn (model/network failure, fallback exhaustion, a persistence error) must not
             // escape a self-driving channel's callback. Surface it as a terminal ErrorEvent; the failed
             // attempt is already ledgered in provider_calls by the model decorator's own transaction
             // (M7), so no conversational rows are orphaned.
-            sink.accept(ErrorEvent.from(Instant.now(), turnId, "turn_failed",
-                    describeFailure(agentId, e), e));
+            emitError(sink, turnId, "turn_failed", safeFailureMessage(e, primaryModelOrUnknown(agentId)), e);
         }
     }
 
@@ -297,35 +294,6 @@ public class TurnService implements ChannelTurnDriver {
         intersected.addAll(scopes);
         intersected.retainAll(d.approvedScopes()); // caller ∩ agent-cap ∩ device-approved
         return intersected;
-    }
-
-    /**
-     * Compose the user-facing failure message: the exception's own message plus the deepest cause (the
-     * original network/provider failure an intermediate wrapper like the supervisor-graph exception
-     * hides), and — for a connection-level failure — a hint naming the agent's configured model, since
-     * an unreachable provider (model server down, wrong base URL) is the most common fresh-install
-     * failure and the wrapper message alone is unactionable.
-     */
-    private String describeFailure(AgentId agentId, RuntimeException e) {
-        String message = (e.getMessage() == null || e.getMessage().isBlank())
-                ? e.getClass().getSimpleName()
-                : e.getMessage();
-        Throwable root = e;
-        // hop cap: initCause only rejects a DIRECT self-cause, so a multi-node cause cycle is
-        // constructible and would otherwise spin this walk forever inside the dispatch catch block
-        for (int hops = 0; hops < 50 && root.getCause() != null && root.getCause() != root; hops++) {
-            root = root.getCause();
-        }
-        if (root != e) {
-            String rootText = (root.getMessage() == null || root.getMessage().isBlank())
-                    ? ""
-                    : ": " + root.getMessage();
-            message += " (cause: " + root.getClass().getSimpleName() + rootText + ")";
-        }
-        if (isConnectionFailure(root)) {
-            message += ". Is the model provider running? (model: " + primaryModelOrUnknown(agentId) + ")";
-        }
-        return message;
     }
 
     /**
@@ -391,5 +359,28 @@ public class TurnService implements ChannelTurnDriver {
         } catch (RuntimeException defensive) {
             return "<diagnostic unavailable>";
         }
+    }
+
+    /**
+     * Emit a terminal {@link ErrorEvent} to the channel with a SANITIZED message (#172). The user-facing
+     * message is the {@link SecretRedactor}-redacted {@code userMessage} plus the {@code turnId} as a
+     * correlation {@code ref} (a null/blank redaction falls back to a stable phrase). The FULL detail is
+     * logged (redacted) at WARN keyed by {@code turnId} — the protected operator diagnostic that lets an
+     * operator walk from the user's {@code ref} to the real exception. The event carries NO
+     * {@code exceptionClass}/{@code stackTraceText}, removing the latent serialization leak; every channel
+     * renders only {@code message}. Defensive: message building never throws back into the dispatch caller.
+     */
+    private void emitError(Consumer<AgentEvent> sink, UUID turnId, String code, String userMessage,
+            Throwable cause) {
+        String safe;
+        try {
+            String redacted = SecretRedactor.redact(userMessage).content();
+            String base = (redacted == null || redacted.isBlank()) ? "The turn failed" : redacted;
+            safe = base + " (ref: " + turnId + ")";
+        } catch (RuntimeException guardFailure) {
+            safe = "The turn failed (ref: " + turnId + ")";
+        }
+        LOG.warnf("Turn %s failed [%s]: %s", turnId, code, redactedDiagnostic(cause));
+        sink.accept(new ErrorEvent(Instant.now(), turnId, code, safe, null, null));
     }
 }

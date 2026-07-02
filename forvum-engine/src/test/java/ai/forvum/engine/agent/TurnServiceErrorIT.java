@@ -3,6 +3,8 @@ package ai.forvum.engine.agent;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.event.AgentEvent;
@@ -51,6 +53,10 @@ class TurnServiceErrorIT {
                 "the failure is surfaced as an ErrorEvent, not propagated");
         assertNotNull(error.turnId(), "the ErrorEvent carries the bound turn id");
         assertNotNull(error.message(), "the ErrorEvent carries the failure message");
+        assertTrue(error.message().contains("ref: " + error.turnId()),
+                "#172: the safe message carries the correlation id");
+        assertNull(error.exceptionClass(), "#172: no diagnostic class on the channel-bound event");
+        assertNull(error.stackTraceText(), "#172: no diagnostic stack on the channel-bound event");
     }
 
     /** Seeds {@code main} pinned to the always-throwing {@code boom} provider. */
