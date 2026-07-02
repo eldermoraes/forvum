@@ -58,8 +58,8 @@ class TurnServiceSafeErrorIT {
         assertFalse(m.contains("\"path\":"), "no tool argument");
         assertEquals("turn_failed", error.code(), "a stable failure category");
         assertTrue(m.contains("ref: " + error.turnId()), "a correlation id");
-        assertNull(error.exceptionClass(), "no diagnostic class on the channel event");
-        assertNull(error.stackTraceText(), "no diagnostic stack on the channel event");
+        assertNull(error.stackTraceText(),
+                "no diagnostic stack trace on the channel event (the latent leak is removed)");
     }
 
     public static class LeakyHomeProfile implements QuarkusTestProfile {

@@ -209,9 +209,16 @@ Add the helper:
             safe = "The turn failed (ref: " + turnId + ")";
         }
         LOG.warnf("Turn %s failed [%s]: %s", turnId, code, redactedDiagnostic(cause));
-        sink.accept(new ErrorEvent(Instant.now(), turnId, code, safe, null, null));
+        String exceptionClass = cause == null ? null : cause.getClass().getName();
+        sink.accept(new ErrorEvent(Instant.now(), turnId, code, safe, exceptionClass, null));
     }
 ```
+
+> **As-built amendment:** the event KEEPS `exceptionClass` (a class name — safe, for telemetry) and nulls
+> only `stackTraceText` (the leak vector). The first cut nulled both and broke five `[#166]`
+> `TurnServicePairingIT` cases that assert `error.exceptionClass()`; a class name carries no user data, so
+> keep it. The strengthened tests below assert only `assertNull(error.stackTraceText())`, not the class.
+
 Replace the five `sink.accept(ErrorEvent.from(...))` calls:
 - `role_unresolved` (≈195): `emitError(sink, turnId, "role_unresolved", roleError.getMessage(), roleError);`
 - `output_filtered` (≈238): `emitError(sink, turnId, "output_filtered", filtered.getMessage(), filtered);`

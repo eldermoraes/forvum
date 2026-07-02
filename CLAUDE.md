@@ -1722,9 +1722,12 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `OutputGuardChain`, on the error path — a `Blocked` disposition THROWS, and an error must always surface as
   a category, never be blocked/re-thrown into the dispatch catch arm (make `safeFailureMessage`/`emitError`
   defensive: a pathological cause chain falls back to a stable generic phrase). Null the event's
-  `exceptionClass`/`stackTraceText` (a LATENT serialization leak — no renderer reads them today, but a future
-  JSON path would); log the FULL detail (redacted) at WARN keyed by `turnId` — the protected operator
-  diagnostic that walks the user's `ref` back to the exception. **Red-check trap:** at the `catch (RuntimeException
+  `stackTraceText` (the full stack carries exception MESSAGES — a LATENT serialization leak — no renderer
+  reads it today, but a future JSON path would) but KEEP `exceptionClass` (a class name — a code identifier,
+  never user data — so telemetry and the [#166] `TurnServicePairingIT` that asserts `error.exceptionClass()`
+  still work; nulling it too broke 5 pairing ITs — a class name is safe, only the stack is the leak); log
+  the FULL detail (redacted) at WARN keyed by `turnId` — the protected operator diagnostic that walks the
+  user's `ref` back to the exception. **Red-check trap:** at the `catch (RuntimeException
   e)`, `e` is the WRAPPER (e.g. the supervisor-graph exception, generic message) — the leak is the DEEPEST
   cause's message. So the leak fixture must seed the secret/path in a NESTED cause, and the meaningful
   red-check injects `root.getMessage()` into `safeFailureMessage` (passing `e.getMessage()` raw does NOT leak

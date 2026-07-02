@@ -64,8 +64,11 @@ Replaces the five raw `sink.accept(ErrorEvent.from(...))` calls with
    `detail = SecretRedactor.redact(fullDetail(cause)).content()` and `fullDetail` renders the cause's
    class + message + stack trace. Redacted even here (a log is a protected-but-shippable sink — the
    persistence acceptance criterion). This is the operator's path from the user's `ref` to the exception.
-3. **Emit** `new ErrorEvent(now, turnId, code, safeMessage, null, null)` — the diagnostic fields are
-   **null** on the channel-bound event (the latent leak is removed; the diagnostic lives in the log).
+3. **Emit** `new ErrorEvent(now, turnId, code, safeMessage, cause.getClass().getName(), null)` — keep the
+   exception's `exceptionClass` (a class name — a code identifier, never user data — for telemetry and the
+   #166 pairing ITs that assert the exception TYPE; channels never render it) but **null `stackTraceText`**
+   (the full stack carries exception messages — the latent serialization leak — which live only in the
+   redacted internal log).
 
 ### 4.2 `describeFailure` → safe variant
 

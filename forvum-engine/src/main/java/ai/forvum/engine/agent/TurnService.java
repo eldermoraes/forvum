@@ -366,9 +366,12 @@ public class TurnService implements ChannelTurnDriver {
      * message is the {@link SecretRedactor}-redacted {@code userMessage} plus the {@code turnId} as a
      * correlation {@code ref} (a null/blank redaction falls back to a stable phrase). The FULL detail is
      * logged (redacted) at WARN keyed by {@code turnId} — the protected operator diagnostic that lets an
-     * operator walk from the user's {@code ref} to the real exception. The event carries NO
-     * {@code exceptionClass}/{@code stackTraceText}, removing the latent serialization leak; every channel
-     * renders only {@code message}. Defensive: message building never throws back into the dispatch caller.
+     * operator walk from the user's {@code ref} to the real exception. The event keeps the exception's
+     * {@code exceptionClass} (a class name — a code identifier, never user data — kept for telemetry and
+     * type assertions; channels never render it) but carries a null {@code stackTraceText}: the full stack
+     * carries exception MESSAGES (the latent serialization leak) and lives only in the redacted internal
+     * log. Every channel renders only {@code message}. Defensive: message building never throws back into
+     * the dispatch caller.
      */
     private void emitError(Consumer<AgentEvent> sink, UUID turnId, String code, String userMessage,
             Throwable cause) {
@@ -381,6 +384,7 @@ public class TurnService implements ChannelTurnDriver {
             safe = "The turn failed (ref: " + turnId + ")";
         }
         LOG.warnf("Turn %s failed [%s]: %s", turnId, code, redactedDiagnostic(cause));
-        sink.accept(new ErrorEvent(Instant.now(), turnId, code, safe, null, null));
+        String exceptionClass = cause == null ? null : cause.getClass().getName();
+        sink.accept(new ErrorEvent(Instant.now(), turnId, code, safe, exceptionClass, null));
     }
 }

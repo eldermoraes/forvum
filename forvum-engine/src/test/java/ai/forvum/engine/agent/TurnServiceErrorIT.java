@@ -55,8 +55,8 @@ class TurnServiceErrorIT {
         assertNotNull(error.message(), "the ErrorEvent carries the failure message");
         assertTrue(error.message().contains("ref: " + error.turnId()),
                 "#172: the safe message carries the correlation id");
-        assertNull(error.exceptionClass(), "#172: no diagnostic class on the channel-bound event");
-        assertNull(error.stackTraceText(), "#172: no diagnostic stack on the channel-bound event");
+        assertNull(error.stackTraceText(),
+                "#172: no diagnostic stack trace on the channel-bound event (the latent leak is removed)");
     }
 
     /** Seeds {@code main} pinned to the always-throwing {@code boom} provider. */
