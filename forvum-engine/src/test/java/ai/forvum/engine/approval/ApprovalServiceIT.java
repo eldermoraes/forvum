@@ -99,7 +99,7 @@ class ApprovalServiceIT {
                     () -> service.requireApproval("sess-async-ok", AGENT, "a.danger", "{}"));
             String id = awaitPendingId("sess-async-ok");
             assertTrue(service.decide(id, true, "looks fine"), "decide must complete the live future");
-            assertTrue(blocked.get(8, TimeUnit.SECONDS), "an out-of-band approve must release the blocked turn");
+            assertTrue(blocked.get(25, TimeUnit.SECONDS), "an out-of-band approve must release the blocked turn");
             assertEquals("approved", service.statusOf(id));
         } finally {
             exec.shutdownNow();
@@ -113,8 +113,8 @@ class ApprovalServiceIT {
             Future<Boolean> blocked = exec.submit(
                     () -> service.requireApproval("sess-async-timeout", AGENT, "a.danger", "{}"));
             String id = awaitPendingId("sess-async-timeout");
-            // No decision arrives → the configured timeout (5s) fires and denies; wait past it with margin.
-            assertFalse(blocked.get(15, TimeUnit.SECONDS), "an unresolved confirmation must time out to deny");
+            // No decision arrives → the configured timeout (15s) fires and denies; wait past it with margin.
+            assertFalse(blocked.get(30, TimeUnit.SECONDS), "an unresolved confirmation must time out to deny");
             assertEquals("timed_out", service.statusOf(id));
         } finally {
             exec.shutdownNow();
@@ -123,11 +123,13 @@ class ApprovalServiceIT {
 
     /**
      * Poll the pending queue until a row for {@code sessionId} appears (the async branch committed it). The
-     * window (3s) stays under the configured timeout (5s) so the row is still {@code pending} when found,
-     * and the {@code warmUpPersistence} step keeps the first {@code createPending} from eating it.
+     * window (12s) stays under the configured approval timeout (15s) so the row is still {@code pending}
+     * when found even after a saturated-runner connection wait, and the {@code warmUpPersistence} step keeps
+     * the first {@code createPending} from eating it. Polls GENTLY (100ms) to avoid hammering the sole
+     * {@code max-size=1} connection with acquisitions that would themselves contend with {@code createPending}.
      */
     private String awaitPendingId(String sessionId) throws InterruptedException {
-        for (int i = 0; i < 150; i++) {
+        for (int i = 0; i < 120; i++) {
             String id = service.listPending().stream()
                     .filter(p -> p.sessionId().equals(sessionId))
                     .map(PendingApproval::id)
@@ -135,7 +137,7 @@ class ApprovalServiceIT {
             if (id != null) {
                 return id;
             }
-            Thread.sleep(20);
+            Thread.sleep(100);
         }
         throw new AssertionError("no pending approval row appeared for " + sessionId);
     }
@@ -147,9 +149,22 @@ class ApprovalServiceIT {
     }
 
     /**
-     * A temp {@code $FORVUM_HOME} plus a 5s approval timeout: short enough that the timeout arm does not slow
-     * the suite much, but long enough that the async-approve arm (which decides in milliseconds once the
-     * persistence is warm, see {@code warmUpPersistence}) never races it on a loaded CI runner.
+     * A temp {@code $FORVUM_HOME} plus a deliberately GENEROUS timing budget for the single-connection
+     * ({@code max-size=1}, because SQLite is a single writer — Risk #11) pool on the saturated macOS CI
+     * cell (measured right after the native-image build, where a boot alone was seen taking &gt;100 s). Two
+     * widened windows work together to kill the documented [P2-14] flake:
+     * <ul>
+     *   <li>{@code quarkus.datasource.jdbc.acquisition-timeout=30s} — a concurrent op (the
+     *       {@code awaitPendingId} poll's {@code listPending}) WAITS for the sole connection instead of
+     *       failing at Agroal's 5s DEFAULT when {@code createPending}'s transaction/context lifecycle holds
+     *       it for a few seconds under load. This is the exact failure observed on the #165/#170 PRs
+     *       ({@code Unable to acquire JDBC Connection [Sorry, acquisition timeout!]}); the production code
+     *       already blocks connection-free, so widening the wait — not the pool — is the correct fix.</li>
+     *   <li>{@code forvum.approval.timeout-seconds=15} — the parked row stays {@code pending} long enough
+     *       that a poll delayed by that connection contention still finds it pending (dwarfing the
+     *       few-second worst-case hold), while the timeout arm still fires. The cost is only the one
+     *       timeout test's wall-clock; the approve arm returns as soon as {@code decide} completes.</li>
+     * </ul>
      */
     public static class ShortTimeoutProfile implements QuarkusTestProfile {
         static final Path HOME = createHome();
@@ -166,7 +181,8 @@ class ApprovalServiceIT {
         public Map<String, String> getConfigOverrides() {
             return Map.of(
                     "forvum.home", HOME.toString(),
-                    "forvum.approval.timeout-seconds", "5");
+                    "forvum.approval.timeout-seconds", "15",
+                    "quarkus.datasource.jdbc.acquisition-timeout", "30s");
         }
     }
 }
