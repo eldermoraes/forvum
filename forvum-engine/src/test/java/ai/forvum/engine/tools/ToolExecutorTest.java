@@ -301,6 +301,26 @@ class ToolExecutorTest {
         assertSame(InvocationStatus.DENIED, recorder.invocations().get(1).status());
     }
 
+
+    @Test
+    void anExhaustedBudgetNeverParksAnApprovalRequest() throws Exception {
+        // #169 fail-fast peek: with the budget already spent, a confirm-required call must be denied
+        // BEFORE the approval gate — never prompting the owner (or blocking up to the approval timeout)
+        // for an action the consuming grant would deny right after an approve. The peek takes no grant.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        RecordingGate gate = new RecordingGate(true);
+        ToolExecutor executor = executor(recorder, gate);
+
+        ScopedValue.where(TurnToolBudget.CURRENT_TOOL_BUDGET, new TurnToolBudget(0, null)).run(() ->
+                assertThrows(BudgetExhaustedException.class, () -> executor.execute(
+                        "sess-1", new AgentId("main"), List.of(CONFIRM_READ), "a.confirm", "{}",
+                        () -> "never")));
+
+        assertFalse(gate.consulted, "an exhausted budget must never reach the approval gate");
+        assertEquals(1, recorder.invocations().size());
+        assertSame(InvocationStatus.DENIED, recorder.invocations().get(0).status());
+    }
+
     @Test
     void unboundToolBudgetKeepsTheExecutorUncapped() {
         // Enforce-iff-bound (the P2-11 pattern): no binding means no cap — the pre-#169 behavior for

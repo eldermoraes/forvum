@@ -50,4 +50,19 @@ public final class TurnToolBudget {
             throw new BudgetExhaustedException(ExhaustionCause.TOOL_CAP_HIT, turnId);
         }
     }
+
+    /**
+     * Fail-fast read: throw when the cap is already spent WITHOUT consuming a grant. Used ahead of the
+     * approval gate so an exhausted budget never parks a confirm-required call — prompting the owner
+     * (or blocking up to the approval timeout) for an action {@link #consumeOne()} would deny right
+     * after the approve. Advisory between concurrent consumers; the consuming increment stays the
+     * authoritative gate.
+     *
+     * @throws BudgetExhaustedException with {@link ExhaustionCause#TOOL_CAP_HIT} when the cap is spent
+     */
+    public void requireHeadroom() {
+        if (used.get() >= cap) {
+            throw new BudgetExhaustedException(ExhaustionCause.TOOL_CAP_HIT, turnId);
+        }
+    }
 }

@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -105,28 +106,25 @@ public class ToolExecutor {
         }
         // P2-14 #39 approval gate (LAST): a confirm-required tool is parked until the owner approves it. A
         // reject/timeout audits denied and throws — the action never runs.
-        if (tool.userConfirmRequired()
-                && !approvals.requireApproval(sessionId, agentId, toolName, arguments)) {
-            recorder.record(new ToolInvocation(sessionId, agentId.value(), toolName, arguments,
-                    null, InvocationStatus.DENIED, null, createdAt));
-            throw new ApprovalDeniedException(
-                    "Tool '" + toolName + "' requires user confirmation and the request was declined or "
-                  + "timed out.");
+        if (tool.userConfirmRequired()) {
+            // #169 fail-fast peek (no grant consumed): an already-exhausted budget must not park the call
+            // in the approval flow — the owner would be prompted (or the turn blocked up to the approval
+            // timeout) for an action the consuming grant below would deny right after the approve.
+            checkBudget(sessionId, agentId, toolName, arguments, createdAt, TurnToolBudget::requireHeadroom);
+            if (!approvals.requireApproval(sessionId, agentId, toolName, arguments)) {
+                recorder.record(new ToolInvocation(sessionId, agentId.value(), toolName, arguments,
+                        null, InvocationStatus.DENIED, null, createdAt));
+                throw new ApprovalDeniedException(
+                        "Tool '" + toolName + "' requires user confirmation and the request was declined or "
+                      + "timed out.");
+            }
         }
         // #169 per-turn tool budget (§5.5): consumed AFTER every gate passes and BEFORE the action runs —
         // a denied/declined call above never consumed, and an authorized attempt consumes exactly once
         // (even if the action then fails). Exhaustion audits `denied` and hard-stops the turn: unlike a
         // belt/scope miss, BudgetExhaustedException is NOT rendered back to the model (the graph rethrows
         // it), or an exhausted loop would keep burning generate rounds.
-        if (TurnToolBudget.CURRENT_TOOL_BUDGET.isBound()) {
-            try {
-                TurnToolBudget.CURRENT_TOOL_BUDGET.get().consumeOne();
-            } catch (BudgetExhaustedException exhausted) {
-                recorder.record(new ToolInvocation(sessionId, agentId.value(), toolName, arguments,
-                        null, InvocationStatus.DENIED, null, createdAt));
-                throw exhausted;
-            }
-        }
+        checkBudget(sessionId, agentId, toolName, arguments, createdAt, TurnToolBudget::consumeOne);
         long start = System.nanoTime();
         try {
             String result = action.get();
@@ -137,6 +135,25 @@ public class ToolExecutor {
             recorder.record(new ToolInvocation(sessionId, agentId.value(), toolName, arguments,
                     failure.toString(), InvocationStatus.ERROR, elapsedMillis(start), createdAt));
             throw failure;
+        }
+    }
+
+    /**
+     * Run {@code gate} against the turn's bound {@link TurnToolBudget} — a no-op when unbound
+     * (enforce-iff-bound, the P2-11 pattern). Exhaustion audits the attempt {@code denied} and
+     * rethrows, hard-stopping the turn.
+     */
+    private void checkBudget(String sessionId, AgentId agentId, String toolName, String arguments,
+            long createdAt, Consumer<TurnToolBudget> gate) {
+        if (!TurnToolBudget.CURRENT_TOOL_BUDGET.isBound()) {
+            return;
+        }
+        try {
+            gate.accept(TurnToolBudget.CURRENT_TOOL_BUDGET.get());
+        } catch (BudgetExhaustedException exhausted) {
+            recorder.record(new ToolInvocation(sessionId, agentId.value(), toolName, arguments,
+                    null, InvocationStatus.DENIED, null, createdAt));
+            throw exhausted;
         }
     }
 
