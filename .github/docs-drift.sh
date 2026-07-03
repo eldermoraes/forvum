@@ -11,11 +11,12 @@
 #     Phase-3 (v1.0+) is next. Live sequencing: docs/IMPLEMENTATION-ORDER.md.
 #   - JaCoCo 80% line / 75% branch coverage gates are wired + ENFORCED in `./mvnw verify`.
 #   - Known as-built gaps in shipped v0.5 are flagged inline as `as-built ... #NNN`, never stated as a
-#     delivered/enforced runtime boundary (memory #175, compression #176, spawn #177, CAPR verdict #195,
-#     web/dashboard auth #165). The cost/tool budget hard-stop (#169) is ENFORCED at runtime — no doc may
-#     claim it is parsed-but-not-enforced. Runtime-state owner-only permissions (#173) are ENFORCED on
-#     every boot (StateDirInitializer 0700/0600) — no doc may frame the state/ umask gap as an unshipped
-#     follow-up.
+#     delivered/enforced runtime boundary (memory #175, spawn #177, CAPR verdict #195, web/dashboard auth
+#     #165). The cost/tool budget hard-stop (#169) is ENFORCED at runtime — no doc may claim it is
+#     parsed-but-not-enforced. Runtime-state owner-only permissions (#173) are ENFORCED on every boot
+#     (StateDirInitializer 0700/0600) — no doc may frame the state/ umask gap as an unshipped follow-up.
+#     The compression-failure fallback (#176) is BOUNDED (BoundedCompressor: truncate + fixed marker) — no
+#     doc may frame it as a fail-open path that reinserts the raw text.
 #
 # `docs/ISSUES.md` is deliberately NOT scanned: it preserves each step's ORIGINAL proposal as historical
 # text, distinguished from as-built reality by the marker legend at the top of that file.
@@ -66,6 +67,12 @@ ban "budget hard-stop stated as not-yet-enforced" \
 #    is deliberately not scanned).
 ban "state/ owner-only enforcement (#173) stated as an unshipped gap" \
     '(hardening follow-up to align .?StateDirInitializer|StateDirInitializer[^.|]{0,40}uses plain|no-.?init first boot creates .?state/[^.|]{0,80}umask)'
+
+# 7. The #176 compression-failure fallback is BOUNDED (BoundedCompressor: truncate + fixed marker) — no
+#    scanned doc may frame it as a fail-open path that reinserts the raw text at either the retrieved-memory
+#    or worker-digest boundary.
+ban "compression-failure fallback (#176) stated as fail-open / reinserting raw" \
+    'reinserts the raw text instead of bounding|reinserting the raw text \(fail-open\)|compression-failure fallback fail-open|fail-open path tracked by #176'
 
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."

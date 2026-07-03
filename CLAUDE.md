@@ -1816,3 +1816,32 @@ Generalizable lessons from completed milestones; append here as milestones land.
   are deterministically reachable in CI. The native proof reuses the `SessionReplayNativeIT`
   `replay <missing-session>` boot-migrates dance (`replay` is not a `CommandMode` one-shot → it boots
   persistence) to stat the binary-created `state/`+`forvum.sqlite` in the default native leg. [#173]
+- **A compression-FAILURE fallback must be BOUNDED, not fail-open — and the ceiling reuses the existing
+  threshold rather than adding config.** #176 closed the Compress-pillar fail-open path: `SupervisorGraph`
+  had TWO call-sites (`compressHits` for retrieved memory, `compress` for the `reduce` worker-digest) that,
+  on a summarizer throw / null / blank, reinserted the RAW oversized content (already `> threshold`) with no
+  ceiling — overflowing the window / amplifying injection from untrusted retrieved/worker data. The fix is
+  ONE shared `ai.forvum.engine.compress.BoundedCompressor` (pure-Java, native-safe, no reflection, no CDI —
+  a static `compress(content, CompressionBudget, Summarizer)` taking the summarizer as a PARAM so the graph
+  keeps its single injected instance and tests still set `graph.summarizer = lambda`). Budgets derive from
+  the single `compressThresholdChars` knob (DR-5, no new config surface — the maintainer's config-minimalism):
+  `maxOutput = threshold` (a failed compression must not leave content above the size that triggered it),
+  `maxInput = threshold*4` (clamped) above which the model is SKIPPED entirely (bounded memory, no expensive
+  call on adversarial multi-MB input — the "very-large-input" acceptance). Fallback = truncate to `maxOutput`
+  + a FIXED marker (OUR literal, ASCII, no delimiter, never attacker-derived; the exact omitted count goes to
+  the safe content-free WARN log, never the prompt). Traps: (1) the marker is 60 chars, so tests using a tiny
+  `threshold` (5/10) hard-clamp it away — the graph tests needed realistic thresholds (100) + content sized
+  into the right band (>threshold, <maxInput for the model-called path; >maxInput for the skip path). (2) the
+  three existing `*KeepsTheRaw*` tests ENCODED the fail-open bug — rewrite them to the bounded contract (assert
+  `!contains(rawOversized)` + `contains(TRUNCATION_MARKER)` + a char-count `<= maxOutput`), the Red→Green.
+  (3) an over-limit SUMMARY (model "compressed" to something still `> maxOutput`) is itself bounded → truncate
+  the SUMMARY (better signal than raw). (4) `BudgetExhaustedException` is RE-THROWN (hop-capped cause walk,
+  mirroring `asGraphFailure`), never swallowed into a fallback — a #169 hard stop still aborts the turn, so
+  budget exhaustion can never trigger a compression fallback at all. (5) delimiter safety is preserved by
+  ORDER: the memory fallback text still flows through `RetrievedMemory.frame`→`neutralize` AFTER truncation
+  (a complete `</retrieved_memory>` in the kept chars is stripped; a partial tag at the cut is inert), and the
+  worker digest rides a role-framed `ToolExecutionResultMessage` (no textual delimiter). (6) removing the two
+  `LOG.warnf` fail-open lines orphaned the graph's `LOG` field + `Logger` import — remove them (surgical). The
+  3rd `Summarizer` call-site (`SessionCompactor`) is fail-CLOSED over TRUSTED own-session content — NOT the
+  #176 vector, left out of scope. The failure taxonomy (timeout/exception/blank/invalid/over-limit/input-over-limit)
+  is a `CompressionOutcome` enum for diagnostics; classify timeout by a `*TimeoutException` in the cause chain. [#176]
