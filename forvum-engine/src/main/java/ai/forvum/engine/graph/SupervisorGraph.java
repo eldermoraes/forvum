@@ -145,30 +145,32 @@ public class SupervisorGraph {
             Optional<GraphState> result = graph.invoke(Map.of());
             finalText = result.flatMap(GraphState::finalText).orElseGet(turn::lastAssistantText);
         } catch (Exception e) {
-            rethrowBudgetExhaustion(e);
-            if (e instanceof SupervisorGraphException graphFailure) {
-                throw graphFailure;
-            }
-            throw new SupervisorGraphException("Supervisor graph failed for session "
-                    + request.sessionId(), e);
+            throw asGraphFailure(e, "Supervisor graph failed for session " + request.sessionId());
         }
         return enforceOutputSchema(request, finalText);
     }
 
     /**
-     * Re-throw the {@link BudgetExhaustedException} buried anywhere in {@code failure}'s cause chain
-     * (#169): the hard stop must abort the turn AS ITSELF — {@code TurnService} surfaces it with
-     * {@code code = "budget_exhausted"} — never wrapped in a generic graph failure. The walk covers
-     * however the exception emerges from {@code graph.invoke()} (raw, completion-wrapped, or inside the
-     * worker-failure wrapper), hop-capped against a pathological cause cycle.
+     * Translate a graph-execution failure for the turn boundary — the ONE policy both the supervisor and
+     * the cycle graph share (a copy per graph would let the abort-as-itself list drift between them). A
+     * {@link BudgetExhaustedException} buried anywhere in the cause chain is re-thrown AS ITSELF (#169:
+     * the hard stop must surface as {@code code = "budget_exhausted"}, never a generic graph failure —
+     * the walk covers however {@code graph.invoke()} delivers a node's exception: raw,
+     * completion-wrapped, or inside the worker-failure wrapper; hop-capped against a pathological cause
+     * cycle). An already-typed {@link SupervisorGraphException} re-throws unchanged; anything else is
+     * wrapped with {@code message}.
      */
-    private static void rethrowBudgetExhaustion(Exception failure) {
+    private static SupervisorGraphException asGraphFailure(Exception failure, String message) {
         Throwable t = failure;
         for (int hops = 0; t != null && hops < 50; hops++, t = t.getCause()) {
             if (t instanceof BudgetExhaustedException budget) {
                 throw budget;
             }
         }
+        if (failure instanceof SupervisorGraphException graphFailure) {
+            return graphFailure;
+        }
+        return new SupervisorGraphException(message, failure);
     }
 
     /**
@@ -320,12 +322,7 @@ public class SupervisorGraph {
             // latest pass as the final answer; "" is an unreachable belt-and-suspenders fallback.
             finalText = result.flatMap(GraphState::finalText).orElse("");
         } catch (Exception e) {
-            rethrowBudgetExhaustion(e); // #169: a cycle generation is budget-gated like any other
-            if (e instanceof SupervisorGraphException graphFailure) {
-                throw graphFailure;
-            }
-            throw new SupervisorGraphException(
-                "Cyclic-agent graph failed for session " + request.sessionId(), e);
+            throw asGraphFailure(e, "Cyclic-agent graph failed for session " + request.sessionId());
         }
         return enforceOutputSchema(request, finalText);
     }

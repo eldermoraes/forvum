@@ -58,7 +58,6 @@ public class PanacheBudgetMeter implements BudgetMeter {
               + "from ProviderCallEntity p where ");
 
         Long startMillis = null;
-        String dayAgentId = null;
         String sessionId = null;
         String agentId = null;
         switch (budget.window()) {
@@ -66,7 +65,6 @@ public class PanacheBudgetMeter implements BudgetMeter {
                 startMillis = LocalDate.now(d.tz()).atStartOfDay(d.tz()).toInstant().toEpochMilli();
                 jpql.append("p.createdAt >= :start");
                 if (callingAgentId != null) {
-                    dayAgentId = callingAgentId;
                     jpql.append(" and p.agentId = :dayAid");
                 }
             }
@@ -80,9 +78,9 @@ public class PanacheBudgetMeter implements BudgetMeter {
         var query = em.createQuery(jpql.toString(), Object[].class);
         if (startMillis != null) {
             query.setParameter("start", startMillis);
-        }
-        if (dayAgentId != null) {
-            query.setParameter("dayAid", dayAgentId);
+            if (callingAgentId != null) {
+                query.setParameter("dayAid", callingAgentId);
+            }
         }
         if (sessionId != null) {
             query.setParameter("sid", sessionId);
