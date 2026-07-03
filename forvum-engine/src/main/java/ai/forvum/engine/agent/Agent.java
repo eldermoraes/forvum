@@ -2,11 +2,15 @@ package ai.forvum.engine.agent;
 
 import ai.forvum.core.AgentScoped;
 import ai.forvum.core.Persona;
+import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.context.CurrentAgent;
+import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.graph.GraphTurnRequest;
+import ai.forvum.engine.graph.ReplayContext;
 import ai.forvum.engine.graph.SupervisorGraph;
+import ai.forvum.engine.memory.MemoryWriter;
 import ai.forvum.engine.persistence.CaprRecorder;
 import ai.forvum.engine.routing.LlmSelector;
 import ai.forvum.engine.tools.TurnToolBudget;
@@ -23,6 +27,7 @@ import io.opentelemetry.instrumentation.annotations.WithSpan;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * The {@code @AgentScoped} facade for a live agent: it aggregates the agent's {@link Persona}, its
@@ -53,6 +58,9 @@ public class Agent {
 
     @Inject
     CaprRecorder caprRecorder;
+
+    @Inject
+    MemoryWriter memoryWriter;
 
     /** This agent's persona (system prompt + structural spec), for the currently bound agent. */
     public Persona persona() {
@@ -124,7 +132,32 @@ public class Agent {
 
         long turnId = memory.recordTurn(sessionId, userText, reply);
         caprRecorder.recordPassed(sessionId, id.value(), turnId);
+        // #175 Write phase: extract, filter, embed, and persist durable facts off-turn — ONLY for a real
+        // interactive turn. Skip when memory is off for this agent (strategy NONE — retrieval already
+        // honors it, so the write must too, a consent symmetry), when the turn is a REPLAY (re-run content
+        // must not pollute the user's real long-term memory — the graph honors ReplayContext, and the write
+        // sits outside it), or when there is no bound turn id (a cron/internal turn, not a user
+        // conversation). Every tenant key is captured here (ScopedValues bound) and passed in, so the async
+        // task needs no re-bind; it never affects the turn (which already produced its reply).
+        UUID currentTurn = CurrentAgent.currentTurnOrNull();
+        if (shouldWriteMemory(currentTurn, persona)) {
+            memoryWriter.onTurnCompleted(id, CurrentIdentity.currentIdentityId(), currentTurn,
+                    sessionId, userText, reply);
+        }
         return reply;
+    }
+
+    /**
+     * Whether a completed turn should feed the #175 off-turn Write phase — true only for a real interactive
+     * turn: a bound turn id ({@code CURRENT_TURN}, so not a cron/internal turn), not a replay (re-run content
+     * must not pollute the user's real long-term memory — the graph honors {@code ReplayContext}, the write
+     * sits outside it), and memory enabled for the agent ({@code strategy != NONE} — retrieval already honors
+     * it, so the write must too, a consent symmetry). Package-private + static for unit coverage of each gate.
+     */
+    static boolean shouldWriteMemory(UUID currentTurn, Persona persona) {
+        return currentTurn != null
+                && !ReplayContext.CURRENT_REPLAY.isBound()
+                && persona.memoryPolicy().strategy() != RetrievalStrategy.NONE;
     }
 
     /** Identity of the resolved per-agent instance — lets tests assert per-agent isolation/caching. */

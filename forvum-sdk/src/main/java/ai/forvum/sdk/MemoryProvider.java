@@ -60,6 +60,23 @@ public sealed interface MemoryProvider permits AbstractMemoryProvider {
     String extensionId();
 
     /**
+     * Whether this provider is configured and ready to serve retrieval right now. The engine's
+     * {@code MemorySelector} prefers an <em>active external</em> provider over the bundled local SQLite
+     * default, so a bundled-but-unconfigured backend (e.g. Qdrant with no {@code memory/qdrant.json})
+     * reports {@code false} and steps aside for the always-available local provider (#175). This keeps the
+     * local three-tier memory the default without an operator configuring anything, while an explicitly
+     * configured external provider still wins when present.
+     *
+     * <p>The default is {@code true}: a provider is assumed active unless it has an off/unconfigured state
+     * to report. Purely additive to the SPI — existing implementations need no change.
+     *
+     * @return {@code true} if this provider should be selected when installed and active
+     */
+    default boolean isActive() {
+        return true;
+    }
+
+    /**
      * Retrieve the memory most relevant to {@code query}, honoring {@code policy}.
      *
      * <p>Blocking; invoked on a virtual thread. Returns an ordered (most-relevant-first), at-most-{@code

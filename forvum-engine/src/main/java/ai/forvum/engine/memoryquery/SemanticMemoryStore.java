@@ -13,6 +13,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -48,6 +49,79 @@ public class SemanticMemoryStore {
 
     @Inject
     AgroalDataSource dataSource;
+
+    /**
+     * Upsert one long-term fact with its embedding, scoped to {@code (identityId, agentId, key)} — the
+     * off-turn write path of #175. Uses SQLite's ATOMIC {@code INSERT ... ON CONFLICT(identity_id, agent_id,
+     * key) DO UPDATE} so a re-write of the same key updates value/source/embedding/{@code updated_at}
+     * (deterministic dedup) with NO read-modify-write race: two concurrent writes of the same new key on
+     * the virtual-thread executor cannot both INSERT and violate the UNIQUE constraint (the losing writer's
+     * statement resolves to the UPDATE branch instead of throwing). Unlike {@code AgentMemory.recordFact}
+     * (which is {@code @AgentScoped} and resolves the tenant from ScopedValues), this takes identity/agent
+     * explicitly so the async writer can call it on a plain virtual thread with no ScopedValue re-bind.
+     * Wrapped in its own request context + fresh transaction (like {@link #applyEmbeddings}) so it commits
+     * independently of any ambient turn transaction. The blocking embedding call must happen BEFORE this.
+     */
+    @ActivateRequestContext
+    public void upsertFact(String identityId, String agentId, String key, String value, String source,
+            byte[] embedding) {
+        long now = System.currentTimeMillis();
+        String sql = "INSERT INTO semantic_memory (identity_id, agent_id, key, value, embedding, source, "
+                + "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                + "ON CONFLICT(identity_id, agent_id, key) DO UPDATE SET value = excluded.value, "
+                + "embedding = excluded.embedding, source = excluded.source, updated_at = excluded.updated_at";
+        QuarkusTransaction.requiringNew().run(() -> {
+            try (Connection connection = dataSource.getConnection();
+                    PreparedStatement statement = connection.prepareStatement(sql)) {
+                statement.setString(1, identityId);
+                statement.setString(2, agentId);
+                statement.setString(3, key);
+                statement.setString(4, value);
+                if (embedding == null) {
+                    statement.setNull(5, Types.BLOB);
+                } else {
+                    statement.setBytes(5, embedding);
+                }
+                statement.setString(6, source);
+                statement.setLong(7, now);
+                statement.setLong(8, now);
+                statement.executeUpdate();
+            } catch (SQLException e) {
+                throw new IllegalStateException("Upserting memory fact failed: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    /**
+     * Delete the fact named {@code key} for {@code (identityId, agentId)}, returning how many rows were
+     * removed (0 or 1). The delete is identity/agent-scoped — {@code forvum memory forget} (#175) can never
+     * touch another identity's or agent's fact. Filters by key in-memory to avoid the SQL-reserved {@code
+     * key} column in a JPQL where-clause (the {@link #upsertFact} idiom).
+     */
+    @ActivateRequestContext
+    public int deleteFact(String identityId, String agentId, String key) {
+        int[] deleted = {0};
+        QuarkusTransaction.requiringNew().run(() -> SemanticMemoryEntity
+                .<SemanticMemoryEntity>list("identityId = ?1 and agentId = ?2", identityId, agentId).stream()
+                .filter(fact -> fact.key.equals(key))
+                .forEach(fact -> {
+                    fact.delete();
+                    deleted[0]++;
+                }));
+        return deleted[0];
+    }
+
+    /**
+     * Delete every long-term fact for {@code (identityId, agentId)} — {@code forvum memory forget --all}
+     * (#175) — returning the number removed. Identity/agent-scoped: another identity's facts are untouched.
+     */
+    @ActivateRequestContext
+    public long deleteAllFacts(String identityId, String agentId) {
+        long[] deleted = {0};
+        QuarkusTransaction.requiringNew().run(() -> deleted[0] =
+                SemanticMemoryEntity.delete("identityId = ?1 and agentId = ?2", identityId, agentId));
+        return deleted[0];
+    }
 
     /**
      * Read (via raw JDBC, L1-cache-immune) every embedded {@code semantic_memory} row for an identity/agent.

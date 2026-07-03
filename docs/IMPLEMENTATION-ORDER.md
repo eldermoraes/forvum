@@ -72,7 +72,7 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 
 ## Wave 3 — Memory loop *(foundational CE; unblocks parity)*
 
-15. **#175** `[HIGH]` `feat(memory)`: integrate local semantic + episodic memory into normal turns — today `recordFact` has no production caller and `MemorySelector` only wires Qdrant, so a default install **never** writes or retrieves long-term memory. Realizes the three-tier Write/Select map. Depends on #168, consumes #176; **hard-unblocks #193 and #196, underpins #189**.
+15. **#175** ✅ `[HIGH]` `feat(memory)`: integrate local semantic + episodic memory into normal turns. Realizes the three-tier Write/Select map. Depends on #168, consumes #176; **hard-unblocks #193 and #196, underpins #189**. *Done:* an engine-resident `LocalMemoryProvider` (semantic cosine + episodic keyword, identity/agent-scoped) is the default retrieval path, reconciled onto the #50 SQLite index (no second index); `MemoryWriter` runs the Write phase off-turn (LLM fact-extraction → pre-memory-write secret filter → embed-on-write → upsert) and `recordTurn` now writes real episodes; `MemorySelector` prefers a configured external provider (Qdrant `isActive()`) only when active, else the local default; `forvum memory forget <key>`/`--all` is the delete surface. Loop-E2E + degrade + native-`forget` ITs land with it.
 
 ## Wave 4 — Security/CI test capstone *(once the controls exist)*
 
@@ -94,13 +94,13 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 25. **#190** ▸ `feat(tools)`: structured planning `update_plan` tool — **Write** pillar; strongest single driver of multi-step coherence. Plan in the session scratchpad with a compaction `block_type`.
 26. **#191** ▸ `[HIGH]` `feat(engine)`: `SkillInvokerTool` skill-invocation surface — **Select** (procedural); unlocks the skills axis. (Phase-1 X7 #73 leftover.)
 27. **#195** ▸ `[new]` `feat(capr)`: replace the always-`passed` turn verdict with a real per-turn judge — **closes the CAPR measurement loop** the whole CE paradigm is built around (`Agent.java:117` records a constant verdict today). Off the critical path, off by default.
-28. **#196** ▸ `[new]` `[blocked: #175]` `feat(memory)`: upgrade Select from single-shot retrieval to iterative/agentic RAG — the PT doc's headline ask ("Agentic RAG dinâmico") + OpenClaw's `active-memory` pattern; bounded retrieve→evaluate→decompose as an Isolate-respecting sub-agent.
+28. **#196** ▸ `[new]` `[unblocked: #175 ✅]` `feat(memory)`: upgrade Select from single-shot retrieval to iterative/agentic RAG — the PT doc's headline ask ("Agentic RAG dinâmico") + OpenClaw's `active-memory` pattern; bounded retrieve→evaluate→decompose as an Isolate-respecting sub-agent.
 29. **#197** ▸ `[new]` `feat(context)`: mid-turn context pruning for tool results & images — the one **Compress** mechanism OpenClaw has (`context-pruning/pruner.ts`) and Forvum lacks; distinct from #176 and the between-turn compactor.
 
 ## Wave 7 — Remaining parity + polish *(breadth / delight / reach)*
 
 30. **#189** `feat(tools)`: session + sub-agent introspection tools (`agents.list` / `sessions.*`) — depends on #167/#168.
-31. **#193** `[blocked: #175]` `feat(tools)`: explicit `memory.save` / `memory.recall` tool — hard dep on #175; do not start before its provider contract merges.
+31. **#193** `[unblocked: #175 ✅]` `feat(tools)`: explicit `memory.save` / `memory.recall` tool — its provider contract (`LocalMemoryProvider`/`MemoryWriter`) has merged, so it is now startable.
 32. **#186** ▸ `feat(tools)`: text-to-speech (`tts.speak`) tool — reuses the voice-channel Piper subprocess pattern.
 33. **#187** ▸ `feat(tools)`: media-generation tools (image/video/music) via a new `GenerationProvider` SPI.
 34. **#194** `[HIGH]` `feat(app)`: interactive first-run onboarding wizard (`forvum onboard`) — composes #184 + #192; **pullable forward** right after Wave 5 if adoption is a priority.
