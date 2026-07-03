@@ -25,6 +25,11 @@ import java.time.LocalDate;
  * matching cap on {@link CostBudget} is {@code null} is opted out — its {@code spent}/{@code remaining}
  * are reported as {@code null} and it never triggers exhaustion. No {@code synchronized} (ULTRAPLAN
  * section 3.8); the read runs on the calling virtual thread inside a transaction.
+ *
+ * <p><strong>Per-agent scoping (#169, Decision 10):</strong> the two-argument overload restricts a
+ * {@link DayWindow} aggregation to the calling agent's rows, so each agent's day budget tracks its own
+ * spend — a spawned child inheriting the parent's budget record still meters independently. A
+ * {@link SessionWindow} carries its own {@code (sessionId, agentId)} pair and ignores the parameter.
  */
 @Singleton
 public class PanacheBudgetMeter implements BudgetMeter {
@@ -39,6 +44,12 @@ public class PanacheBudgetMeter implements BudgetMeter {
     @Override
     @Transactional
     public Usage usage(CostBudget budget) {
+        return usage(budget, null);
+    }
+
+    @Override
+    @Transactional
+    public Usage usage(CostBudget budget, String callingAgentId) {
         boolean usdActive = budget.maxUsd() != null;
         boolean tokActive = budget.maxTokens() != null;
 
@@ -53,6 +64,9 @@ public class PanacheBudgetMeter implements BudgetMeter {
             case DayWindow d -> {
                 startMillis = LocalDate.now(d.tz()).atStartOfDay(d.tz()).toInstant().toEpochMilli();
                 jpql.append("p.createdAt >= :start");
+                if (callingAgentId != null) {
+                    jpql.append(" and p.agentId = :dayAid");
+                }
             }
             case SessionWindow s -> {
                 sessionId = s.sessionId();
@@ -64,6 +78,9 @@ public class PanacheBudgetMeter implements BudgetMeter {
         var query = em.createQuery(jpql.toString(), Object[].class);
         if (startMillis != null) {
             query.setParameter("start", startMillis);
+            if (callingAgentId != null) {
+                query.setParameter("dayAid", callingAgentId);
+            }
         }
         if (sessionId != null) {
             query.setParameter("sid", sessionId);

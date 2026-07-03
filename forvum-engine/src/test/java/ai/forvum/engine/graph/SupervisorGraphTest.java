@@ -14,6 +14,8 @@ import ai.forvum.core.MemoryTier;
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
+import ai.forvum.core.budget.BudgetExhaustedException;
+import ai.forvum.core.budget.ExhaustionCause;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.approval.ApprovalGate;
 import ai.forvum.engine.context.CurrentIdentity;
@@ -22,6 +24,7 @@ import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.session.compaction.Summarizer;
 import ai.forvum.engine.tools.ToolCallBridge;
 import ai.forvum.engine.tools.ToolTestFixtures;
+import ai.forvum.engine.tools.TurnToolBudget;
 import ai.forvum.sdk.AbstractToolProvider;
 import ai.forvum.sdk.ToolProvider;
 
@@ -882,5 +885,58 @@ class SupervisorGraphTest {
 
         assertTrue(framedBlock(model.seen.get(0)).contains(oversized),
                 "a null/blank proxy summary falls through to the raw hit (the MemoryHit ctor rejects null)");
+    }
+
+    // ---- #169 budget-exhaustion propagation: the hard stop aborts the turn AS ITSELF --------------
+
+    @Test
+    void toolBudgetExhaustionAbortsTheTurnInsteadOfFeedingTheModel() throws Exception {
+        // With a bound zero cap, the FIRST authorized tool call exhausts the budget. Unlike a belt/scope
+        // miss (rendered back to the model as a tool result), the exhaustion must abort the turn as a raw
+        // BudgetExhaustedException — never wrapped in SupervisorGraphException, never a model-visible
+        // "failed" result that would keep the loop burning generate rounds.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        AiMessage toolCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("call-1").name("fs.read").arguments("{\"path\":\"x.txt\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(toolCall, AiMessage.from("never reached"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("read x"));
+        GraphTurnRequest request = new GraphTurnRequest("s1", new AgentId("main"), model,
+                List.of(FS_READ), seed);
+
+        BudgetExhaustedException thrown = ScopedValue
+                .where(TurnToolBudget.CURRENT_TOOL_BUDGET, new TurnToolBudget(0, null))
+                .call(() -> assertThrows(BudgetExhaustedException.class, () -> graph.run(request)));
+
+        assertEquals(ExhaustionCause.TOOL_CAP_HIT, thrown.cause());
+        assertEquals(1, model.seen.size(), "the turn stops at the exhausted tool call — no further generate");
+        assertEquals(1, recorder.invocations().size(), "the blocked attempt is audited");
+        assertSame(InvocationStatus.DENIED, recorder.invocations().get(0).status());
+    }
+
+    @Test
+    void costBudgetExhaustionFromTheModelSeamAbortsTheTurnAsItself() {
+        // The Decision-8 pre-call gate throws from INSIDE a generate node (the model seam). However the
+        // exception emerges from graph.invoke() (raw or completion-wrapped), run() must surface the raw
+        // BudgetExhaustedException so TurnService maps it to code=budget_exhausted.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+
+        ChatModel exhaustedModel = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                throw new BudgetExhaustedException(ExhaustionCause.TOKEN_CAP_HIT, null);
+            }
+        };
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("hi"));
+
+        BudgetExhaustedException thrown = assertThrows(BudgetExhaustedException.class,
+                () -> graph.run(new GraphTurnRequest("s1", new AgentId("main"), exhaustedModel,
+                        List.of(), seed)));
+
+        assertEquals(ExhaustionCause.TOKEN_CAP_HIT, thrown.cause());
     }
 }

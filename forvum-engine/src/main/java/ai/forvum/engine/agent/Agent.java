@@ -9,6 +9,7 @@ import ai.forvum.engine.graph.GraphTurnRequest;
 import ai.forvum.engine.graph.SupervisorGraph;
 import ai.forvum.engine.persistence.CaprRecorder;
 import ai.forvum.engine.routing.LlmSelector;
+import ai.forvum.engine.tools.TurnToolBudget;
 
 import jakarta.inject.Inject;
 
@@ -110,8 +111,16 @@ public class Agent {
         ChatModel model = modelOverride != null ? modelOverride : llmSelector.select(persona, sessionId);
         List<ToolSpec> belt = toolBelt.tools();
 
-        String reply = supervisorGraph.run(new GraphTurnRequest(sessionId, id, model, belt, messages,
-                persona.outputSchema(), persona.memoryPolicy(), spec.cycle()));
+        GraphTurnRequest request = new GraphTurnRequest(sessionId, id, model, belt, messages,
+                persona.outputSchema(), persona.memoryPolicy(), spec.cycle());
+        // #169: a declared toolBudget binds the per-turn grant counter around the graph (the same
+        // ScopedValue seam as CURRENT_EFFECTIVE_SCOPES), consumed by ToolExecutor at the execution
+        // boundary; an uncapped persona binds nothing — the graph's MAX_ROUNDS stays the only backstop.
+        String reply = persona.toolBudget() == null
+                ? supervisorGraph.run(request)
+                : ScopedValue.where(TurnToolBudget.CURRENT_TOOL_BUDGET,
+                                new TurnToolBudget(persona.toolBudget(), CurrentAgent.currentTurnOrNull()))
+                        .call(() -> supervisorGraph.run(request));
 
         long turnId = memory.recordTurn(sessionId, userText, reply);
         caprRecorder.recordPassed(sessionId, id.value(), turnId);

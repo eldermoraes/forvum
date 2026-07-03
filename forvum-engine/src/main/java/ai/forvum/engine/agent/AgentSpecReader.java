@@ -5,12 +5,17 @@ import ai.forvum.core.MemoryTier;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
 import ai.forvum.core.RetrievalStrategy;
+import ai.forvum.core.budget.CostBudget;
+import ai.forvum.core.budget.DayWindow;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.graph.CycleSpec;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
+import java.time.DateTimeException;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -25,7 +30,7 @@ import java.util.Set;
  * model, the fallback chain, the retrieval policy, the role cap, the identity pointer, an optional
  * parent pointer, and budget caps (DR-8, §4.3.8). Every key but {@code primaryModel} is optional with a
  * backward-compatible default, so a spec predating the DR-8 fields parses unchanged. {@code costBudget}
- * parsing stays deferred (PR-9, DR-8 DP-6); absent ⇒ {@code null} today.
+ * parses per DR-8 DP-6 (#169): file windows are {@code "day"}-only; absent ⇒ {@code null} (uncapped).
  */
 public final class AgentSpecReader {
 
@@ -75,10 +80,78 @@ public final class AgentSpecReader {
         MemoryPolicy memoryPolicy = parseMemoryPolicy(id, spec.get("memoryPolicy"));
         List<String> roles = parseRoles(id, spec.get("roles"));
         String identityId = parseIdentityId(spec.get("identityId"));
+        CostBudget costBudget = parseCostBudget(id, spec.get("costBudget"));
 
-        // costBudget parsing (nested CostBudget) stays deferred to PR-9 (DR-8 DP-6); absent -> null.
-        return new Persona(id, systemPrompt, allowedTools, primaryModel, parent, null, toolBudget,
+        return new Persona(id, systemPrompt, allowedTools, primaryModel, parent, costBudget, toolBudget,
                 outputSchema, fallbackModels, memoryPolicy, roles, identityId);
+    }
+
+    /**
+     * The optional cost-budget block (DR-8 DP-6, un-deferred by #169): {@code { maxUsd?, maxTokens?,
+     * window?: "day", timezone? }}. File-declared windows are {@code "day"}-only — a {@code "session"}
+     * window is rejected at parse because a config file has no session id (§4.3.5.2 Decision 5) — and an
+     * absent {@code timezone} resolves to the system zone at parse time. At-least-one-cap and
+     * non-negativity stay in {@link CostBudget}'s canonical constructor; its failure is re-thrown naming
+     * the file. Absent/null ⇒ {@code null} (uncapped, the backward-compatible default).
+     */
+    private static CostBudget parseCostBudget(AgentId id, JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (!node.isObject()) {
+            throw new IllegalStateException(
+                "Agent '" + id.value() + "' 'costBudget' must be a JSON object "
+              + "{ \"maxUsd\"?, \"maxTokens\"?, \"window\"?: \"day\", \"timezone\"? } (got "
+              + node.getNodeType() + "). Check agents/" + id.value() + ".json.");
+        }
+        BigDecimal maxUsd = null;
+        JsonNode usdNode = node.get("maxUsd");
+        if (usdNode != null && !usdNode.isNull()) {
+            if (!usdNode.isNumber()) {
+                throw new IllegalStateException(
+                    "Agent '" + id.value() + "' 'costBudget.maxUsd' must be a number (got " + usdNode
+                  + "). Check agents/" + id.value() + ".json.");
+            }
+            maxUsd = usdNode.decimalValue();
+        }
+        Long maxTokens = null;
+        JsonNode tokensNode = node.get("maxTokens");
+        if (tokensNode != null && !tokensNode.isNull()) {
+            if (!tokensNode.isIntegralNumber()) {
+                throw new IllegalStateException(
+                    "Agent '" + id.value() + "' 'costBudget.maxTokens' must be an integer (got "
+                  + tokensNode + "). Check agents/" + id.value() + ".json.");
+            }
+            maxTokens = tokensNode.asLong();
+        }
+        JsonNode windowNode = node.get("window");
+        if (windowNode != null && !windowNode.isNull()
+                && !"day".equalsIgnoreCase(windowNode.asText())) {
+            throw new IllegalStateException(
+                "Agent '" + id.value() + "' 'costBudget.window' must be \"day\" (got '"
+              + windowNode.asText() + "'). A config file cannot declare a \"session\" window — it has "
+              + "no session id (ULTRAPLAN §4.3.5.2 Decision 5). Check agents/" + id.value() + ".json.");
+        }
+        ZoneId zone = ZoneId.systemDefault();
+        JsonNode tzNode = node.get("timezone");
+        if (tzNode != null && !tzNode.isNull()) {
+            try {
+                zone = ZoneId.of(tzNode.asText());
+            } catch (DateTimeException e) {
+                throw new IllegalStateException(
+                    "Agent '" + id.value() + "' 'costBudget.timezone' is not a valid zone id (got '"
+                  + tzNode.asText() + "'). Check agents/" + id.value() + ".json.", e);
+            }
+        }
+        try {
+            return new CostBudget(maxUsd, maxTokens, new DayWindow(zone));
+        } catch (IllegalStateException e) {
+            // The record's own invariants (at least one cap, non-negative caps) name the generic config
+            // origin; re-throw naming THIS file so the operator lands on the right spec.
+            throw new IllegalStateException(
+                "Agent '" + id.value() + "' has an invalid 'costBudget': " + e.getMessage()
+              + " Check agents/" + id.value() + ".json.", e);
+        }
     }
 
     /**

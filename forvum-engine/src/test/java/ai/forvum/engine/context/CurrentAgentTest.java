@@ -44,4 +44,16 @@ class CurrentAgentTest {
         assertEquals(turn, seen);
         assertFalse(CurrentAgent.CURRENT_TURN.isBound());
     }
+
+    @Test
+    void currentTurnOrNullReadsTheBindingWithoutThrowingWhenUnbound() throws Exception {
+        // #169: the budget-correlation read must be null-safe when no turn id is bound (cron fires,
+        // worker VTs) — ScopedValue.orElse(null) throws, so the helper uses the bound-check form.
+        assertEquals(null, CurrentAgent.currentTurnOrNull());
+
+        UUID turn = UUID.randomUUID();
+        UUID seen = ScopedValue.where(CurrentAgent.CURRENT_TURN, turn)
+                .call(CurrentAgent::currentTurnOrNull);
+        assertEquals(turn, seen);
+    }
 }

@@ -15,4 +15,17 @@ package ai.forvum.core.budget;
  */
 public interface BudgetMeter {
     Usage usage(CostBudget budget);
+
+    /**
+     * As {@link #usage(CostBudget)}, additionally scoping a {@link DayWindow} aggregation to
+     * {@code agentId} — ULTRAPLAN section 4.3.5.2 Decision 10: spend is tracked independently
+     * per agent, so a day-window budget aggregates only the calling agent's ledger rows. A
+     * {@link SessionWindow} already carries its own {@code (sessionId, agentId)} pair and
+     * ignores this parameter; a {@code null} agent id keeps the unscoped read. The default
+     * delegates to the unscoped read for implementations predating the per-agent filter
+     * (#169); the M5 persistence implementation overrides it.
+     */
+    default Usage usage(CostBudget budget, String agentId) {
+        return usage(budget);
+    }
 }

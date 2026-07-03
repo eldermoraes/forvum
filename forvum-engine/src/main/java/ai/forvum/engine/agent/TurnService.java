@@ -5,6 +5,7 @@ import ai.forvum.core.DeviceCredential;
 import ai.forvum.core.ModelRef;
 import ai.forvum.core.Persona;
 import ai.forvum.core.PermissionScope;
+import ai.forvum.core.budget.BudgetExhaustedException;
 import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.Done;
 import ai.forvum.core.event.ErrorEvent;
@@ -252,6 +253,13 @@ public class TurnService implements ChannelTurnDriver {
             // cross-channel credential (the DeviceAuthenticationException subtype). Rejected BEFORE the
             // responder, so no model/provider/tool ran. The message carries no token (secret hygiene, #166).
             emitError(sink, turnId, "device_unpaired", deviceRejected.getMessage(), deviceRejected);
+        } catch (BudgetExhaustedException exhausted) {
+            // #169 hard stop (§4.3.5.2 Decisions 8/9 + §5.5): the cost/tool budget gate fired BEFORE the
+            // next provider/tool action. The message is non-sensitive by construction (a cause enum —
+            // never user data), so it rides the sanitized error path with code=budget_exhausted.
+            emitError(sink, turnId, "budget_exhausted",
+                    "The agent's budget is exhausted (" + exhausted.cause() + ") — the turn was stopped "
+                  + "before the next model/tool action.", exhausted);
         } catch (RuntimeException e) {
             // A failed turn (model/network failure, fallback exhaustion, a persistence error) must not
             // escape a self-driving channel's callback. Surface it as a terminal ErrorEvent; the failed

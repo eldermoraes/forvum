@@ -1733,3 +1733,51 @@ Generalizable lessons from completed milestones; append here as milestones land.
   red-check injects `root.getMessage()` into `safeFailureMessage` (passing `e.getMessage()` raw does NOT leak
   and gives a false-green red-check). Verified: injecting the root message flips the e2e to fail on the
   nested-cause path assertion. [#172]
+- **Budget enforcement is TWO different seams — cost by decorator construction, tool count by ScopedValue
+  — and a LangGraph4j node's exception emerges from `graph.invoke()` wrapped in `ExecutionException`, so a
+  typed catch without an unwrap-walk is dead code.** #169 activated the dormant §4.3.5.2 Decisions 8/9/10:
+  the `costBudget` gate rides `FallbackChatModel` BY CONSTRUCTION (`LlmSelector.select` builds a
+  `BudgetGate` from `persona.costBudget()`; a new budget-gated `resolve` overload serves the cron path —
+  update `CronSchedulerTest`'s `StubLlmSelector` to the new signature, the [#167] stub-models-the-new-call
+  trap), checked BEFORE EVERY attempt so a failed link's ledger row is seen by the next check; `toolBudget`
+  is a per-turn `AtomicLong` grant counter (`TurnToolBudget`, the `CURRENT_EFFECTIVE_SCOPES` enforce-iff-
+  bound pattern) bound by `Agent.respond` and consumed by `ToolExecutor` AFTER belt/RBAC/approval and
+  BEFORE the action — the issue's coordination rule "denied actions must not consume tool budget, while
+  authorized attempted actions must" falls out of that gate order for free. `BudgetExhaustedException` must
+  abort the turn AS ITSELF (TurnService maps it to `code=budget_exhausted`): `runTool` rethrows it ahead of
+  the render-back-to-model arms (else the loop burns generate rounds on an exhausted budget), and `run()`'s
+  catch walks the cause chain (hop-capped) — the tests' error logs proved invoke() delivers the node's
+  exception inside `ExecutionException`, so the pre-existing `catch (SupervisorGraphException) rethrow`
+  idiom never fires for node-thrown types. Decision-10 per-agent day scoping = an ADDITIVE default overload
+  `BudgetMeter.usage(budget, agentId)` (core interface unchanged for implementors), where the filter value
+  IS the decorator's own ledger-attribution `agentId` — the aggregation filters by exactly what the rows
+  were written with, no ScopedValue divergence possible. And a zero cap (`maxTokens: 0`) makes the
+  enforcement path a DETERMINISTIC OFFLINE native E2E: the pre-call gate fires before any provider HTTP, so
+  `BudgetExhaustedAskNativeIT` runs the full parse→meter→gate→error surface in the DEFAULT native leg
+  against the real `ollama:`-pinned provider with no live model ([Risk#5]'s fake-not-in-image trap never
+  applies because the provider never has to answer). [#169]
+- **Activating a dormant exception can expose a stale doc-vs-code contract — reconcile the doc to the
+  as-built, don't add dead mapping code.** #169 un-deferred `costBudget`, which activated the M7 dormant
+  `SpawnConfigurationException` guard (a `SessionWindow` parent budget inherited without an override). Its
+  core javadoc + ULTRAPLAN Decision 10 both promised the engine surfaces it as a terminal
+  `spawn_invalid_config` `ErrorEvent` — but the M18 supervisor graph's ONLY production spawn path
+  (`spawn_worker` fan-out → `SupervisorGraph.prepareSpawn`) catches every `RuntimeException` (id collision,
+  self-id, belt-widening) as a model-visible tool result and CONTINUES the turn, so the promised terminal
+  surface has no escape path. Three independent review finders flagged the divergence; the exception is
+  ALSO unreachable from file config (`AgentSpecReader` rejects a `"session"` window), reachable only via
+  the programmatic 4-arg `spawn` override. Right fix: reconcile the javadoc + the ULTRAPLAN Decision-10
+  line to the as-built (a defensive spawn-time safeguard rendered as a tool result, not a terminal event),
+  NOT add a `spawn_invalid_config` catch arm in `TurnService` + make `prepareSpawn` rethrow — that is dead
+  code for an unreachable path (YAGNI, CLAUDE §13 simplicity). The generalizable rule: when you turn on a
+  guard that was inert, grep its own javadoc for the behavioral contract it advertises and make the code
+  honor it OR correct the doc — an activated guard with a lying doc is worse than a dormant one. [#169]
+- **Telemetry emitted to a null sink is not a #169 regression — the `FallbackTriggered` stream has no
+  production consumer.** Two finders flagged that the cost gate's `FallbackTriggered(COST_BUDGET)` is
+  dropped because `LlmSelector` builds every production `FallbackChatModel` with `onEvent=null`. This is
+  pre-existing and by-design for ALL reasons (`RATE_LIMIT`/`TIMEOUT`/`SERVER_ERROR`/`COST_BUDGET`):
+  production fallback telemetry is the `provider_calls` ledger + OTel spans, not the `AgentEvent`
+  `FallbackTriggered` stream (which the M8 decorator emits only when a caller passes a sink — the unit
+  tests do). The hard stop still reaches the user via `BudgetExhaustedException` → `code=budget_exhausted`.
+  Emitting the event keeps the decorator's contract uniform and ULTRAPLAN-Decision-8-mandated (the unit
+  test asserts it), and wiring a `FallbackTriggered` consumer is out of #169 scope — don't add speculative
+  observability plumbing to satisfy a finder about a dead sink. [#169]
