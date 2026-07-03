@@ -18,12 +18,25 @@ package ai.forvum.core.budget;
  * recommended override shape.
  *
  * <p>Like {@link BudgetExhaustedException}, this is
- * unchecked and is caught by the engine layer, which
- * surfaces it as a terminal {@code Error}
- * {@link ai.forvum.core.event.AgentEvent} with
- * {@code code = "spawn_invalid_config"} plus
- * {@code parentAgentId}, {@code childAgentId}, and the
- * educational {@code getMessage()} text.
+ * unchecked and carries {@code parentAgentId},
+ * {@code childAgentId}, and the educational
+ * {@code getMessage()} text.
+ *
+ * <p><b>As-built (#169).</b> The spawn guard is activated
+ * but is a defensive spawn-time safeguard for the
+ * programmatic budget-override path: it is unreachable
+ * from file config, since {@code AgentSpecReader} rejects
+ * a file-declared {@code "session"} window, so no
+ * file-parsed agent can carry a {@link SessionWindow}
+ * budget to inherit. In the M18 supervisor graph the sole
+ * production spawn path is the {@code spawn_worker}
+ * fan-out, which — like every spawn failure (id collision,
+ * self-id, belt-widening) — renders this exception as a
+ * model-visible tool result and lets the turn continue,
+ * rather than a terminal {@code spawn_invalid_config}
+ * {@link ai.forvum.core.event.AgentEvent} (the once-designed
+ * terminal-error surface has no M18 spawn path that escapes
+ * to it).
  */
 public final class SpawnConfigurationException extends RuntimeException {
     private final String parentAgentId;

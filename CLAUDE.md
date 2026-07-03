@@ -1756,3 +1756,28 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `BudgetExhaustedAskNativeIT` runs the full parse→meter→gate→error surface in the DEFAULT native leg
   against the real `ollama:`-pinned provider with no live model ([Risk#5]'s fake-not-in-image trap never
   applies because the provider never has to answer). [#169]
+- **Activating a dormant exception can expose a stale doc-vs-code contract — reconcile the doc to the
+  as-built, don't add dead mapping code.** #169 un-deferred `costBudget`, which activated the M7 dormant
+  `SpawnConfigurationException` guard (a `SessionWindow` parent budget inherited without an override). Its
+  core javadoc + ULTRAPLAN Decision 10 both promised the engine surfaces it as a terminal
+  `spawn_invalid_config` `ErrorEvent` — but the M18 supervisor graph's ONLY production spawn path
+  (`spawn_worker` fan-out → `SupervisorGraph.prepareSpawn`) catches every `RuntimeException` (id collision,
+  self-id, belt-widening) as a model-visible tool result and CONTINUES the turn, so the promised terminal
+  surface has no escape path. Three independent review finders flagged the divergence; the exception is
+  ALSO unreachable from file config (`AgentSpecReader` rejects a `"session"` window), reachable only via
+  the programmatic 4-arg `spawn` override. Right fix: reconcile the javadoc + the ULTRAPLAN Decision-10
+  line to the as-built (a defensive spawn-time safeguard rendered as a tool result, not a terminal event),
+  NOT add a `spawn_invalid_config` catch arm in `TurnService` + make `prepareSpawn` rethrow — that is dead
+  code for an unreachable path (YAGNI, CLAUDE §13 simplicity). The generalizable rule: when you turn on a
+  guard that was inert, grep its own javadoc for the behavioral contract it advertises and make the code
+  honor it OR correct the doc — an activated guard with a lying doc is worse than a dormant one. [#169]
+- **Telemetry emitted to a null sink is not a #169 regression — the `FallbackTriggered` stream has no
+  production consumer.** Two finders flagged that the cost gate's `FallbackTriggered(COST_BUDGET)` is
+  dropped because `LlmSelector` builds every production `FallbackChatModel` with `onEvent=null`. This is
+  pre-existing and by-design for ALL reasons (`RATE_LIMIT`/`TIMEOUT`/`SERVER_ERROR`/`COST_BUDGET`):
+  production fallback telemetry is the `provider_calls` ledger + OTel spans, not the `AgentEvent`
+  `FallbackTriggered` stream (which the M8 decorator emits only when a caller passes a sink — the unit
+  tests do). The hard stop still reaches the user via `BudgetExhaustedException` → `code=budget_exhausted`.
+  Emitting the event keeps the decorator's contract uniform and ULTRAPLAN-Decision-8-mandated (the unit
+  test asserts it), and wiring a `FallbackTriggered` consumer is out of #169 scope — don't add speculative
+  observability plumbing to satisfy a finder about a dead sink. [#169]
