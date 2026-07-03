@@ -209,6 +209,12 @@ leaves `$FORVUM_HOME`. The complete egress inventory:
   readable). Hardening follow-up (named, not scheduled): align `StateDirInitializer` (and any other
   engine-side directory creation) with the `InitCommand` POSIX permission recipe.
   **Settled — flagged for maintainer review.**
+  **As-built (#173) — RESOLVED:** `StateDirInitializer` now applies the recipe on **every** boot —
+  creates `state/` `0700` independent of umask, repairs a pre-existing world-accessible directory, and
+  hardens the SQLite database + WAL/SHM sidecars (and any nested state) to `0600` after migration. The
+  fail policy is repair-and-warn (option A: never blocks the boot, preserving the M4 graceful-boot
+  contract and K8s/PVC deployments); a symlinked `state/` path is the one hard-reject (path
+  substitution). See CLAUDE.md §14 [#173].
 - **[DP-14] No-secret-in-logs is confirmed as built and is a standing review obligation.** The
   enforced rules (CLAUDE.md §14 [M17], [P2-CH/discord]): never log a secret-bearing URL or header raw;
   redact the secret-bearing segment (`TelegramChannel.redact` strips `/bot<TOKEN>`;
@@ -235,7 +241,7 @@ leaves `$FORVUM_HOME`. The complete egress inventory:
 | `[DP-10]` | JVM drop-in plugins | operator-trust boundary; contract owned by DR-6b §9.3 (cross-ref only) | Ratified (wave directive 2026-06-09) |
 | `[DP-11]` | Release integrity | SHA256SUMS published with release artifacts (#49); SBOM/provenance deferred | SHA256SUMS ratified; verification/SBOM deferral flagged |
 | `[DP-12]` | Secrets at rest | owner-only `0700/0600` `$FORVUM_HOME`; #35/#42 credentials JSON at `0600`; keychain = named follow-up | Ratified (wave directive 2026-06-09) |
-| `[DP-13]` | `state/` umask gap | no-`init` boot creates `state/` world-readable — named hardening follow-up | Settled — flagged for maintainer review |
+| `[DP-13]` | `state/` umask gap | no-`init` boot creates `state/` world-readable — named hardening follow-up | Settled → **As-built #173 (RESOLVED): owner-only enforced on every boot** |
 | `[DP-14]` | No-secret-in-logs | confirmed as built (Telegram/Discord redaction); standing obligation for every new secret-bearing surface | Ratified (wave directive 2026-06-09) |
 
 ---
@@ -246,8 +252,9 @@ leaves `$FORVUM_HOME`. The complete egress inventory:
   [DP-2] operator surface; deferred, unscheduled; raw SQL is the v0.5 answer.
 - **Platform-keychain credential storage** — the §4.1 direction; deferred behind the [DP-12]
   credentials-file posture (#35/#42 land the file; keychain is their named follow-up).
-- **`StateDirInitializer` permission alignment** — the [DP-13] umask gap; a small hardening change,
-  owned by whichever package next touches the persistence bootstrap.
+- **`StateDirInitializer` permission alignment** — the [DP-13] umask gap; **RESOLVED by #173**
+  (`StateDirInitializer` applies the `InitCommand` `0700`/`0600` recipe on every boot: umask-independent
+  create, repair-and-warn, symlink reject, post-migration DB/WAL/SHM hardening).
 - **SBOM / signed provenance** — the [DP-11] deferral on the #49 release pipeline.
 - **Memory forgetting/decay policy** — explicitly out of scope ([DP-5]); a future design round if
   wanted.

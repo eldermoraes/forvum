@@ -1781,3 +1781,38 @@ Generalizable lessons from completed milestones; append here as milestones land.
   Emitting the event keeps the decorator's contract uniform and ULTRAPLAN-Decision-8-mandated (the unit
   test asserts it), and wiring a `FallbackTriggered` consumer is out of #169 scope — don't add speculative
   observability plumbing to satisfy a finder about a dead sink. [#169]
+- **Owner-only runtime-state permissions are the `InitCommand` recipe DUPLICATED into the engine (module
+  boundary), enforced repair-and-warn on every boot — and the durable guarantee is the `0700` DIRECTORY,
+  not the per-file `0600`.** #173 closed DR-6c [6c-DP-13]: without it a no-`init` first boot left the SQLite
+  store (WAL/SHM + ledger/approval/CAPR/memory rows) at the process umask (typically group/world-readable).
+  `forvum-engine`'s `StateDirInitializer` cannot depend on `forvum-app`'s `InitCommand` (Layer-2 ⊄ Layer-4),
+  so it carries its OWN copy of the `POSIX`/`DIR_PERMS(0700)`/`FILE_PERMS(0600)` recipe — the
+  copy-the-recipe convention already set by `InitCommand`↔`SkillInstaller` (which each duplicate this exact
+  recipe rather than share a helper; the `WorkspaceRoot`-per-module rule is the cross-module version), NOT a
+  new shared helper (a 2-use engine helper is a judgment call left to a future DRY pass, not this PR — §3
+  surgical, don't refactor the unrelated `SkillInstaller`). Two seams: `ensureStateDir` makes `state/`
+  `0700` BEFORE Flyway (owner-only perms carry no group/other bits, so the mode is umask-independent BY
+  CONSTRUCTION — no umask syscall, which Java can't portably do anyway), and `PersistenceBootstrap.onStart`
+  calls `hardenStateFiles` AFTER `flyway.migrate()` to tighten the just-created DB + sidecars to `0600`. The
+  `0700` DIRECTORY is load-bearing: traversal permission gates every file inside — including the WAL/SHM
+  SQLite RE-creates after the one-time boot pass — so a per-file `0600` sweep cannot durably cover files
+  born later and must not be sold as if it does (the IT asserts `dir==0700` + `db==0600`; the sidecars are
+  directory-protected, their individual mode unit-tested via named `-wal`/`-shm` fixtures). Fail policy is
+  **repair-and-warn** (maintainer-ratified option A): tighten a pre-existing loose dir/file best-effort, and
+  on a chmod failure (not owner / read-only FS / K8s fsGroup volume) WARN and continue — a hard-block would
+  violate the M4 graceful-boot contract, break the CI native smoke (runs with no `~/.forvum/`), and break an
+  intentionally group-shared PVC (the acceptance's "preserve K8s PV behavior"). The one hard-reject is a
+  **symlinked `state/`** (`Files.isSymbolicLink` → return false = persistence unavailable): following it is a
+  path-substitution write-redirect; the file-walk (`Files.walkFileTree`, no `FOLLOW_LINKS`) likewise skips
+  symlink entries so it never chmods THROUGH a link to a target outside `state/`. Permission-failure warnings
+  omit the absolute state path ([6c-DP-14]); non-POSIX (Windows) creates the dir + warns once that owner-only
+  cannot be enforced. TDD traps worth generalizing: (1) a POSIX-conditional NO-OP branch (non-POSIX) cannot
+  be RED-driven on a POSIX host — its correct behavior (set no perms) is indistinguishable from unimplemented
+  — so it is a coverage guard, not a driver; the real drivers are the exact-mode assertions. (2) the
+  `onStart` WIRING (the `hardenStateFiles` call, which is what makes the DB `0600`) is observable only with a
+  REAL Flyway boot — prove it by commenting the call out and watching `StatePermissionsIT` flip the db
+  assertion from `0600` to the umask `0644`, then restore (the pure `RecordingFlyway` bootstrap test has no
+  db file to harden, so it cannot gate the wiring). (3) inject a `boolean posix` overload so both branches
+  are deterministically reachable in CI. The native proof reuses the `SessionReplayNativeIT`
+  `replay <missing-session>` boot-migrates dance (`replay` is not a `CommandMode` one-shot → it boots
+  persistence) to stat the binary-created `state/`+`forvum.sqlite` in the default native leg. [#173]
