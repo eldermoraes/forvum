@@ -13,6 +13,10 @@ import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.budget.BudgetExhaustedException;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.compress.BoundedCompressor;
+import ai.forvum.engine.compress.CompressionBudget;
+import ai.forvum.engine.compress.CompressionOutcome;
+import ai.forvum.engine.compress.CompressionResult;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.routing.RetrievedMemory;
@@ -42,7 +46,6 @@ import io.opentelemetry.instrumentation.annotations.WithSpan;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import org.jboss.logging.Logger;
 
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -89,8 +92,6 @@ import java.util.concurrent.Future;
  */
 @ApplicationScoped
 public class SupervisorGraph {
-
-    private static final Logger LOG = Logger.getLogger(SupervisorGraph.class);
 
     /** Safety cap on {@code generate ⇄ (tool_loop|workers)} rounds, independent of any per-agent budget. */
     private static final int MAX_ROUNDS = 8;
@@ -237,24 +238,17 @@ public class SupervisorGraph {
         if (threshold <= 0 || hits.isEmpty()) {
             return hits;
         }
+        CompressionBudget budget = CompressionBudget.fromThreshold(threshold);
         List<MemoryHit> out = new ArrayList<>(hits.size());
         for (MemoryHit hit : hits) {
-            String content = hit.content();
-            if (content == null || content.length() <= threshold) {
-                out.add(hit);
-                continue;
-            }
-            // Best-effort (graceful degradation, mirroring MemorySelector.retrieve): a proxy-model failure
-            // — a throw, or a null/blank summary the MemoryHit ctor would reject — must NOT fail the turn;
-            // keep the raw hit and proceed. retrieveAndFrame runs OUTSIDE run()'s try/catch.
-            try {
-                String summary = summarizer.summarize(List.of(content));
-                out.add(summary == null || summary.isBlank()
-                        ? hit : new MemoryHit(hit.tier(), summary, hit.score(), hit.source()));
-            } catch (RuntimeException e) {
-                LOG.warnf(e, "Proxy compression of a retrieved hit failed; keeping it uncompressed.");
-                out.add(hit);
-            }
+            // #176: a proxy-compression failure yields a DETERMINISTIC bounded fallback (truncate + a fixed
+            // marker), NEVER the raw oversized hit — so the untrusted content that re-enters the window is
+            // always within budget. RetrievedMemory.frame still runs AFTER this and neutralizes any closing
+            // delimiter surviving in the kept chars, so the framing stays intact. Provenance is preserved
+            // (same tier/score/source). A BudgetExhaustedException is re-thrown to abort the turn (#169).
+            CompressionResult result = BoundedCompressor.compress(hit.content(), budget, summarizer);
+            out.add(result.outcome() == CompressionOutcome.PASSED_THROUGH
+                    ? hit : new MemoryHit(hit.tier(), result.text(), hit.score(), hit.source()));
         }
         return out;
     }
@@ -541,17 +535,11 @@ public class SupervisorGraph {
      * compression (DR-5); {@code threshold <= 0} disables it (the pre-#56 pass-through behavior).
      */
     private String compress(String digest, int threshold) {
-        if (threshold <= 0 || digest == null || digest.length() <= threshold) {
-            return digest;
-        }
-        // Best-effort like compressHits: a proxy-model failure keeps the raw digest rather than failing the turn.
-        try {
-            String summary = summarizer.summarize(List.of(digest));
-            return summary == null || summary.isBlank() ? digest : summary;
-        } catch (RuntimeException e) {
-            LOG.warnf(e, "Proxy compression of a worker digest failed; keeping it uncompressed.");
-            return digest;
-        }
+        // #176: a proxy-compression failure yields a bounded fallback (truncate + a fixed marker), NEVER the
+        // raw oversized digest — the worker output that re-enters the window is always within budget. The
+        // digest rides back inside a role-framed ToolExecutionResultMessage, so there is no textual delimiter
+        // to escape. A BudgetExhaustedException is re-thrown to abort the turn (#169).
+        return BoundedCompressor.compress(digest, CompressionBudget.fromThreshold(threshold), summarizer).text();
     }
 
     /** One delegated subtask: the model's {@code spawn_worker} call paired with its parsed child + task. */
