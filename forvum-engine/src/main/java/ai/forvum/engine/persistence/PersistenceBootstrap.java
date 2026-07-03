@@ -48,10 +48,15 @@ public class PersistenceBootstrap {
         }
         if (StateDirInitializer.ensureStateDir(home.state())) {
             flyway.migrate();
+            // Tighten the just-created database + WAL/SHM sidecars to owner-only (#173); the 0700 state/
+            // directory is the durable guarantee, this pass is defense-in-depth for the files themselves.
+            StateDirInitializer.hardenStateFiles(home.state());
             LOG.debugf("Flyway migration applied; database at %s/forvum.sqlite", home.state());
         } else {
-            LOG.warnf("State directory %s unavailable — skipping schema migration; "
-                    + "persistence is disabled for this run", home.state());
+            // Omit the absolute state path from the failure report ([6c-DP-14]); the StateDirInitializer
+            // warning already named the specific cause (unwritable, or a symlinked/substituted path).
+            LOG.warn("State directory unavailable or unsafe — skipping schema migration; "
+                    + "persistence is disabled for this run");
         }
     }
 }

@@ -13,7 +13,9 @@
 #   - Known as-built gaps in shipped v0.5 are flagged inline as `as-built ... #NNN`, never stated as a
 #     delivered/enforced runtime boundary (memory #175, compression #176, spawn #177, CAPR verdict #195,
 #     web/dashboard auth #165). The cost/tool budget hard-stop (#169) is ENFORCED at runtime — no doc may
-#     claim it is parsed-but-not-enforced.
+#     claim it is parsed-but-not-enforced. Runtime-state owner-only permissions (#173) are ENFORCED on
+#     every boot (StateDirInitializer 0700/0600) — no doc may frame the state/ umask gap as an unshipped
+#     follow-up.
 #
 # `docs/ISSUES.md` is deliberately NOT scanned: it preserves each step's ORIGINAL proposal as historical
 # text, distinguished from as-built reality by the marker legend at the top of that file.
@@ -58,6 +60,12 @@ ban "v0.1 pinned as current shipping version" \
 # 5. The #169 budget hard-stop is enforced at runtime — no doc may claim it is parsed-but-not-enforced.
 ban "budget hard-stop stated as not-yet-enforced" \
     '(budget|hard-stop)[^.|]{0,120}not (yet )?enforced at runtime'
+
+# 6. The #173 runtime-state owner-only permission enforcement is DELIVERED — no scanned doc may frame the
+#    state/ umask gap as an unshipped named follow-up (the DR-6c round file keeps the deliberation text and
+#    is deliberately not scanned).
+ban "state/ owner-only enforcement (#173) stated as an unshipped gap" \
+    '(hardening follow-up to align .?StateDirInitializer|StateDirInitializer[^.|]{0,40}uses plain|no-.?init first boot creates .?state/[^.|]{0,80}umask)'
 
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."
