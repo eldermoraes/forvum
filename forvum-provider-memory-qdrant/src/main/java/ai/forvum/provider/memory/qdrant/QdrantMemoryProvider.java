@@ -60,6 +60,22 @@ public class QdrantMemoryProvider extends AbstractMemoryProvider {
         return "memory-qdrant";
     }
 
+    /**
+     * Active only when {@code memory/qdrant.json} is present, enabled, and carries a URL (#175). This lets
+     * the engine's {@code MemorySelector} prefer the bundled local provider whenever Qdrant is merely on
+     * the classpath but unconfigured — an operator opts Qdrant in. An unreadable config is treated as
+     * inactive so a malformed file never usurps the local default.
+     */
+    @Override
+    public boolean isActive() {
+        try {
+            return config.read().isActive();
+        } catch (RuntimeException e) {
+            LOG.debugf("Qdrant config unreadable (%s); treating as inactive.", e.getMessage());
+            return false;
+        }
+    }
+
     @Override
     public List<MemoryHit> retrieve(MemoryQuery query, MemoryPolicy policy) {
         if (policy.strategy() == RetrievalStrategy.NONE) {

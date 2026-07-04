@@ -50,6 +50,22 @@ class QdrantMemoryProviderTest {
     }
 
     @Test
+    void isActiveOnlyWhenConfiguredWithAUrl(@TempDir Path dir) throws Exception {
+        assertTrue(provider(activeConfig(dir), new FakeQdrantApi()).isActive(),
+                "a configured qdrant.json with a url is active — the selector prefers it");
+        assertFalse(provider(dir.resolve("absent.json"), new FakeQdrantApi()).isActive(),
+                "no config => inactive, so the bundled local provider stays the default (#175)");
+    }
+
+    @Test
+    void isActiveTreatsAnUnreadableConfigAsInactive(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("qdrant.json");
+        Files.writeString(file, "{ this is not valid json ");
+        assertFalse(provider(file, new FakeQdrantApi()).isActive(),
+                "a malformed config must never usurp the local default");
+    }
+
+    @Test
     void unconfiguredProviderIsInertAndIssuesNoCall(@TempDir Path dir) {
         FakeQdrantApi api = new FakeQdrantApi();
         QdrantMemoryProvider p = provider(dir.resolve("absent.json"), api);

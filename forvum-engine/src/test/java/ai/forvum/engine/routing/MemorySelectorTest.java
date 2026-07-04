@@ -1,6 +1,8 @@
 package ai.forvum.engine.routing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -12,6 +14,7 @@ import ai.forvum.core.MemoryPolicy;
 import ai.forvum.core.MemoryQuery;
 import ai.forvum.core.MemoryTier;
 import ai.forvum.core.RetrievalStrategy;
+import ai.forvum.engine.memory.LocalMemoryProvider;
 import ai.forvum.sdk.AbstractMemoryProvider;
 import ai.forvum.sdk.MemoryProvider;
 
@@ -93,5 +96,53 @@ class MemorySelectorTest {
     @Test
     void normalizesANullProviderResultToEmpty() {
         assertEquals(List.of(), selectorWith(provider(null)).retrieve(QUERY, HYBRID));
+    }
+
+    // --- provider selection: local default vs. an explicitly configured external provider (#175) ---
+
+    private static MemoryProvider named(String id, boolean active) {
+        return new AbstractMemoryProvider() {
+            @Override
+            public String extensionId() {
+                return id;
+            }
+
+            @Override
+            public boolean isActive() {
+                return active;
+            }
+
+            @Override
+            public List<MemoryHit> retrieve(MemoryQuery query, MemoryPolicy policy) {
+                return List.of();
+            }
+        };
+    }
+
+    @Test
+    void selectPrefersAnActiveExternalProviderOverTheLocalDefault() {
+        MemoryProvider local = named(LocalMemoryProvider.EXTENSION_ID, true);
+        MemoryProvider external = named("memory-qdrant", true);
+        assertSame(external, MemorySelector.select(List.of(local, external)));
+        assertSame(external, MemorySelector.select(List.of(external, local)), "order-independent");
+    }
+
+    @Test
+    void selectFallsBackToLocalWhenTheOnlyExternalProviderIsInactive() {
+        MemoryProvider local = named(LocalMemoryProvider.EXTENSION_ID, true);
+        MemoryProvider inactiveExternal = named("memory-qdrant", false);
+        assertSame(local, MemorySelector.select(List.of(inactiveExternal, local)),
+                "an unconfigured external provider steps aside for the local default");
+    }
+
+    @Test
+    void selectUsesLocalWhenItIsTheOnlyInstalledProvider() {
+        MemoryProvider local = named(LocalMemoryProvider.EXTENSION_ID, true);
+        assertSame(local, MemorySelector.select(List.of(local)));
+    }
+
+    @Test
+    void selectReturnsNullWhenNoProviderIsInstalled() {
+        assertNull(MemorySelector.select(List.of()));
     }
 }

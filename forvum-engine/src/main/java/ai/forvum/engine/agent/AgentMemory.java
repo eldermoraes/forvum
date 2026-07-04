@@ -52,7 +52,9 @@ public class AgentMemory {
     public long recordTurn(String sessionId, String userText, String assistantText) {
         persistMessage(sessionId, Role.USER, userText);
         MessageEntity assistant = persistMessage(sessionId, Role.ASSISTANT, assistantText);
-        persistObservation(sessionId, "turn completed");
+        // Record the real turn content (the user's cue) as the episodic observation, not a generic
+        // "turn completed" placeholder — episodic recall (#175) keyword-matches against this content.
+        persistObservation(sessionId, userText);
         return assistant.id;
     }
 
@@ -80,8 +82,13 @@ public class AgentMemory {
     /**
      * Record a long-term fact for the current identity (#53), upserting on
      * {@code (identity_id, agent_id, key)} so a re-write updates the existing row rather than violating the
-     * table's UNIQUE constraint, and two identities can hold the same key independently. The
-     * {@code embedding} vector is left null this cycle (M7 AC-7); {@code updated_at} is bumped on update.
+     * table's UNIQUE constraint, and two identities can hold the same key independently.
+     *
+     * <p><strong>Legacy helper with no production caller.</strong> The #175 turn Write phase writes facts
+     * through {@link ai.forvum.engine.memoryquery.SemanticMemoryStore#upsertFact} (which embeds on write and
+     * is race-safe). This method leaves {@code embedding} null and, on a re-write of an existing key, does
+     * NOT refresh the embedding — so it must not be used to update a fact that #175 has already embedded, or
+     * semantic recall would match the stale old-value vector while surfacing the new value.
      */
     @Transactional
     public void recordFact(String key, String value, String source) {

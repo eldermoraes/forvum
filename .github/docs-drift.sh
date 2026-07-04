@@ -11,12 +11,14 @@
 #     Phase-3 (v1.0+) is next. Live sequencing: docs/IMPLEMENTATION-ORDER.md.
 #   - JaCoCo 80% line / 75% branch coverage gates are wired + ENFORCED in `./mvnw verify`.
 #   - Known as-built gaps in shipped v0.5 are flagged inline as `as-built ... #NNN`, never stated as a
-#     delivered/enforced runtime boundary (memory #175, spawn #177, CAPR verdict #195, web/dashboard auth
-#     #165). The cost/tool budget hard-stop (#169) is ENFORCED at runtime — no doc may claim it is
+#     delivered/enforced runtime boundary (spawn #177, CAPR verdict #195, web/dashboard auth #165). The
+#     cost/tool budget hard-stop (#169) is ENFORCED at runtime — no doc may claim it is
 #     parsed-but-not-enforced. Runtime-state owner-only permissions (#173) are ENFORCED on every boot
 #     (StateDirInitializer 0700/0600) — no doc may frame the state/ umask gap as an unshipped follow-up.
 #     The compression-failure fallback (#176) is BOUNDED (BoundedCompressor: truncate + fixed marker) — no
-#     doc may frame it as a fail-open path that reinserts the raw text.
+#     doc may frame it as a fail-open path that reinserts the raw text. The three-tier memory Write/Select
+#     loop (#175) is WIRED into normal turns (LocalMemoryProvider default retrieval + MemoryWriter off-turn
+#     write) — no doc may frame the default install as writing/reading only the short-term messages tier.
 #
 # `docs/ISSUES.md` is deliberately NOT scanned: it preserves each step's ORIGINAL proposal as historical
 # text, distinguished from as-built reality by the marker legend at the top of that file.
@@ -73,6 +75,12 @@ ban "state/ owner-only enforcement (#173) stated as an unshipped gap" \
 #    or worker-digest boundary.
 ban "compression-failure fallback (#176) stated as fail-open / reinserting raw" \
     'reinserts the raw text instead of bounding|reinserting the raw text \(fail-open\)|compression-failure fallback fail-open|fail-open path tracked by #176'
+
+# 8. The #175 three-tier memory Write/Select loop is WIRED into normal turns (LocalMemoryProvider default
+#    retrieval + MemoryWriter off-turn write) — no scanned doc may frame the default install as writing/
+#    reading only the short-term messages tier, or recordFact as having no production caller.
+ban "three-tier memory loop (#175) stated as not-wired / recordFact unused" \
+    'recordFact has no production caller|MemorySelector (only wires|wires only) Qdrant|not (yet )?wired into normal turns by default|default install[^.|]{0,40}(never|does not yet) (write|read|retriev)'
 
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."

@@ -2,6 +2,7 @@ package ai.forvum.engine.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -67,6 +68,23 @@ class AgentMemoryTest {
         long userNameFacts = SemanticMemoryEntity.<SemanticMemoryEntity>list("agentId = ?1", "main")
                 .stream().filter(f -> "user.name".equals(f.key)).count();
         assertEquals(1, userNameFacts, "exactly one 'user.name' fact for main");
+    }
+
+    @Test
+    @Transactional
+    void recordTurnWritesAnEpisodeCarryingTheRealTurnContentForLaterRecall() throws Exception {
+        AgentId agent = new AgentId("episode-content-agent");
+        String sessionId = "sess-episode";
+        sessions.ensureSession(sessionId, agent);
+
+        ScopedValue.where(CurrentAgent.CURRENT_AGENT, agent)
+                .run(() -> memory.recordTurn(sessionId, "I just moved to Berlin", "Great, Berlin is lovely!"));
+
+        EpisodicMemoryEntity episode = EpisodicMemoryEntity
+                .<EpisodicMemoryEntity>find("agentId = ?1 and sessionId = ?2", "episode-content-agent", sessionId)
+                .firstResult();
+        assertTrue(episode.content.contains("Berlin"),
+                "the episode must carry the real turn content for later keyword recall, not a placeholder");
     }
 
     @Test
