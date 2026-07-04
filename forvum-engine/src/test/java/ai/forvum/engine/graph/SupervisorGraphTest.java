@@ -142,10 +142,13 @@ class SupervisorGraphTest {
                 .anyMatch(result -> result.text() != null && result.text().contains(text));
     }
 
-    /** Records the workers spawned + driven, and returns a deterministic digest per worker. */
+    /** Records the workers spawned, driven, and retired, and returns a deterministic digest per worker. */
     private static final class FakeWorkerRunner implements WorkerRunner {
         private final List<AgentId> spawned = new CopyOnWriteArrayList<>();
         private final List<AgentId> ran = new CopyOnWriteArrayList<>();
+        private final List<AgentId> retired = new CopyOnWriteArrayList<>();
+        private volatile boolean throwOnRun;
+        private volatile boolean throwOnRetire;
 
         @Override
         public void spawn(AgentId parentId, AgentId childId, List<String> allowedTools) {
@@ -155,7 +158,18 @@ class SupervisorGraphTest {
         @Override
         public String runWorker(AgentId childId, String task, String sessionId) {
             ran.add(childId);
+            if (throwOnRun) {
+                throw new RuntimeException("worker '" + childId.value() + "' failed");
+            }
             return childId.value() + " result for: " + task;
+        }
+
+        @Override
+        public void retire(AgentId childId) {
+            retired.add(childId);
+            if (throwOnRetire) {
+                throw new RuntimeException("retire of '" + childId.value() + "' failed");
+            }
         }
     }
 
@@ -341,9 +355,11 @@ class SupervisorGraphTest {
         String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed));
 
         assertEquals("Final: the worker found it", reply);
-        assertEquals(List.of(new AgentId("researcher")), workerRunner.spawned, "the worker was materialized");
-        assertEquals(List.of(new AgentId("researcher")), workerRunner.ran, "and driven (on a virtual thread)");
-        assertTrue(hasToolResult(model.seen.get(1), "researcher result for: find the answer"),
+        assertEquals(1, workerRunner.spawned.size(), "one worker was materialized");
+        assertTrue(workerRunner.spawned.get(0).value().startsWith("researcher~"),
+                "#177: the worker carries a UNIQUE runtime id from the model's label: " + workerRunner.spawned.get(0));
+        assertEquals(workerRunner.spawned, workerRunner.ran, "the materialized worker was driven (on a virtual thread)");
+        assertTrue(hasToolResult(model.seen.get(1), "result for: find the answer"),
                 "the SECOND generate must see the worker's merged digest (the Isolate/reduce boundary)");
     }
 
@@ -368,9 +384,11 @@ class SupervisorGraphTest {
         assertEquals(1, recorder.invocations().size(), "the belt tool emitted alongside spawn_worker is still executed");
         assertEquals("fs.read", recorder.invocations().get(0).toolName());
         assertSame(InvocationStatus.OK, recorder.invocations().get(0).status(), "and audited (R3 — no bypass)");
-        assertEquals(List.of(new AgentId("researcher")), workerRunner.ran, "the worker also ran");
+        assertEquals(1, workerRunner.ran.size(), "the worker also ran");
+        assertTrue(workerRunner.ran.get(0).value().startsWith("researcher~"),
+                "#177: the worker ran under its unique runtime id: " + workerRunner.ran.get(0));
         assertTrue(hasToolResult(model.seen.get(1), "file body"), "the belt-tool result reaches the model");
-        assertTrue(hasToolResult(model.seen.get(1), "researcher result for: dig"), "the worker digest reaches the model");
+        assertTrue(hasToolResult(model.seen.get(1), "result for: dig"), "the worker digest reaches the model");
     }
 
     @Test
@@ -386,6 +404,72 @@ class SupervisorGraphTest {
 
         assertEquals("Finished", reply, "the turn completes via MAX_ROUNDS instead of throwing on the recursion limit");
         assertEquals(7, workerRunner.ran.size(), "all seven workers ran");
+        assertEquals(workerRunner.spawned, workerRunner.retired,
+                "#177: every one of the seven spawned workers is retired at turn end (bounded, no accumulation)");
+    }
+
+    @Test
+    void spawnedWorkersAreRetiredAfterASuccessfulTurn() {
+        // #177: the run() finally retires every worker the turn materialized (the Isolate teardown).
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        AiMessage spawnCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("sp-1").name("spawn_worker")
+                        .arguments("{\"childId\":\"researcher\",\"task\":\"find the answer\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(spawnCall, AiMessage.from("done"));
+
+        graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(),
+                List.of(SystemMessage.from("sys"), UserMessage.from("delegate"))));
+
+        assertFalse(workerRunner.spawned.isEmpty(), "a worker was materialized");
+        assertEquals(workerRunner.spawned, workerRunner.retired,
+                "every spawned worker is retired on the successful exit path");
+    }
+
+    @Test
+    void spawnedWorkersAreRetiredEvenWhenTheTurnFails() {
+        // #177: teardown must happen on EVERY exit path — here the worker fan-out throws and the graph fails.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        workerRunner.throwOnRun = true;
+        AiMessage spawnCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("sp-1").name("spawn_worker")
+                        .arguments("{\"childId\":\"researcher\",\"task\":\"boom\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(spawnCall, AiMessage.from("unreached"));
+
+        assertThrows(SupervisorGraphException.class, () -> graph.run(new GraphTurnRequest("s1",
+                new AgentId("main"), model, List.of(),
+                List.of(SystemMessage.from("sys"), UserMessage.from("delegate")))));
+
+        assertFalse(workerRunner.spawned.isEmpty(), "a worker was materialized before the failure");
+        assertEquals(workerRunner.spawned, workerRunner.retired,
+                "the failed turn still retires every spawned worker (finally)");
+    }
+
+    @Test
+    void aRetireFailureIsSwallowedAndDoesNotMaskTheTurnResult() {
+        // #177: a cleanup failure cannot mask the turn's own result (the retireWorkers try/catch).
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        workerRunner.throwOnRetire = true;
+        AiMessage spawnCall = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder()
+                        .id("sp-1").name("spawn_worker")
+                        .arguments("{\"childId\":\"researcher\",\"task\":\"t\"}").build()))
+                .build();
+        ScriptedChatModel model = new ScriptedChatModel(spawnCall, AiMessage.from("Final answer"));
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(),
+                List.of(SystemMessage.from("sys"), UserMessage.from("delegate"))));
+
+        assertEquals("Final answer", reply, "a retire failure is swallowed — the turn result is unaffected");
+        assertFalse(workerRunner.retired.isEmpty(), "retire was attempted");
+        assertEquals(workerRunner.retired.size(), graph.retireFailureCount(),
+                "#177: each swallowed retire failure is counted (observable), and it did not mask the result");
     }
 
     /** A schema requiring a string {@code answer} field; reused by the P2-12 structured-output tests. */
@@ -658,7 +742,7 @@ class SupervisorGraphTest {
         assertEquals(1, summarizeCalls.get(), "the oversized worker digest is compressed once in reduce");
         assertTrue(hasToolResult(model.seen.get(1), "DIGEST_SUMMARY"),
                 "the model sees the compressed digest fed back, not the raw worker output");
-        assertFalse(hasToolResult(model.seen.get(1), "researcher result for"),
+        assertFalse(hasToolResult(model.seen.get(1), "result for"),
                 "the raw oversized digest does not reach the model");
     }
 
@@ -847,7 +931,7 @@ class SupervisorGraphTest {
 
         assertEquals(0, summarizeCalls.get(),
                 "replay mode disables proxy compression for determinism, even below the threshold");
-        assertTrue(hasToolResult(model.seen.get(1), "researcher result for: find the long answer"),
+        assertTrue(hasToolResult(model.seen.get(1), "result for: find the long answer"),
                 "the raw worker digest reaches the model in replay mode, not a compressed summary");
     }
 
@@ -872,7 +956,7 @@ class SupervisorGraphTest {
         String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy));
 
         assertEquals("Final", reply, "#176: a worker-digest compression failure must NOT fail the turn");
-        assertFalse(hasToolResult(model.seen.get(1), "researcher result for: " + task),
+        assertFalse(hasToolResult(model.seen.get(1), "result for: " + task),
                 "#176: the raw oversized digest is NEVER fed back to the model on failure");
         assertTrue(hasToolResult(model.seen.get(1), BoundedCompressor.TRUNCATION_MARKER),
                 "the digest is bounded with the fixed truncation marker instead");

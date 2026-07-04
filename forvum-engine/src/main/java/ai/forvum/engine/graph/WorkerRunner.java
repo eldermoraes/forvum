@@ -26,4 +26,16 @@ public interface WorkerRunner {
      * once per worker; the {@code worker_run} node runs many concurrently on virtual threads.
      */
     String runWorker(AgentId childId, String task, String sessionId);
+
+    /**
+     * Retire a spawned worker after its turn is over (#177): unregister it and destroy its
+     * {@code @AgentScoped} context, so a long-running server does not accumulate registry entries or
+     * scoped beans. Called for every worker the turn materialized, on <em>every</em> exit path (success,
+     * model/tool failure, timeout, budget exhaustion, supervisor interruption) — the supervisor drives it
+     * only after {@code worker_run} has joined all fan-out, so no worker-owned async work is still live.
+     * Best-effort and idempotent: it never throws for a persistent agent or an already-retired id, and a
+     * cleanup failure must not mask the turn's own result (delegates to {@code AgentRegistry.retire}).
+     * Task/ledger/audit history for the worker survives retirement.
+     */
+    void retire(AgentId childId);
 }

@@ -51,4 +51,9 @@ public class DefaultWorkerRunner implements WorkerRunner {
             return reply == null ? "" : reply;
         });
     }
+
+    @Override
+    public void retire(AgentId childId) {
+        registry.retire(childId);
+    }
 }
