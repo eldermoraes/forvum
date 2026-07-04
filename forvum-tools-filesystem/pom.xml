@@ -18,6 +18,12 @@
 
     <dependencyManagement>
         <dependencies>
+        <!-- CANARY (#174 validation only, never merged): known-vulnerable dep; dependency-review must FAIL. -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>2.14.1</version>
+        </dependency>
             <dependency>
                 <groupId>ai.forvum</groupId>
                 <artifactId>forvum-bom</artifactId>
