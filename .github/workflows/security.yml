@@ -1,0 +1,158 @@
+name: Security
+
+# Supply-chain, secret, and workflow-surface gates (#174). All new PR jobs are fast, deterministic,
+# parallel ubuntu jobs (seconds to minutes) — never on the critical path (the ~37 min CI wall clock is
+# ci.yml's native legs; macOS concurrency, the scarce resource, is untouched). Network-sensitive deep
+# scans run on a weekly schedule, not per-PR (the issue's "keep PR checks deterministic" requirement).
+#
+# Placement (see docs/SECURITY-GATES.md for the full committed policy):
+#   - per-PR:   dependency-review (blocking), secrets (gitleaks, blocking), workflow-lint (blocking).
+#   - push main: dependency-submission (feeds Dependabot alerts — the continuous Maven vuln signal).
+#   - weekly:   scheduled-deep-scan (Trivy re-scan of the shipped image + a full-transitive SBOM scan).
+#
+# Third-party actions are SHA-pinned with a trailing version comment; GitHub-authored actions (actions/*)
+# stay on major tags. The update process is Dependabot (.github/dependabot.yml).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 5 * * 1'   # Mon 05:00 UTC — offset from eval.yml (04:30) and codeql.yml (06:00)
+  workflow_dispatch: {}   # lets a maintainer drive the weekly deep scan on demand (validation)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Blocking dependency-diff on every PR: fail on a newly-introduced dependency with a HIGH+ advisory.
+  # Pure GitHub API diff (~10-20 s), no Maven build. GitHub-native, zero-config.
+  dependency-review:
+    name: Dependency review (PR diff)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # comment-summary-in-pr
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependency review
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  # Blocking secret scan. PR: the PR commit range. push(main)/schedule/dispatch: the full history
+  # (fetch-depth: 0). The deliberate fake-token fixtures under **/src/test/** are allowlisted in
+  # .gitleaks.toml; GitHub server-side secret scanning + push protection (repo settings, enabled with
+  # this issue) are the layered control for a REAL provider-shaped token pasted anywhere, incl. tests.
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Full history so gitleaks can resolve the PR base..head range (and the full-history scan on
+      # push/schedule). No GITLEAKS_LICENSE is needed — this is a personal-account repo (org repos would
+      # need a free key). If a license nag ever appears, fall back to the ghcr.io/gitleaks/gitleaks
+      # container binary with the same .gitleaks.toml (documented in docs/SECURITY-GATES.md).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e   # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # Blocking lint of every workflow + the .github/*.sh gate scripts. actionlint shellchecks every
+  # `run:` block and flags untrusted-input-in-run / bad expressions; shellcheck covers the gate scripts.
+  # Kept unconditional-but-tiny (~15 s) rather than path-filtered, for simplicity.
+  workflow-lint:
+    name: Workflow + shell lint (actionlint + shellcheck)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      # Download the pinned actionlint release binary (no piping curl into bash — the fetched script is
+      # version-pinned and run explicitly). actionlint shellchecks every `run:` block on the ubuntu
+      # runner, which ships shellcheck; the next step shellchecks the standalone .github/*.sh gate scripts.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: '1.7.7'
+        run: |
+          curl -fsSL -o download-actionlint.bash \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+          bash download-actionlint.bash "${ACTIONLINT_VERSION}"
+      - name: 'Run actionlint (also shellchecks run: blocks)'
+        run: ./actionlint -color
+      - name: shellcheck the .github gate scripts
+        run: shellcheck .github/*.sh
+
+  # On push to main only: submit the FULL resolved transitive Maven graph so GitHub's dependency graph
+  # (and thus Dependabot alerts — the continuous vulnerability signal for Maven deps) sees the real
+  # 27-module BOM-managed closure, which manifest parsing alone would read shallow. ~2-4 min, cached;
+  # never on a PR.
+  dependency-submission:
+    name: Maven dependency submission (push main)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required by the dependency-submission API
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Submit dependency graph
+        uses: advanced-security/maven-dependency-submission-action@b275d12641ac2d2108b2cbb7598b154ad2f2cee8   # v5.0.0
+
+  # Weekly (or on-demand) deep scan: (a) re-scan the SHIPPED image for new CVEs; (b) regenerate the
+  # full-transitive Maven aggregate SBOM and Trivy-scan it — the correlated belt-and-suspenders to
+  # Dependabot's continuous alerts, plus a bit-rot guard on the CycloneDX goal between releases.
+  # CRITICAL/HIGH, fixable-only (ubi-micro carries unfixable base CVEs), exit 1 on a finding.
+  scheduled-deep-scan:
+    name: Scheduled deep scan (image + SBOM)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy — scan the published native image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository_owner }}/forvum:latest-native
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'
+          trivyignores: .trivyignore.yaml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      # Build the reactor first (so reactor-internal artifacts resolve), then run makeAggregateBom at the
+      # ROOT (no -pl) — the aggregator goal + the root-only (`inherited=false`) plugin declaration require
+      # the reactor root, mirroring release.yml. Never a standalone goal on a cold tree.
+      - name: Build the reactor (skip tests)
+        run: ./mvnw -B -ntp -DskipTests -pl forvum-app -am package
+      - name: Generate the aggregate CycloneDX SBOM (full transitive closure)
+        run: ./mvnw -B -ntp -DskipTests org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom
+      - name: Trivy — scan the generated SBOM (full transitive)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
+        with:
+          scan-type: sbom
+          scan-ref: target/bom.json
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'
+          trivyignores: .trivyignore.yaml

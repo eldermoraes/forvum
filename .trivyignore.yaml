@@ -1,0 +1,19 @@
+# Trivy suppression file (#174) — image + SBOM scanning.
+#
+# EMPTY by design: no suppressions today. The release image scan and the weekly deep scan run with
+# `ignore-unfixed: true` (ubi9/ubi-micro carries unfixable base CVEs — fixable-only keeps the gate
+# actionable) and `severity: CRITICAL,HIGH`. A CRITICAL/HIGH fixable finding fails the release job and
+# the weekly job; it is FIXED (bump the dependency / base) or suppressed HERE, never silently ignored.
+#
+# SUPPRESSION PROCESS (committed policy — see docs/SECURITY-GATES.md): every entry MUST carry:
+#   - id:         the CVE / advisory id.
+#   - statement:  owner (@eldermoraes) + the concrete reason (why it is not exploitable / not fixable now).
+#   - expired_at: a mandatory expiry date (YYYY-MM-DD). After it, Trivy re-surfaces the finding.
+# Format (uncomment and fill when a real, justified suppression is needed):
+#
+# vulnerabilities:
+#   - id: CVE-0000-00000
+#     statement: "Owner @eldermoraes — not reachable: <reason>. Revisit at expiry."
+#     expired_at: 2026-01-01
+
+vulnerabilities: []

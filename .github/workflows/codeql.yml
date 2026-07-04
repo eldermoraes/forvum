@@ -1,0 +1,62 @@
+name: CodeQL
+
+# SAST (#174): CodeQL static analysis over the Java sources AND the GitHub Actions workflow files
+# themselves. GitHub-native, zero rule curation, free on this public repo, and the only mainstream
+# SAST with a first-class Actions-workflow language.
+#
+# Two independent analyze jobs run per-PR + on push(main) + weekly (a fresh query pack can flag an
+# alert on unchanged code). Both are parallel ubuntu jobs, invisible next to the ~37 min CI wall clock
+# in ci.yml (build-mode: none scans the sources directly — no Maven build, so minutes not tens of them).
+#
+# GitHub-authored actions (actions/*, github/*) stay on major tags; the update process is Dependabot
+# (.github/dependabot.yml). Policy / thresholds / suppressions: docs/SECURITY-GATES.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'   # Mon 06:00 UTC — offset from security.yml (05:00) and eval.yml (04:30)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # required to upload SARIF to code scanning
+      contents: read
+      actions: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Java is scanned with build-mode: none (source extraction, no Maven build) — the fast path
+          # that keeps this off the critical path. Records/sealed types are long-supported by CodeQL;
+          # the action pulls a recent bundle automatically.
+          - language: java-kotlin
+            build-mode: none
+          # The GA `actions` language analyzes the workflow files themselves (the issue's "workflow
+          # surfaces") — untrusted-input-in-run, script injection, over-broad permissions, etc.
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:${{ matrix.language }}'

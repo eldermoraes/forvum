@@ -14,8 +14,10 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write   # required to create/upload the GitHub Release
-  packages: write   # required to push the native container image to GHCR
+  contents: write       # required to create/upload the GitHub Release
+  packages: write       # required to push the native container image to GHCR
+  id-token: write       # OIDC token for actions/attest-build-provenance (#174)
+  attestations: write   # write the artifact/image provenance attestations (#174)
 
 jobs:
   build:
@@ -48,7 +50,7 @@ jobs:
       # linux-amd64 uses Mandrel 25.0.x-Final (the named native-image distribution).
       - name: Set up Mandrel (Linux)
         if: runner.os == 'Linux'
-        uses: graalvm/setup-graalvm@v1
+        uses: graalvm/setup-graalvm@cabbb10818fabc989d6dbd508e4846596d20dd2d   # v1.6.0
         with:
           distribution: mandrel
           version: mandrel-25.0.3.0-Final
@@ -59,7 +61,7 @@ jobs:
       # macos-arm64: Mandrel publishes no darwin-aarch64 build, so use GraalVM CE 25.
       - name: Set up GraalVM CE (macOS)
         if: runner.os == 'macOS'
-        uses: graalvm/setup-graalvm@v1
+        uses: graalvm/setup-graalvm@cabbb10818fabc989d6dbd508e4846596d20dd2d   # v1.6.0
         with:
           distribution: graalvm-community
           java-version: '25'
@@ -90,17 +92,79 @@ jobs:
           ( cd dist && shasum -a 256 "$ASSET" > "$ASSET.sha256" )
           ls -lh dist
 
+      # Provenance (#174): a GitHub OIDC-backed build-provenance attestation for THIS platform binary,
+      # generated at the build source (subject digest captured here, stronger than attest-after-download).
+      # Verify with:  gh attestation verify forvum-<platform> --repo eldermoraes/forvum
+      - name: Attest binary provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/forvum-${{ matrix.platform }}
+
+      # SBOM (#174, linux-x64 leg only): one CycloneDX aggregate over the whole Maven closure — the
+      # dependency set is identical across the four platform binaries (the delta is toolchain, which the
+      # provenance records), so one SBOM covers them all. Runs AFTER the native `package` above, so the
+      # reactor is built and reactor-internal artifacts resolve (never a standalone goal on a cold tree).
+      - name: Generate the aggregate CycloneDX SBOM (Maven closure)
+        if: matrix.platform == 'linux-x64'
+        run: |
+          ./mvnw -B -ntp -DskipTests org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp target/bom.json "dist/forvum-${VERSION}-sbom.cdx.json"
+          ls -lh dist
+
       # Publish the native single-binary OCI image to GHCR (linux leg only — the image is linux/amd64).
       # The Helm chart (deploy/helm) and docs/DEPLOY.md's Docker path pull this image. The native runner
       # built above sits at forvum-app/target/*-runner, which Dockerfile.native COPYs (context=forvum-app).
-      - name: Build & push native container image to GHCR
+      # Build -> scan (BLOCKING, pre-push) -> image SBOM -> push -> capture digest (for provenance).
+      - name: Build native container image to GHCR (local, pre-push)
         if: matrix.platform == 'linux-x64'
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           IMAGE="ghcr.io/${{ github.repository_owner }}/forvum"
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          echo "IMAGE_REF=${IMAGE}:${VERSION}-native" >> "$GITHUB_ENV"
           docker build -f forvum-app/src/main/docker/Dockerfile.native -t "${IMAGE}:${VERSION}-native" forvum-app
+
+      # Scan the locally-built image BEFORE pushing, so a CRITICAL/HIGH (fixable) vulnerable image never
+      # reaches GHCR. Fixable-only (ubi-micro carries unfixable base CVEs); suppressions in .trivyignore.yaml.
+      - name: Trivy — scan the image before push (blocking)
+        if: matrix.platform == 'linux-x64'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_REF }}
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'
+          trivyignores: .trivyignore.yaml
+
+      # Container SBOM (#174): a CycloneDX SBOM of the image (base + native binary), shipped as a release
+      # asset alongside the Maven SBOM.
+      - name: Trivy — generate the image SBOM (CycloneDX)
+        if: matrix.platform == 'linux-x64'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_REF }}
+          format: cyclonedx
+          output: dist/forvum-image-sbom.cdx.json
+
+      - name: Rename image SBOM with the release version
+        if: matrix.platform == 'linux-x64'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mv dist/forvum-image-sbom.cdx.json "dist/forvum-${VERSION}-image-sbom.cdx.json"
+
+      - name: Push the native image to GHCR
+        if: matrix.platform == 'linux-x64'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           docker push "${IMAGE}:${VERSION}-native"
+          # docker inspect populates RepoDigests only AFTER a successful push — capture the digest here
+          # for the image attestation subject.
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}:${VERSION}-native" | cut -d'@' -f2)
+          echo "IMAGE_DIGEST=${DIGEST}" >> "$GITHUB_ENV"
           # Move :latest-native only for a STABLE release (no '-' suffix), mirroring the GitHub
           # `releases/latest` exclusion of pre-releases — so `docker pull ...:latest-native` never
           # resolves to a pre-release build.
@@ -109,6 +173,17 @@ jobs:
             *)   docker tag "${IMAGE}:${VERSION}-native" "${IMAGE}:latest-native"
                  docker push "${IMAGE}:latest-native" ;;
           esac
+
+      # Provenance (#174): attest the pushed image by its digest and record the attestation in the
+      # registry. Verify with:
+      #   gh attestation verify oci://ghcr.io/eldermoraes/forvum:<version>-native --repo eldermoraes/forvum
+      - name: Attest image provenance
+        if: matrix.platform == 'linux-x64'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.IMAGE_DIGEST }}
+          push-to-registry: true
 
       - name: Upload platform asset
         uses: actions/upload-artifact@v4
@@ -130,8 +205,10 @@ jobs:
         with:
           path: artifacts
 
-      # Flatten the per-platform artifact dirs into one upload set, and include the
-      # installer so `curl | sh` always fetches the script that matches the release.
+      # Flatten the per-platform artifact dirs into one upload set, and include the installer so
+      # `curl | sh` always fetches the script that matches the release. The `forvum-*` glob also picks up
+      # the two CycloneDX SBOMs from the linux-x64 leg (forvum-<ver>-sbom.cdx.json + the image SBOM);
+      # `fail_on_unmatched_files: true` (below) then makes a missing SBOM FAIL the release (#174).
       - name: Collect release files
         run: |
           mkdir -p release
@@ -140,7 +217,7 @@ jobs:
           ls -lh release
 
       - name: Create GitHub Release and upload assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65   # v2.6.2
         with:
           files: release/*
           generate_release_notes: true

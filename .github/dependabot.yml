@@ -1,0 +1,44 @@
+# Dependabot (#174) — the update process for pinned inputs. Dependabot natively bumps SHA-pinned
+# actions (and their trailing `# vX.Y.Z` comments), Maven deps, and the Docker base-image digest, so
+# the SHA/digest pins added by #174 stay fresh without manual tracking.
+#
+# Cadence is weekly with small PR limits — visibility, not churn. Version bumps stay maintainer
+# decisions (forvum-bom is the single Maven bump point; auto-merge is NOT enabled). Enabling Dependabot
+# SECURITY updates (a repo setting, turned on with #174) is what opens vulnerable-dependency PRs
+# automatically; this file governs the routine version-update PRs.
+version: 2
+updates:
+  # GitHub Actions — bumps the SHA-pins in .github/workflows/*.yml (third-party) and the GitHub-authored
+  # major tags.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+
+  # Maven — the whole reactor resolves from the root. Grouped minor+patch so a platform bump is one PR,
+  # not a swarm; the pre-release Quarkiverse pins (forvum-bom) may attract update PRs — the weekly
+  # cadence + grouping + small limit contain the noise.
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      maven-minor-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: build
+
+  # Docker — maintains the ubi9/ubi-micro base-image digest pin in Dockerfile.native.
+  - package-ecosystem: docker
+    directory: /forvum-app/src/main/docker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: ci
