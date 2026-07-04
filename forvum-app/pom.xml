@@ -127,6 +127,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-browser</artifactId>
         </dependency>
+        <!-- Layer-3 Memory tool (#193): contributes memory.save (MEMORY_WRITE) / memory.recall (MEMORY_READ)
+             to the ToolRegistry, driving #175's local memory through the engine-backed MemoryAccess seam.
+             No approval gate; every call is identity-scoped and routed through the pre-memory-write filter. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-memory</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>

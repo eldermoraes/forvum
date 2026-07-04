@@ -50,7 +50,23 @@ public enum PermissionScope {
      * Authority to run a web search via {@code web.search} (PR-6, {@code forvum-tools-web}, Brave Search
      * API). Distinct from {@link #WEB_FETCH} so a role can grant search without arbitrary URL fetch.
      */
-    WEB_SEARCH;
+    WEB_SEARCH,
+    /**
+     * Authority to retrieve durable facts via {@code memory.recall} (#193, {@code forvum-tools-memory}) —
+     * the read half of the explicit memory surface layered on #175's local {@code MemoryProvider}. Every
+     * recall is confined to the caller's identity/agent by the provider, so this scope gates the tool, not
+     * cross-tenant access. Distinct from {@link #MEMORY_WRITE} so a role can grant recall without letting
+     * the agent deliberately persist new facts.
+     */
+    MEMORY_READ,
+    /**
+     * Authority to deliberately persist a durable fact via {@code memory.save} (#193,
+     * {@code forvum-tools-memory}) — the write half of the explicit memory surface. Every save is routed
+     * through the DR-6a pre-memory-write filter and scoped to the caller's identity/agent. The permissive
+     * {@code default-user} role ({@code EnumSet.allOf}) includes it; a restricted role can grant recall
+     * ({@link #MEMORY_READ}) while withholding write.
+     */
+    MEMORY_WRITE;
 
     /**
      * Parses a string into a {@code PermissionScope}, throwing a contextual

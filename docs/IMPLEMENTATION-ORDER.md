@@ -100,7 +100,7 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 ## Wave 7 — Remaining parity + polish *(breadth / delight / reach)*
 
 30. **#189** `feat(tools)`: session + sub-agent introspection tools (`agents.list` / `sessions.*`) — depends on #167/#168.
-31. **#193** `[unblocked: #175 ✅]` `feat(tools)`: explicit `memory.save` / `memory.recall` tool — its provider contract (`LocalMemoryProvider`/`MemoryWriter`) has merged, so it is now startable.
+31. **#193** ✅ `[LOW]` `feat(tools)`: explicit `memory.save` / `memory.recall` tool. *Done:* a Layer-3 `forvum-tools-memory` module contributes model-callable `memory.save` (MEMORY_WRITE) / `memory.recall` (MEMORY_READ) over a new `forvum-sdk` `MemoryAccess` seam (Resolution-B, engine-implemented `EngineMemoryAccess`), reusing #175's `SemanticMemoryStore.upsertFact` + the DR-6a pre-memory-write filter + `MemorySelector` — no second index, no migration. `MEMORY_READ`/`MEMORY_WRITE` added to `PermissionScope` (auto-flow into `default-user`); round-trip + cross-identity-isolation + blocked-filter ITs and a `MemoryWriteScopeDeniedTest` RBAC-audit test land with it.
 32. **#186** ▸ `feat(tools)`: text-to-speech (`tts.speak`) tool — reuses the voice-channel Piper subprocess pattern.
 33. **#187** ▸ `feat(tools)`: media-generation tools (image/video/music) via a new `GenerationProvider` SPI.
 34. **#194** `[HIGH]` `feat(app)`: interactive first-run onboarding wizard (`forvum onboard`) — composes #184 + #192; **pullable forward** right after Wave 5 if adoption is a priority.
