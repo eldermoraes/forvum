@@ -55,6 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write   # lets gitleaks-action comment the finding on the PR (the gate itself is the red check)
     steps:
       # Full history so gitleaks can resolve the PR base..head range (and the full-history scan on
       # push/schedule). No GITLEAKS_LICENSE is needed — this is a personal-account repo (org repos would
@@ -82,9 +83,12 @@ jobs:
       # Download the pinned actionlint release binary (no piping curl into bash — the fetched script is
       # version-pinned and run explicitly). actionlint shellchecks every `run:` block on the ubuntu
       # runner, which ships shellcheck; the next step shellchecks the standalone .github/*.sh gate scripts.
+      # Keep this pin CURRENT: an actionlint older than the newest GitHub runner labels false-positives on
+      # them (1.7.7 did not know macos-15-intel, release.yml's macos-x64 leg — caught by the #174 canary
+      # PRs); the remedy for a future new-label false positive is bumping this one version line.
       - name: Install actionlint
         env:
-          ACTIONLINT_VERSION: '1.7.7'
+          ACTIONLINT_VERSION: '1.7.12'
         run: |
           curl -fsSL -o download-actionlint.bash \
             "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
