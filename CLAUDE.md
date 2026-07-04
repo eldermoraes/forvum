@@ -2003,3 +2003,38 @@ Generalizable lessons from completed milestones; append here as milestones land.
   telegram still carry the hardcoded form — a pre-existing pattern for #181 to sweep). (9) A `sed -i.bak`+`mv`
   red-check restore PRESERVES the old mtime, so Maven's incremental compiler keeps the MUTATED class in
   `target/classes` — `touch` the source (or clean the module) after restoring, or the next build runs the mutant. [#192]
+- **Strict plugin checksums are BELT-AND-BRACES (session global + per-remote FAIL), and the FAIL policy
+  rejects MISSING checksums too — so the existing hermetic fixtures ENCODED the vulnerability and the
+  no-`.sha1` shape becomes the negative test.** #171 hardened `forvum plugin install` (a JVM drop-in runs
+  in-process with core-equivalent authority): `MavenPluginResolver` sets `CHECKSUM_POLICY_FAIL` on BOTH
+  `session.setChecksumPolicy` (a GLOBAL override that rejects a tampered artifact even through a
+  default-`warn` remote — load-bearing for the test-injected `file://` remotes, which carry the default
+  policy) AND every remote's release + snapshot `RepositoryPolicy` (explicit in code, acceptance #2). FAIL
+  aborts on a MISSING checksum, not just a mismatch (probed), so both hermetic fixtures — which wrote a
+  `.jar`+`.pom` but NO `.sha1` and passed only because `warn` tolerates it — flip RED; the fix is
+  fixture-side (write a valid `.jar.sha1` via `MessageDigest`/`HexFormat`) and the old no-sha1 shape is
+  promoted to the `missingChecksumIsRejected*` negative test (the [#176] rewrite-the-test-that-encoded-the-bug
+  arc). NEGATIVE-
+  TEST TRAP: a cached artifact resolves with NO checksum re-verification (the operator's own `~/.m2` disk is
+  trusted — the local-cache boundary), so a tampered-remote test reusing a warm cache passes for the wrong
+  reason — use a FRESH local-cache `@TempDir` per negative case (the per-test dirs already comply). A
+  concrete-version `resolveArtifact` does NOT fetch the `.pom`, so only the `.jar.sha1` governs. RED-CHECK:
+  removing the session policy line flips BOTH the tampered AND missing tests to "nothing was thrown" (the
+  tampered artifact RESOLVES = the live bug). The scheme allowlist is `{https, file}` (plaintext `http://`
+  = MITM downgrade, rejected; `file://` retained for local mirrors + the sanctioned hermetic-test path
+  through the PRODUCTION `forvum.plugins.repository-url` — checksum FAIL still applies to it, so banning it
+  would force a test-only bypass seam). Diagnostics redact `://user:secret@` via a small `redact()`.
+  Owner-only install is a package-private `PluginArtifactInstaller` (the `StateDirInitializer` shape,
+  module-own copy of the `POSIX`/`0700`/`0600` recipe + a `boolean posix` overload): stream the bytes into a
+  `0600`-at-birth temp file in the SAME dir (`Files.copy(REPLACE_EXISTING)` would RECREATE it with umask
+  perms — stream into the temp inode via `newOutputStream(WRITE, TRUNCATE_EXISTING)`) then `ATOMIC_MOVE`
+  (never a partial JAR; a failed install never touches the previous valid JAR — only the atomic move does),
+  rejecting a symlinked dir/target. FAIL POLICY diverges from #173's boot-time repair-and-warn: an
+  interactive one-shot installer staging executable code is NOT the M4 graceful-boot contract, so an
+  un-tightenable loose dir / a symlink FAILS the install fail-closed (exit 1 + remediation), mirroring
+  `SkillInstaller`. Write failures now throw a new engine `PluginInstallException` (the old `streamInto`
+  wrapped them in `UncheckedIOException`, which ESCAPED the CLI's catch and stack-traced) caught alongside
+  `PluginResolutionException` in one CLI multi-catch. `plugins/` is deliberately not read at boot, so
+  install-time is the enforced gate (no startup observer — §13 simplicity; a future drop-in scanner must
+  re-validate). Zero new native surface (pure `java.nio` + method-body-only resolver refs, the P2-6
+  inertness invariant preserved), zero new config, zero new deps. [#171]

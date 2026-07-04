@@ -13,9 +13,17 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The {@code forvum plugin install <coords>} SUCCESS path end-to-end through the CLI: a real resolve +
@@ -25,6 +33,11 @@ import java.util.Map;
  * served as a {@code file://} remote via the {@code forvum.plugins.repository-url} override, so no network
  * and no real {@code ~/.m2} are touched. {@code user.home} is redirected to a throwaway {@code .m2} for the
  * launch so the resolver's local cache writes land there, never in the developer's real {@code ~/.m2}.
+ *
+ * <p>The fixture writes a VALID {@code .jar.sha1} sidecar: since #171 the resolver enforces
+ * {@code CHECKSUM_POLICY_FAIL} by default, so this end-to-end path proves strict checksums are enforced
+ * through the full CLI/CDI/config stack (a no-sha1 fixture would abort). It also asserts the installed JAR is
+ * owner-only ({@code 0600}) — a cheap end-to-end permission lock through the production path.
  *
  * <p>Covers the JVM (fast-jar) branch of {@link PluginInstallCommand#call()} — {@code ImageMode.current()
  * == JVM} — and its "restart the fast-jar" message. The native ({@code NATIVE_RUN}) branch is NOT exercised
@@ -74,7 +87,24 @@ class PluginInstallSuccessTest {
         Assertions.assertTrue(
                 result.getOutput().contains("Restart Forvum (the fast-jar) to load the new plugin."),
                 () -> "the JVM path must print the fast-jar restart instruction; got: " + result.getOutput());
+
+        // #171: the installed JAR is owner-only (0600) on POSIX — an end-to-end perms lock through the CLI.
+        if (POSIX) {
+            Path installed = HermeticRemoteProfile.FORVUM_HOME
+                    .resolve("plugins").resolve(HermeticRemoteProfile.ARTIFACT + "-"
+                            + HermeticRemoteProfile.VERSION + ".jar");
+            try {
+                Assertions.assertEquals(FILE_0600, Files.getPosixFilePermissions(installed),
+                        "the installed plugin JAR must be owner-only (0600)");
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
     }
+
+    private static final boolean POSIX =
+            FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+    private static final Set<PosixFilePermission> FILE_0600 = PosixFilePermissions.fromString("rw-------");
 
     /**
      * Seeds a {@code file://} remote holding {@code tiny-plugin-1.0.0.jar} + its POM, redirects the resolver
@@ -111,11 +141,25 @@ class PluginInstallSuccessTest {
             try {
                 Path dir = root.resolve(GROUP.replace('.', '/')).resolve(ARTIFACT).resolve(VERSION);
                 Files.createDirectories(dir);
-                Files.writeString(dir.resolve(ARTIFACT + "-" + VERSION + ".jar"), "plugin-bytes");
+                String jarName = ARTIFACT + "-" + VERSION + ".jar";
+                String bytes = "plugin-bytes";
+                Files.writeString(dir.resolve(jarName), bytes);
+                // Since #171 the resolver enforces CHECKSUM_POLICY_FAIL, so a valid .jar.sha1 is required.
+                Files.writeString(dir.resolve(jarName + ".sha1"), sha1Hex(bytes));
                 Files.writeString(dir.resolve(ARTIFACT + "-" + VERSION + ".pom"), pom());
                 return root;
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
+            }
+        }
+
+        private static String sha1Hex(String content) {
+            try {
+                byte[] digest = MessageDigest.getInstance("SHA-1")
+                        .digest(content.getBytes(StandardCharsets.UTF_8));
+                return HexFormat.of().formatHex(digest);
+            } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException("SHA-1 must be available", e);
             }
         }
 

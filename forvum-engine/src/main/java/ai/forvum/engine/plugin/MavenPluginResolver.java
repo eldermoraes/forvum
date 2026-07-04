@@ -11,23 +11,41 @@ import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.repository.LocalRepository;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.repository.RepositoryPolicy;
 import org.eclipse.aether.resolution.ArtifactRequest;
 import org.eclipse.aether.resolution.ArtifactResolutionException;
 import org.eclipse.aether.resolution.ArtifactResult;
 import org.eclipse.aether.supplier.RepositorySystemSupplier;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
+import java.net.URI;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Resolves a Maven coordinate ({@code groupId:artifactId:version}) via Apache Maven Resolver and streams
  * the resolved JAR into {@code ~/.forvum/plugins/} — the engine half of P2-6 ({@code forvum plugin install
  * <coords>}). Resolution checks the user's {@code ~/.m2/repository} local cache first (so an artifact the
  * user already has needs no network) and falls back to Maven Central for anything missing.
+ *
+ * <p><strong>Strict checksums (#171, DR-6b [DP-10]).</strong> A JVM drop-in plugin executes in-process with
+ * core-equivalent authority, so a corrupted/replaced artifact must never be accepted with a warning. This
+ * resolver hardens the Resolver's default {@code warn} policy to {@link RepositoryPolicy#CHECKSUM_POLICY_FAIL}
+ * explicitly on BOTH the session ({@code session.setChecksumPolicy}, a global override) and every remote
+ * repository (an explicit {@code RepositoryPolicy} on release and snapshot), so the guarantee holds
+ * independently of Resolver defaults and of how any remote was constructed. A missing OR mismatched checksum
+ * aborts resolution and leaves no loadable JAR. Repositories are restricted to the {@code {https, file}}
+ * scheme allowlist — plaintext {@code http://} (a MITM downgrade) is rejected; {@code file://} is retained
+ * for local mirrors / the hermetic test path (checksum verification still applies to it).
+ *
+ * <p><strong>Local-cache trust boundary.</strong> An artifact already in {@code ~/.m2/repository} resolves
+ * with NO checksum re-verification — identical to Maven itself: the cache is the operator's own disk, inside
+ * the install-act-is-the-trust-decision boundary. Re-hashing it would invent a parallel verifier with no
+ * reference checksum to compare against.
+ *
+ * <p><strong>Owner-only install.</strong> The resolved JAR is staged by {@link PluginArtifactInstaller}:
+ * owner-only {@code 0700}/{@code 0600} on POSIX, an atomic temp-file + move (never a partial JAR), and
+ * symlink rejection on the directory and target.
  *
  * <p><strong>Fast-jar-only by design (§6.2/§6.3), NOT a native carve-out.</strong> The drop-in
  * {@code ~/.forvum/plugins/} directory is loaded only by the JVM fast-jar via {@code ServiceLoader}; the
@@ -59,10 +77,12 @@ public class MavenPluginResolver {
      * Resolve {@code coordinates} (Maven {@code groupId:artifactId:version}) against the user's
      * {@code ~/.m2/repository} cache + Maven Central and stream the resolved JAR into {@code pluginsDir}.
      * Creates {@code pluginsDir} if absent. The installed file keeps the resolver's canonical filename
-     * ({@code artifactId-version.jar}); a re-install overwrites it.
+     * ({@code artifactId-version.jar}); a re-install overwrites it atomically.
      *
      * @return the resolution outcome (canonical coordinates + resolved + installed paths)
-     * @throws PluginResolutionException if the coordinate is malformed or cannot be resolved
+     * @throws PluginResolutionException if the coordinate is malformed, the repository is disallowed, or the
+     *         artifact cannot be resolved (including a missing/mismatched checksum)
+     * @throws PluginInstallException if the resolved JAR cannot be staged owner-only into {@code pluginsDir}
      */
     public PluginInstallResult install(String coordinates, Path pluginsDir) {
         return install(coordinates, pluginsDir, localM2Repository(), List.of(remote()));
@@ -80,6 +100,9 @@ public class MavenPluginResolver {
         DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
         session.setLocalRepositoryManager(
                 system.newLocalRepositoryManager(session, new LocalRepository(localRepo.toFile())));
+        // Strict checksums (#171): fail — never warn — on a missing/mismatched checksum. Set on the session as
+        // a global override so it holds even through a remote built with a default (warn) policy.
+        session.setChecksumPolicy(RepositoryPolicy.CHECKSUM_POLICY_FAIL);
 
         ArtifactRequest request = new ArtifactRequest();
         request.setArtifact(requested);
@@ -90,12 +113,12 @@ public class MavenPluginResolver {
             result = system.resolveArtifact(session, request);
         } catch (ArtifactResolutionException e) {
             throw new PluginResolutionException(
-                    "Could not resolve plugin coordinate '" + coordinates + "': " + e.getMessage(), e);
+                    "Could not resolve plugin coordinate '" + coordinates + "': " + redact(e.getMessage()), e);
         }
 
         Artifact resolved = result.getArtifact();
         Path resolvedJar = resolved.getFile().toPath();
-        Path installedJar = streamInto(resolvedJar, pluginsDir);
+        Path installedJar = PluginArtifactInstaller.install(resolvedJar, pluginsDir);
 
         return new PluginInstallResult(coordinatesOf(resolved), resolvedJar, installedJar);
     }
@@ -118,20 +141,6 @@ public class MavenPluginResolver {
         }
     }
 
-    /** Stream {@code resolvedJar} into {@code pluginsDir} (created if absent); returns the installed path. */
-    private static Path streamInto(Path resolvedJar, Path pluginsDir) {
-        try {
-            Files.createDirectories(pluginsDir);
-            Path target = pluginsDir.resolve(resolvedJar.getFileName().toString());
-            // Files.copy streams the bytes; no full in-memory buffer of the JAR.
-            Files.copy(resolvedJar, target, StandardCopyOption.REPLACE_EXISTING);
-            return target;
-        } catch (IOException e) {
-            throw new UncheckedIOException(
-                    "Failed to write resolved plugin JAR into " + pluginsDir, e);
-        }
-    }
-
     private static String coordinatesOf(Artifact a) {
         return a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getVersion();
     }
@@ -141,8 +150,44 @@ public class MavenPluginResolver {
         return Path.of(System.getProperty("user.home"), ".m2", "repository");
     }
 
-    /** The configured remote (Maven Central by default; a {@code file://} layout under a hermetic test). */
-    private RemoteRepository remote() {
-        return new RemoteRepository.Builder(CENTRAL_ID, "default", remoteRepositoryUrl).build();
+    /**
+     * The configured remote (Maven Central by default; a {@code file://} layout under a hermetic test),
+     * package-private so a test can assert the checksum policy and scheme allowlist. Strict checksums are set
+     * explicitly on both the release and snapshot policy; the URL scheme is restricted to {@code {https, file}}
+     * — plaintext {@code http://} is rejected as a MITM downgrade.
+     */
+    RemoteRepository remote() {
+        requireAllowedScheme(remoteRepositoryUrl);
+        RepositoryPolicy strict = new RepositoryPolicy(
+                true, RepositoryPolicy.UPDATE_POLICY_DAILY, RepositoryPolicy.CHECKSUM_POLICY_FAIL);
+        return new RemoteRepository.Builder(CENTRAL_ID, "default", remoteRepositoryUrl)
+                .setReleasePolicy(strict)
+                .setSnapshotPolicy(strict)
+                .build();
+    }
+
+    /** Allow only {@code https} (network) and {@code file} (local mirror / hermetic test) repository URLs. */
+    private static void requireAllowedScheme(String url) {
+        String scheme;
+        try {
+            scheme = URI.create(url).getScheme();
+        } catch (IllegalArgumentException e) {
+            throw new PluginResolutionException(
+                    "Malformed plugin repository URL '" + redact(url) + "': " + e.getMessage(), e);
+        }
+        scheme = scheme == null ? "" : scheme.toLowerCase(Locale.ROOT);
+        if (!scheme.equals("https") && !scheme.equals("file")) {
+            throw new PluginResolutionException("Plugin repository URL '" + redact(url) + "' uses an "
+                    + "unsupported scheme '" + scheme + "'; only https (and file:// for a local mirror) is "
+                    + "allowed — plaintext http is refused.", null);
+        }
+    }
+
+    /** Strip {@code ://user:secret@} credentials from a URL so a diagnostic never leaks a repository token. */
+    private static String redact(String message) {
+        if (message == null) {
+            return null;
+        }
+        return message.replaceAll("://[^/@\\s]*@", "://***@");
     }
 }

@@ -2,6 +2,7 @@ package ai.forvum.app;
 
 import ai.forvum.engine.config.ForvumHome;
 import ai.forvum.engine.plugin.MavenPluginResolver;
+import ai.forvum.engine.plugin.PluginInstallException;
 import ai.forvum.engine.plugin.PluginInstallResult;
 import ai.forvum.engine.plugin.PluginResolutionException;
 
@@ -52,7 +53,9 @@ public class PluginInstallCommand implements Callable<Integer> {
         PluginInstallResult result;
         try {
             result = resolver.install(coordinates, home.plugins());
-        } catch (PluginResolutionException e) {
+        } catch (PluginResolutionException | PluginInstallException e) {
+            // Resolve-side (malformed coordinate / disallowed repo / checksum mismatch, #171) and install-side
+            // (unsafe plugins dir / target, atomic-move failure) both surface as one clean exit-1 diagnostic.
             System.err.println("Plugin install failed: " + e.getMessage());
             return 1;
         }
