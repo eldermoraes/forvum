@@ -13,6 +13,7 @@ import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.budget.BudgetExhaustedException;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.agent.EphemeralAgentId;
 import ai.forvum.engine.compress.BoundedCompressor;
 import ai.forvum.engine.compress.CompressionBudget;
 import ai.forvum.engine.compress.CompressionOutcome;
@@ -50,6 +51,7 @@ import jakarta.inject.Inject;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.StateGraph;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -61,6 +63,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The Orchestrator-Workers supervisor (ULTRAPLAN section 5.5) materialized as a LangGraph4j
@@ -92,6 +95,11 @@ import java.util.concurrent.Future;
  */
 @ApplicationScoped
 public class SupervisorGraph {
+
+    private static final Logger LOG = Logger.getLogger(SupervisorGraph.class);
+
+    /** Cumulative count of worker retirements that failed teardown (#177 bounded observability). */
+    private final AtomicLong retireFailures = new AtomicLong();
 
     /** Safety cap on {@code generate ⇄ (tool_loop|workers)} rounds, independent of any per-agent budget. */
     private static final int MAX_ROUNDS = 8;
@@ -147,8 +155,38 @@ public class SupervisorGraph {
             finalText = result.flatMap(GraphState::finalText).orElseGet(turn::lastAssistantText);
         } catch (Exception e) {
             throw asGraphFailure(e, "Supervisor graph failed for session " + request.sessionId());
+        } finally {
+            retireWorkers(turn);
         }
         return enforceOutputSchema(request, finalText);
+    }
+
+    /**
+     * Retire every worker this turn spawned (#177), on EVERY exit path — the {@code finally} runs after
+     * {@code worker_run} has already joined all fan-out and closed its executor (try-with-resources), so no
+     * worker-owned async work is still live when teardown happens. Iterates {@link Turn#spawnedIds} (the
+     * accumulated allocation, not {@code turn.spawns}, which {@code reduce} clears per round). Each retire is
+     * isolated in try/catch so a cleanup failure can never mask the turn's own result or the in-flight
+     * exception the {@code finally} is unwinding.
+     */
+    private void retireWorkers(Turn turn) {
+        for (AgentId childId : turn.spawnedIds) {
+            try {
+                workerRunner.retire(childId);
+            } catch (Throwable e) {
+                // Best-effort teardown inside the turn's finally: swallow EVERYTHING (including an Error such
+                // as a native LinkageError) and count it, so a cleanup failure can never mask the turn's own
+                // result or the in-flight exception this finally is unwinding (#177).
+                retireFailures.incrementAndGet();
+                LOG.warnf(e, "Failed to retire worker '%s' for session '%s'",
+                        childId.value(), turn.sessionId);
+            }
+        }
+    }
+
+    /** Cumulative worker retirements whose teardown failed — a bounded, payload-free gauge (#177). */
+    public long retireFailureCount() {
+        return retireFailures.get();
     }
 
     /**
@@ -482,8 +520,14 @@ public class SupervisorGraph {
         }
         AgentId child;
         try {
-            child = new AgentId(childId.toString());
+            // #177: allocate a UNIQUE runtime id from the model's suggested label — never trust the model's
+            // raw childId as the registry key (it could collide with a persistent agent or a prior worker).
+            child = EphemeralAgentId.forLabel(childId.toString());
             workerRunner.spawn(turn.agentId, child, List.of());
+            // Track for teardown IMMEDIATELY after registration (before anything else that could throw), so a
+            // registered worker can never escape retirement. spawnedIds accumulates across rounds — unlike
+            // turn.spawns, which reduce clears per round.
+            turn.spawnedIds.add(child);
         } catch (RuntimeException e) {
             return "Could not spawn worker: " + e.getMessage();
         }
@@ -556,6 +600,8 @@ public class SupervisorGraph {
         private final List<ChatMessage> conversation;
         private final int compressThreshold;
         private final List<SpawnRequest> spawns = new ArrayList<>();
+        /** Every ephemeral worker id allocated this turn (accumulated across rounds; retired in run()'s finally). */
+        private final List<AgentId> spawnedIds = new ArrayList<>();
         private final ConcurrentMap<String, String> digests = new ConcurrentHashMap<>();
         private int round;
 

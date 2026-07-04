@@ -49,6 +49,10 @@ class DefaultWorkerRunnerIT {
 
         String digest = workerRunner.runWorker(child, "do the subtask", "sess-worker");
         assertFalse(digest.isBlank(), "runWorker drove the child's turn and returned a non-empty digest");
+
+        workerRunner.retire(child); // #177: production retire delegates to AgentRegistry.retire
+        assertThrows(IllegalStateException.class, () -> registry.persona(child),
+                "retire unregisters the worker from the active registry");
     }
 
     @Test

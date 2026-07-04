@@ -1845,3 +1845,42 @@ Generalizable lessons from completed milestones; append here as milestones land.
   3rd `Summarizer` call-site (`SessionCompactor`) is fail-CLOSED over TRUSTED own-session content — NOT the
   #176 vector, left out of scope. The failure taxonomy (timeout/exception/blank/invalid/over-limit/input-over-limit)
   is a `CompressionOutcome` enum for diagnostics; classify timeout by a `*TimeoutException` in the cause chain. [#176]
+- **Retiring ephemeral spawned workers (#177) is a `finally` in `SupervisorGraph.run` + an `AgentRegistry.retire`
+  that both UNREGISTERS and DESTROYS the `@AgentScoped` context — and the ArC-registered custom-context instance is
+  reachable DIRECTLY, no wrapper.** The empirical fact that unblocked the design (verified with a throwaway probe):
+  `Arc.container().getContexts(AgentScoped.class)` returns the REAL `AgentContext` instance (size 1), so a cast +
+  the custom `destroy(AgentId)` works — a re-resolve of an `@AgentScoped` bean then yields a fresh identity, proving
+  teardown. The wrapper the `AgentContext` javadoc warns about only shadows the no-arg `destroy()`/`getState()` of the
+  container-shutdown lifecycle, NOT the custom method. **Native-safety is by CONSTRUCTION, not by precedent**: the
+  context is registered at BUILD TIME (the `BuildCompatibleExtension`) and `getContexts` is a deterministic,
+  reflection-free, no-dynamic-proxy runtime map lookup of that registered instance — so it behaves identically on the
+  JVM and in native (categorically unlike the Risk#5 ServiceLoader/serialization traps that native genuinely breaks;
+  do NOT claim `MemoryWriter` as precedent — it uses `requestContext()`, a built-in scope, not `getContexts(customScope)`).
+  Still, `destroyScope` asserts the instance IS an `AgentContext` and WARNS loudly if not (never a silent skip), so a
+  future ArC change could not let the leak return unnoticed. Design shape: (1) allocate a UNIQUE runtime id per worker
+  (`EphemeralAgentId.forLabel`, `<sanitized-label>~<uuid8>`) — NEVER the model's raw suggested `childId` — so a spawn
+  can never collide with a persistent (file-declared) agent or another worker, making collision-safety, race-safety,
+  and the persistent-vs-ephemeral distinction trivial; (2) track live ids in a dedicated `ephemeralIds`
+  `ConcurrentHashMap.newKeySet()` — its membership IS the "retire never touches a persistent agent" guarantee
+  (`retire` no-ops on an id it did not spawn) AND the `activeWorkerCount()` gauge; (3) retire ALL of them in `run()`'s
+  `finally`, covering EVERY exit path (success / model-fail / tool-fail / MAX_ROUNDS timeout / budget / interrupt) —
+  safe because `worker_run`'s try-with-resources VT executor has already joined+closed the fan-out before `invoke()`
+  returns, so no worker async work survives teardown. `destroyScope` REBINDS `CURRENT_AGENT` to the child so any
+  `@PreDestroy` a scoped bean fires resolves in the CHILD's context, not the parent turn's (retirement runs on the
+  parent thread). TRAPS the 6-dim `/code-review` caught (all applied): (a) `reduce` clears `turn.spawns` PER ROUND, so
+  the `finally` must iterate a SEPARATE accumulated `spawnedIds` list, not `turn.spawns` (empty by then). (b) The
+  "cannot mask the turn result" guard must catch **`Throwable`**, not `RuntimeException` — a native teardown `Error`
+  (LinkageError) thrown from a `finally` would otherwise REPLACE the in-flight exception / discard the answer. (c) Do
+  NOT invent a package-private `scopeDestroyer` seam + a `ClientProxy.unwrap` test just to drive a cleanup-failure
+  counter — ArC swallows a failing `@PreDestroy`, so that path is un-drivable in production and the seam is test-only
+  damage (§2 "no error handling for impossible scenarios"); instead put the `retireFailureCount()` counter on
+  `SupervisorGraph.retireWorkers` where the existing fake `throwOnRetire` drives it NATURALLY, and let `retire`
+  propagate. (d) A bounded/concurrent stress test asserting only `activeWorkerCount()` (== `ephemeralIds.size()`,
+  which `retire` clears FIRST) stays green even if the `specs`-map leak — the whole point of #177 — regressed; also
+  assert `persona(worker)` throws (spec evicted), not just the gauge. (e) Switching to generated ids breaks any test
+  asserting the exact childId in the worker digest (`FakeWorkerRunner` returns `childId.value() + " result for: " +
+  task`) — assert the task SUBSTRING, and for the `assertFalse` compression tests drop the id prefix
+  (`"researcher result for"` → `"result for"`) or the assertion passes vacuously. ledger/task rows survive (retire
+  touches no DB). Native EXECUTION of the retire path has no dedicated deterministic IT (the bundled `EchoModelProvider`
+  never emits `spawn_worker`, and a native IT is out-of-process so it cannot inspect context liveness) — covered by
+  JVM `@QuarkusTest` + native-COMPILEs/boots + the by-construction argument + the defensive warning. [#177]

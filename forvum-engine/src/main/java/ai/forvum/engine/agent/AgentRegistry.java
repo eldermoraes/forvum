@@ -1,5 +1,6 @@
 package ai.forvum.engine.agent;
 
+import ai.forvum.core.AgentScoped;
 import ai.forvum.core.Persona;
 import ai.forvum.core.TaskRecord;
 import ai.forvum.core.TaskStatus;
@@ -11,9 +12,14 @@ import ai.forvum.core.budget.SpawnConfigurationException;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.config.AgentReader;
 import ai.forvum.engine.config.ConfigurationChangedEvent;
+import ai.forvum.engine.context.AgentContext;
+import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.sdk.TaskExecutor;
 
 import com.fasterxml.jackson.databind.JsonNode;
+
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.InjectableContext;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -23,6 +29,7 @@ import org.jboss.logging.Logger;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -50,6 +57,14 @@ public class AgentRegistry {
 
     private final AgentSpecReader specReader = new AgentSpecReader();
     private final ConcurrentMap<AgentId, AgentSpec> specs = new ConcurrentHashMap<>();
+
+    /**
+     * The live ephemeral-worker ids (#177). {@link #spawn} adds; {@link #retire} removes. This set is the
+     * ephemeral membership record: it distinguishes operator-declared persistent agents (loaded via
+     * {@link #getOrCreate}, never in this set) from ephemeral worker ids, so {@link #retire} can never
+     * unregister a persistent agent, and its size IS the active-worker gauge.
+     */
+    private final Set<AgentId> ephemeralIds = ConcurrentHashMap.newKeySet();
 
     /**
      * Resolve the agent, loading its spec from disk on first request. Returns the {@code @AgentScoped}
@@ -138,8 +153,59 @@ public class AgentRegistry {
                     "spawn: agent id '" + childId.value() + "' is already registered; choose a distinct "
                   + "child id (spawn never overwrites an existing agent).");
         }
+        // Every spawn is an ephemeral worker (retire-eligible); persistent agents enter only via getOrCreate.
+        ephemeralIds.add(childId);
         recordSpawnTask(parentId, childId);
         return childId;
+    }
+
+    /**
+     * Retire a spawned worker once its turn is over (#177): unregister its spec and destroy its
+     * {@code @AgentScoped} context, releasing the registry entry and any scoped beans so a long-running
+     * server stays bounded. Idempotent and safe by construction — it acts only on ids this registry
+     * {@link #spawn}ed (tracked in {@link #ephemeralIds}); an unknown id, an already-retired id, or a
+     * persistent file-declared agent id is a no-op, so the ephemeral cleanup path can never tear down a
+     * persistent agent. The task/ledger row written at spawn is untouched, so history stays queryable.
+     *
+     * <p>The spec is removed first (the worker is immediately unregistered), then its {@code @AgentScoped}
+     * beans are destroyed. Teardown is not wrapped here — a failure propagates to the caller
+     * ({@code SupervisorGraph.retireWorkers}), which is the one place a cleanup failure must be swallowed
+     * (in the turn's {@code finally}) and counted so it cannot mask the turn result.
+     */
+    public void retire(AgentId childId) {
+        if (!ephemeralIds.remove(childId)) {
+            return; // not a live ephemeral worker — never touch a persistent agent or double-retire
+        }
+        specs.remove(childId);
+        destroyScope(childId);
+    }
+
+    /** Live ephemeral worker sub-agents (bounded-observability gauge, #177). */
+    public int activeWorkerCount() {
+        return ephemeralIds.size();
+    }
+
+    /**
+     * Destroy every {@code @AgentScoped} bean held for {@code agentId} via the ArC-registered
+     * {@link AgentContext}. The teardown runs with {@code CURRENT_AGENT} rebound to {@code agentId} so any
+     * {@code @PreDestroy} callback a scoped bean fires resolves in the CHILD's context, not the parent
+     * turn's (retirement runs on the parent's turn thread).
+     *
+     * <p>{@code Arc.container().getContexts(AgentScoped.class)} returns the registered context instances —
+     * a deterministic, reflection-free runtime lookup (no dynamic proxy), so it behaves identically on the
+     * JVM and in a native image (unlike a ServiceLoader/serialization path). We nonetheless assert the
+     * instance IS our {@link AgentContext} and warn loudly if it is not, rather than silently skipping
+     * teardown, so a future ArC change that wrapped the context could never let the leak return unnoticed.
+     */
+    private static void destroyScope(AgentId agentId) {
+        for (InjectableContext context : Arc.container().getContexts(AgentScoped.class)) {
+            if (context instanceof AgentContext agentContext) {
+                ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId).run(() -> agentContext.destroy(agentId));
+                return;
+            }
+        }
+        LOG.warnf("No AgentContext registered for @AgentScoped; cannot destroy scoped beans for retired "
+                + "worker '%s' (unregistered, but its @AgentScoped context may leak).", agentId.value());
     }
 
     /**
