@@ -124,6 +124,36 @@ class AgentRegistryTest {
     }
 
     @Test
+    void aBoundLeaseFreezesItsGenerationAgainstAConcurrentReload() throws Exception {
+        Path agents = AgentRegistryTestHomeProfile.HOME.resolve("agents");
+        Path md = agents.resolve("leased.md");
+        Path json = agents.resolve("leased.json");
+        try {
+            Files.writeString(md, "persona");
+            Files.writeString(json, "{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"allowedTools\": [] }");
+            AgentId id = new AgentId("leased");
+            registry.getOrCreate(id);
+            LiveAgent leased = registry.lease(id);
+
+            // A reload of the file lands AFTER the lease is taken (a concurrent operator edit mid-turn).
+            Files.writeString(json, "{ \"primaryModel\": \"fake:new\", \"allowedTools\": [] }");
+            configChanged.fire(new ConfigurationChangedEvent(
+                    Path.of("agents", "leased.json"), ChangeType.MODIFIED));
+
+            // Inside the lease binding, the turn still observes the generation it leased — never the reload.
+            ModelRef insideLease = ScopedValue.where(AgentRegistry.CURRENT_AGENT_SPEC, leased)
+                    .call(() -> registry.persona(id).primaryModel());
+            assertEquals(ModelRef.parse("ollama:qwen3:1.7b"), insideLease,
+                    "an in-flight turn must observe its leased generation, not a concurrent reload");
+        } finally {
+            Files.deleteIfExists(md);
+            Files.deleteIfExists(json);
+            configChanged.fire(new ConfigurationChangedEvent(
+                    Path.of("agents", "leased.json"), ChangeType.DELETED));
+        }
+    }
+
+    @Test
     void spawnRejectsAChildIdEqualToTheParent() {
         AgentId main = new AgentId("main");
         registry.getOrCreate(main);

@@ -47,6 +47,18 @@ public class AgentRegistry {
 
     private static final Logger LOG = Logger.getLogger(AgentRegistry.class);
 
+    /**
+     * The per-turn agent snapshot lease (#178). Bound once at each turn entry ({@code TurnService.dispatch},
+     * {@code CronScheduler.fire}) to the {@link LiveAgent} generation the turn runs on; {@link #persona}/
+     * {@link #spec} return it (enforce-iff-bound — the P2-11 {@code CURRENT_EFFECTIVE_SCOPES} pattern) so
+     * every read for that turn observes one consistent generation even as {@link #onConfigChange} publishes
+     * newer ones. It lives here rather than on {@code CurrentAgent} because {@link LiveAgent} is in this
+     * package and a {@code context -> agent} import would create a package cycle; the registry is the
+     * lease's producer and consumer. A worker virtual thread does not inherit it ({@code ScopedValue}
+     * semantics), so a worker reads its own ephemeral child spec from the map — correct.
+     */
+    public static final ScopedValue<LiveAgent> CURRENT_AGENT_SPEC = ScopedValue.newInstance();
+
     @Inject
     AgentReader reader;
 
@@ -119,6 +131,12 @@ public class AgentRegistry {
      * entry. Throws if unregistered.
      */
     private LiveAgent live(AgentId id) {
+        if (CURRENT_AGENT_SPEC.isBound()) {
+            LiveAgent leased = CURRENT_AGENT_SPEC.get();
+            if (leased.persona().id().equals(id)) {
+                return leased; // the turn's frozen generation — immune to a concurrent reload
+            }
+        }
         LiveAgent found = specs.get(id);
         if (found == null) {
             throw new IllegalStateException(
