@@ -24,8 +24,6 @@ public class AgentToolBelt {
     @Inject
     ToolRegistry toolRegistry;
 
-    private volatile List<ToolSpec> filtered;
-
     /** The agent's {@code allowedTools} globs (immutable, from its persona). */
     public List<String> globs() {
         return registry.persona(CurrentAgent.CURRENT_AGENT.get()).allowedTools();
@@ -33,13 +31,12 @@ public class AgentToolBelt {
 
     /**
      * The filtered tools this agent may call — the global registry intersected with {@link #globs()}.
-     * Cached on first use: the bean is {@code @AgentScoped} and the result is immutable, so a concurrent
-     * first read at worst recomputes the same list (no lock, no pinning).
+     * Recomputed on each call from the CURRENT lease (#178): a turn calls this once, and two turns of the
+     * same agent running on different generations each filter their own leased globs, so a
+     * capability-reducing reload is never served a stale belt cached on the shared {@code @AgentScoped}
+     * bean. The filter is a cheap glob match over the registry; no cross-turn cache, no lock, no pinning.
      */
     public List<ToolSpec> tools() {
-        if (filtered == null) {
-            filtered = ToolFilter.filter(globs(), toolRegistry.all());
-        }
-        return filtered;
+        return ToolFilter.filter(globs(), toolRegistry.all());
     }
 }
