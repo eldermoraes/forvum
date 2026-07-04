@@ -95,32 +95,84 @@ class AgentRegistryTest {
     }
 
     @Test
-    void hotReloadEvictsAChangedAgentSoTheNextGetOrCreateRereadsIt() throws Exception {
+    void reloadPublishesAValidatedGenerationAtomicallyWithoutGetOrCreate() throws Exception {
         Path agents = AgentRegistryTestHomeProfile.HOME.resolve("agents");
-        Path md = agents.resolve("reloadable.md");
-        Path json = agents.resolve("reloadable.json");
+        Path md = agents.resolve("atomic.md");
+        Path json = agents.resolve("atomic.json");
         try {
             Files.writeString(md, "persona");
             Files.writeString(json, "{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"allowedTools\": [] }");
-
-            AgentId id = new AgentId("reloadable");
+            AgentId id = new AgentId("atomic");
             registry.getOrCreate(id);
-            assertEquals(ModelRef.parse("ollama:qwen3:1.7b"), registry.persona(id).primaryModel());
+            long gen0 = registry.generation(id);
 
-            Files.writeString(json, "{ \"primaryModel\": \"fake:test-model\", \"allowedTools\": [] }");
+            Files.writeString(json, "{ \"primaryModel\": \"fake:v2\", \"allowedTools\": [] }");
             configChanged.fire(new ConfigurationChangedEvent(
-                    Path.of("agents", "reloadable.json"), ChangeType.MODIFIED));
+                    Path.of("agents", "atomic.json"), ChangeType.MODIFIED));
 
-            registry.getOrCreate(id);
-            assertEquals(ModelRef.parse("fake:test-model"), registry.persona(id).primaryModel(),
-                    "a changed agent file must be re-read on the next getOrCreate");
+            // The publish is immediate — NO getOrCreate — and the generation advanced.
+            assertEquals(ModelRef.parse("fake:v2"), registry.persona(id).primaryModel(),
+                    "a reload publishes atomically for new turns with no getOrCreate");
+            assertTrue(registry.generation(id) > gen0, "a successful reload advances the generation");
         } finally {
-            // Keep the shared static seed home self-contained: drop this test's residue.
             Files.deleteIfExists(md);
             Files.deleteIfExists(json);
             configChanged.fire(new ConfigurationChangedEvent(
-                    Path.of("agents", "reloadable.json"), ChangeType.DELETED));
+                    Path.of("agents", "atomic.json"), ChangeType.DELETED));
         }
+    }
+
+    @Test
+    void anInvalidReloadKeepsTheLastKnownGoodAndDoesNotWiden() throws Exception {
+        Path agents = AgentRegistryTestHomeProfile.HOME.resolve("agents");
+        Path md = agents.resolve("keepsgood.md");
+        Path json = agents.resolve("keepsgood.json");
+        try {
+            Files.writeString(md, "persona");
+            Files.writeString(json,
+                    "{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"allowedTools\": [\"fs.read\"] }");
+            AgentId id = new AgentId("keepsgood");
+            registry.getOrCreate(id);
+            long failuresBefore = registry.reloadFailureCount();
+
+            // Malformed / half-written JSON (truncated) — a mid-write read.
+            Files.writeString(json,
+                    "{ \"primaryModel\": \"fake:v2\", \"allowedTools\": [\"fs.read\", \"web.");
+            configChanged.fire(new ConfigurationChangedEvent(
+                    Path.of("agents", "keepsgood.json"), ChangeType.MODIFIED));
+
+            assertEquals(ModelRef.parse("ollama:qwen3:1.7b"), registry.persona(id).primaryModel(),
+                    "an invalid reload must retain the last known-good spec");
+            assertEquals(List.of("fs.read"), registry.persona(id).allowedTools(),
+                    "an invalid reload must NOT widen capabilities");
+            assertTrue(registry.reloadFailureCount() > failuresBefore, "the failure is counted");
+        } finally {
+            Files.deleteIfExists(md);
+            Files.deleteIfExists(json);
+            configChanged.fire(new ConfigurationChangedEvent(
+                    Path.of("agents", "keepsgood.json"), ChangeType.DELETED));
+        }
+    }
+
+    @Test
+    void deletingAnAgentFileUnregistersItSoANewLeaseFails() throws Exception {
+        Path agents = AgentRegistryTestHomeProfile.HOME.resolve("agents");
+        Path md = agents.resolve("deletable.md");
+        Path json = agents.resolve("deletable.json");
+        Files.writeString(md, "persona");
+        Files.writeString(json, "{ \"primaryModel\": \"ollama:qwen3:1.7b\", \"allowedTools\": [] }");
+        AgentId id = new AgentId("deletable");
+        registry.getOrCreate(id);
+        assertTrue(registry.generation(id) >= 0, "the agent is registered before deletion");
+
+        Files.deleteIfExists(json);
+        configChanged.fire(new ConfigurationChangedEvent(
+                Path.of("agents", "deletable.json"), ChangeType.DELETED));
+
+        assertEquals(-1L, registry.generation(id), "a deleted agent is unregistered");
+        assertThrows(IllegalStateException.class, () -> registry.lease(id),
+                "a new turn leasing a deleted agent must fail (rejected new-turn)");
+        Files.deleteIfExists(md);
     }
 
     @Test
