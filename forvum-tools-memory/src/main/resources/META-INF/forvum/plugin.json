@@ -1,0 +1,7 @@
+{
+  "extension_id": "memory",
+  "module_name": "forvum-tools-memory",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.memory.MemoryToolProvider" }
+  ]
+}
