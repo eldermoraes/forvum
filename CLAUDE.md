@@ -348,6 +348,12 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **Security-test layer** under `forvum-app/.../security/`: prompt-injection → no tool escalation; path
   traversal → denied; spawn-boundary identity override → rejected; `PermissionScope` mismatch → denied
   + audited.
+- **CI security gates (#174):** per-PR = blocking `dependency-review` + `gitleaks` (with the
+  `**/src/test/**` fake-fixture allowlist) + `CodeQL` (Java + Actions) + `actionlint`/`shellcheck`
+  (`security.yml`/`codeql.yml`); weekly Trivy deep scan of the shipped image; release = CycloneDX SBOMs
+  (Maven closure + image) + OIDC build-provenance attestations (4 binaries + GHCR image) + a blocking
+  pre-push image scan (`release.yml`). Third-party Actions are SHA-pinned (Dependabot updates them).
+  Committed thresholds / SLA / suppression policy: `docs/SECURITY-GATES.md`.
 - **Concurrency discipline (§3.8):** **virtual threads first** — blocking, imperative code on virtual
   threads is the default model, not reactive programming; reactive types (Mutiny/Reactor) are allowed
   only at a framework-mandated boundary bridged to a VT, with a justification, and reactive code where

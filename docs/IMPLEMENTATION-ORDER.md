@@ -76,7 +76,7 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 
 ## Wave 4 — Security/CI test capstone *(once the controls exist)*
 
-16. **#174** `ci(security)`: supply-chain / secret / SAST / SBOM / provenance gates — follows #160; covers the build-side of #171.
+16. **#174** ✅ `ci(security)`: supply-chain / secret / SAST / SBOM / provenance gates — follows #160; covers the build-side of #171. *Done:* new `security.yml` (per-PR `dependency-review` + `gitleaks` + `actionlint`/`shellcheck`; push-`main` Maven dependency-graph submission → Dependabot alerts; weekly Trivy image+SBOM deep scan) + `codeql.yml` (Java + Actions SAST); `.gitleaks.toml` (`**/src/test/**` fake-fixture allowlist), `.trivyignore.yaml` (expiry-bound suppressions), `.github/dependabot.yml`; `release.yml` gains CycloneDX Maven+image SBOMs as release assets, a blocking pre-push image scan, and OIDC build-provenance attestations for the 4 binaries + the GHCR image; third-party Actions SHA-pinned across ci/qa/helm/release; parent `pom.xml` CycloneDX plugin (no phase binding); `Dockerfile.native` base digest-pinned; GitHub-side secret-scanning/push-protection/Dependabot enabled; committed policy in `docs/SECURITY-GATES.md`.
 17. **#180** `test(coverage)`: remove substantive exclusions, restore declared gates — test memory/compression against #175/#176 contracts.
 18. **#181** `test(live)`: schedule provider / browser / sandbox live tests in CI.
 19. **#182** `test(mutation)`: bounded mutation-testing signal + ratchet — depends on #180.
