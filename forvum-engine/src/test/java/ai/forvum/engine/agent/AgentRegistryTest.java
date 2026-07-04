@@ -155,6 +155,25 @@ class AgentRegistryTest {
     }
 
     @Test
+    void onConfigChangeIgnoresIrrelevantEventsAndNeverLoadedAgents() {
+        AgentId main = new AgentId("main");
+        registry.getOrCreate(main);
+        long gen = registry.generation(main);
+
+        // A non-agents subfolder event, a stray non-.md/.json file, a malformed stem, and a MODIFIED for a
+        // never-loaded agent are all no-ops — a loaded agent is untouched and an unloaded one stays lazy.
+        configChanged.fire(new ConfigurationChangedEvent(Path.of("roles", "x.json"), ChangeType.MODIFIED));
+        configChanged.fire(new ConfigurationChangedEvent(Path.of("agents", "notes.txt"), ChangeType.MODIFIED));
+        configChanged.fire(new ConfigurationChangedEvent(Path.of("agents", ".json"), ChangeType.MODIFIED));
+        configChanged.fire(new ConfigurationChangedEvent(
+                Path.of("agents", "never-loaded.json"), ChangeType.MODIFIED));
+
+        assertEquals(gen, registry.generation(main), "irrelevant reload events must not touch a loaded agent");
+        assertEquals(-1L, registry.generation(new AgentId("never-loaded")),
+                "a MODIFIED for a never-loaded agent stays lazy (not proactively loaded)");
+    }
+
+    @Test
     void deletingAnAgentFileUnregistersItSoANewLeaseFails() throws Exception {
         Path agents = AgentRegistryTestHomeProfile.HOME.resolve("agents");
         Path md = agents.resolve("deletable.md");

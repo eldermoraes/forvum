@@ -1884,3 +1884,43 @@ Generalizable lessons from completed milestones; append here as milestones land.
   touches no DB). Native EXECUTION of the retire path has no dedicated deterministic IT (the bundled `EchoModelProvider`
   never emits `spawn_worker`, and a native IT is out-of-process so it cannot inspect context liveness) — covered by
   JVM `@QuarkusTest` + native-COMPILEs/boots + the by-construction argument + the defensive warning. [#177]
+- **Atomic capability-safe hot-reload (#178) is a per-turn immutable LEASE + a snapshot-resident derived belt +
+  a validate-then-atomic-swap publish — NOT a refcount/drain.** The pre-#178 gap was that agent config was
+  re-read live at 4+ independent sites in one turn (`TurnService`, `Agent.respond`, `AgentToolBelt`, cron/workers),
+  the filtered belt was cached on the shared `@AgentScoped` `AgentToolBelt` bean (so a capability-REDUCING reload
+  was never revoked for the bean), and `onConfigChange` was a bare evict that a concurrent in-flight `persona`
+  read would miss-and-throw. Fix, four moves: (1) version each registry entry as an immutable
+  `LiveAgent(long generation, AgentSpec spec)` stamped by a monotonic `AtomicLong` (never reused → delete+recreate
+  is ABA-distinguishable); (2) a turn LEASES one generation at entry and binds it into
+  `AgentRegistry.CURRENT_AGENT_SPEC` (a `ScopedValue<LiveAgent>`) — `persona(id)`/`spec(id)` return the leased
+  snapshot when it is bound for that id (enforce-iff-bound, the P2-11 `CURRENT_EFFECTIVE_SCOPES` pattern), so ALL
+  the existing call-sites become coherent with ZERO edits to each; (3) drop `AgentToolBelt`'s `volatile filtered`
+  cache — the belt is recomputed from the lease per turn (called once, cheap glob match), so the derived state
+  lives in the GC-per-turn snapshot, not on the shared bean; (4) rewrite `onConfigChange` from evict-only to
+  atomic publish: rebuild the FULL spec OFF the lock, then `specs.replace` (the `ToolRegistry` volatile-swap
+  precedent) — an invalid/half-written file is DROPPED (`reloadFailureCount++`, keep the last-known-good, never
+  widen), `DELETED` removes + `destroyScope`s so a new `lease` throws (rejected new-turn) while in-flight turns
+  finish on their leased snapshot. Load-bearing decisions: **NO refcount/drain is needed** — because the derived
+  belt lives in the lease (not the `@AgentScoped` context), `destroyScope` on reload cannot disrupt an in-flight
+  turn (it holds an immutable `LiveAgent`), satisfying "destroy doesn't disrupt leases" without a drain
+  mechanism; the `@AgentScoped` context is keyed by `AgentId` (not generation), so "retire the OLD generation's
+  context after its leases" is only achievable by making the beans stateless-for-config (this design) rather than
+  re-keying the ArC context (invasive) — the issue's "recompute belts per generation" IS the stateless-belt fix.
+  The `ScopedValue` lives on `AgentRegistry`, not `CurrentAgent`, because `LiveAgent`/`AgentSpec` are in the
+  `agent` package and `agent`→`context` already exists, so a `context`→`agent` field would cycle the packages.
+  The two files of an agent (`.md`+`.json`) arrive as two separate `ConfigurationChangedEvent`s — rebuilding the
+  FULL spec on each is safe (every published generation is a complete, validated spec, never a cross-generation
+  field mix); a transient intermediate generation (new `.json` + old `.md`, if both parse) is valid, not partial.
+  A worker VT does not inherit the `ScopedValue`, so it reads its own ephemeral child spec from the map — correct
+  (child specs are immutable, never touched by `onConfigChange`, retired at turn end #177). Approval-resume
+  re-dispatches through `TurnService.dispatch`, so it leases the CURRENT (post-reload) generation — the safe
+  choice (a capability-reducing edit takes effect; the approved tool still passes the new config's gates).
+  TESTING split: the freeze MECHANISM is proven at the registry level (a bound lease keeps the old model after a
+  concurrent reload); the production BINDING is proven by a `LeaseProbeModelProvider` capturing
+  `CURRENT_AGENT_SPEC.isBound()` at chat time (red-check: delete the `.where(...)` and it flips false); an
+  in-flight turn completing when its agent is deleted mid-turn is a concurrent latch test. TRAP (the #167
+  stub-models-the-new-call discipline, hit again): `CronScheduler.fire` grew a `registry.lease(id)` call, so
+  `CronSchedulerTest`'s `@Vetoed StubRegistry` had to override `lease()` (reusing its `persona(id)`) or `fire`
+  caught the throw and silently dropped delivery. Native is the sanctioned [M4] `WatchService` OS-polling
+  carve-out — the deterministic event-fire is the tested path on both JVM and native; the reload machinery is
+  pure map/`ScopedValue` (no reflection), native-identical. [#178]
