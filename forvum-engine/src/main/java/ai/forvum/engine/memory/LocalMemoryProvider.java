@@ -91,6 +91,15 @@ public class LocalMemoryProvider extends AbstractMemoryProvider {
     }
 
     private List<MemoryHit> retrieveSemantic(MemoryQuery query, String identityId) {
+        // Read the embedded facts FIRST: if the agent/identity has nothing embedded to compare against, skip
+        // the (blocking) query-embed call entirely. This keeps the common empty-memory turn off the embedding
+        // model — critical for latency, since a query embed against an unavailable model would otherwise block
+        // the turn on a connect timeout (the per-turn latency gate would blow up), and it is a real
+        // optimization: no point paying an embed to cosine against zero rows.
+        List<EmbeddedFact> facts = semanticStore.embeddedFacts(identityId, query.agentId());
+        if (facts.isEmpty()) {
+            return List.of();
+        }
         float[] queryVector;
         try {
             EmbeddingModel model = embeddings.resolve(ModelRef.parse(embeddingModel));
@@ -104,7 +113,7 @@ public class LocalMemoryProvider extends AbstractMemoryProvider {
             return List.of();
         }
         List<MemoryHit> hits = new ArrayList<>();
-        for (EmbeddedFact fact : semanticStore.embeddedFacts(identityId, query.agentId())) {
+        for (EmbeddedFact fact : facts) {
             float[] factVector = VectorCodec.decode(fact.embedding());
             if (factVector == null || factVector.length != queryVector.length) {
                 continue; // a fact embedded by a different model (dimension drift) — skip, don't crash

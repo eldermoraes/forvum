@@ -8,6 +8,7 @@ import ai.forvum.core.MemoryQuery;
 import ai.forvum.core.MemoryTier;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.persistence.EpisodicMemoryEntity;
+import ai.forvum.engine.persistence.SemanticMemoryEntity;
 import ai.forvum.engine.persistence.SessionEntity;
 
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -48,6 +49,7 @@ class LocalMemoryProviderDegradeIT {
     void seed() {
         QuarkusTransaction.requiringNew().run(() -> {
             EpisodicMemoryEntity.delete("agentId = ?1", AGENT);
+            SemanticMemoryEntity.delete("agentId = ?1", AGENT);
             SessionEntity.delete("agentId = ?1", AGENT);
             SessionEntity session = new SessionEntity();
             session.id = "past";
@@ -65,6 +67,18 @@ class LocalMemoryProviderDegradeIT {
             episode.content = "u1 talked about Paris";
             episode.createdAt = now;
             episode.persist();
+            // An EMBEDDED semantic fact, so retrieveSemantic actually attempts the query-embed (which then
+            // fails on the broken model) — proving the embed-failure degrade path, not just the empty-store
+            // skip. Without a fact here the provider would short-circuit before the embed.
+            SemanticMemoryEntity fact = new SemanticMemoryEntity();
+            fact.identityId = "u1";
+            fact.agentId = AGENT;
+            fact.key = "user.city";
+            fact.value = "Berlin";
+            fact.embedding = new byte[] {1, 2, 3, 4};
+            fact.createdAt = now;
+            fact.updatedAt = now;
+            fact.persist();
         });
     }
 

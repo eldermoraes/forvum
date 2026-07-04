@@ -188,7 +188,13 @@ class ChannelLatencyGateTest {
 
         @Override
         public Map<String, String> getConfigOverrides() {
-            return Map.of("forvum.home", HOME.toString());
+            // Disable the off-turn memory write on the latency gate: it is fire-and-forget (never on the
+            // measured turn path), but with no Ollama on the CI runner its extraction attempts would block
+            // background virtual threads on a connect timeout and slow teardown. Retrieval stays on (with an
+            // empty store it skips the embed), so the gate still measures a turn that consults memory.
+            return Map.of(
+                    "forvum.home", HOME.toString(),
+                    "forvum.memory.write.enabled", "false");
         }
     }
 }

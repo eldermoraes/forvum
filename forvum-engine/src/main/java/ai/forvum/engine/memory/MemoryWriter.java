@@ -30,6 +30,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The off-turn Write phase of #175: after a turn completes, extract durable facts with the small model,
@@ -62,6 +63,9 @@ public class MemoryWriter {
 
     /** Best-effort backpressure: at most this many off-turn writes run at once (bounds Ollama/pool pressure). */
     private static final int MAX_CONCURRENT_WRITES = 4;
+
+    /** Grace window to drain in-flight writes on shutdown before force-cancelling them (see {@link #shutdown}). */
+    private static final long WRITE_DRAIN_SECONDS = 3;
 
     @Inject
     FactExtractor factExtractor;
@@ -162,8 +166,21 @@ public class MemoryWriter {
 
     @PreDestroy
     void shutdown() {
-        if (executor instanceof ExecutorService service) {
-            service.shutdown(); // in-flight best-effort writes are abandoned on shutdown (documented)
+        if (!(executor instanceof ExecutorService service)) {
+            return; // a test same-thread executor (Runnable::run) has nothing to drain
+        }
+        service.shutdown();
+        try {
+            // Drain in-flight writes so none outlives the app: a one-shot `forvum ask` gets a brief window
+            // to persist, and — critically — no write virtual thread lingers past shutdown to interfere with
+            // the next boot (in a @QuarkusMainTest the following launch shares this JVM; a lingering write
+            // touching the request context / EntityManager corrupts its startup). Force-cancel if it elapses.
+            if (!service.awaitTermination(WRITE_DRAIN_SECONDS, TimeUnit.SECONDS)) {
+                service.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            service.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 }
