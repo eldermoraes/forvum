@@ -1,6 +1,7 @@
 package ai.forvum.tools.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,30 +14,43 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * Dispatch + integration contract for {@link WebToolProvider#invoke(String, Map)} (M18 Option A): the
  * provider self-dispatches a tool call by name to the {@code WebFetchTool} / {@code WebSearchTool} logic
- * with no reflection, building the {@link EgressGuard} from the live {@code tools/web.json} spec. The
- * engine's {@code ToolExecutor} gates permission + audits; this test exercises the in-provider dispatch
- * directly against fakes (no network).
+ * with no reflection, building the {@link EgressGuard} and selecting the search backend from the live
+ * {@code tools/web.json} spec. The engine's {@code ToolExecutor} gates permission + audits; this test
+ * exercises the in-provider dispatch directly against fakes (no network).
  */
 class WebToolProviderTest {
 
+    /** A fake fetcher that echoes the requested URI for web.fetch and returns a DDG page for web.search. */
     private static final class FakeHttpFetcher implements HttpFetcher {
-        EgressGuard.Approved last;
+        String ddgBody = TestFixtures.load("ddg-results.html");
+        boolean ddgCalled = false;
+
         @Override
         public FetchResult get(EgressGuard.Approved approved) {
-            last = approved;
-            return new FetchResult(200, "text/plain", "body of " + approved.uri(),
-                    java.util.Optional.empty());
+            // web.fetch path: echo the URI so the caller can assert it.
+            return new FetchResult(200, "text/plain", "body of " + approved.uri(), Optional.empty());
+        }
+
+        @Override
+        public FetchResult get(EgressGuard.Approved approved, Map<String, String> headers) {
+            // web.search (DDG backend) path: 2-arg override is used, so this is the search.
+            ddgCalled = true;
+            return new FetchResult(200, "text/html", ddgBody, Optional.empty());
         }
     }
 
     private static final class FakeBraveApi implements BraveSearchApi {
         String lastKey;
+        boolean called = false;
         @Override
         public BraveSearchResponse search(String apiKey, String query, int count) {
+            called = true;
             lastKey = apiKey;
             return new BraveSearchResponse(new BraveWebResults(List.of(
                     new BraveWebResult("R", "https://r.example", "snip"))));
@@ -69,7 +83,7 @@ class WebToolProviderTest {
     @Test
     void invokeWebFetchDispatchesThroughEgressGuard() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of()));
 
         String out = provider.invoke("web.fetch", Map.of("url", "https://example.com/p"));
         assertTrue(out.contains("https://example.com/p"), out);
@@ -78,7 +92,7 @@ class WebToolProviderTest {
     @Test
     void invokeWebFetchToInternalIsRefused() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of()));
 
         assertThrows(EgressDeniedException.class,
                 () -> provider.invoke("web.fetch", Map.of("url", "http://127.0.0.1/secret")),
@@ -88,7 +102,7 @@ class WebToolProviderTest {
     @Test
     void invokeWebFetchToInternalAllowedWhenOptedIn() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), true, java.util.Set.of()));
+                new WebToolConfig.Spec(Optional.empty(), true, Set.of()));
 
         // allowPrivateNetwork=true: the egress guard permits the loopback target (the fake fetcher answers).
         String out = provider.invoke("web.fetch", Map.of("url", "http://127.0.0.1/ok"));
@@ -96,9 +110,20 @@ class WebToolProviderTest {
     }
 
     @Test
+    void invokeWebSearchDefaultsToDuckDuckGo() {
+        WebToolProvider provider = providerWith(
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of()));
+
+        String out = provider.invoke("web.search", Map.of("query", "rust async"));
+        assertTrue(((FakeHttpFetcher) provider.fetcher).ddgCalled, "the keyless default reaches DuckDuckGo");
+        assertFalse(((FakeBraveApi) provider.braveApi).called, "Brave is not called with no key");
+        assertTrue(out.contains("Tokio"), out);
+    }
+
+    @Test
     void invokeWebSearchUsesConfiguredKey() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.of("CFG-KEY"), false, java.util.Set.of()));
+                new WebToolConfig.Spec(Optional.of("CFG-KEY"), false, Set.of()));
 
         String out = provider.invoke("web.search", Map.of("query", "q"));
         assertTrue(out.contains("R"), out);
@@ -106,18 +131,20 @@ class WebToolProviderTest {
     }
 
     @Test
-    void invokeWebSearchInertWithNoKey() {
+    void invokeWebSearchBraveBackendWithNoKeyReturnsMessageAndDoesNotCall() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of(), Optional.of("brave")));
 
         String out = provider.invoke("web.search", Map.of("query", "q"));
-        assertTrue(out.toLowerCase().contains("not configured"), out);
+        assertFalse(((FakeBraveApi) provider.braveApi).called, "no key → no Brave call");
+        assertFalse(((FakeHttpFetcher) provider.fetcher).ddgCalled, "config-shaped: no DDG call either");
+        assertTrue(out.contains("braveApiKey"), out);
     }
 
     @Test
     void invokeUnknownToolThrows() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of()));
 
         assertThrows(IllegalArgumentException.class,
                 () -> provider.invoke("web.crawl", Map.of("url", "x")),
@@ -127,7 +154,7 @@ class WebToolProviderTest {
     @Test
     void invokeMissingRequiredArgThrows() {
         WebToolProvider provider = providerWith(
-                new WebToolConfig.Spec(java.util.Optional.empty(), false, java.util.Set.of()));
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of()));
 
         assertThrows(IllegalArgumentException.class,
                 () -> provider.invoke("web.fetch", Map.of()),

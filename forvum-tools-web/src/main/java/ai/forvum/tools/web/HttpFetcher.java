@@ -1,5 +1,6 @@
 package ai.forvum.tools.web;
 
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -25,6 +26,20 @@ public interface HttpFetcher {
      * @throws java.io.UncheckedIOException on a network/IO failure (no key/URL detail beyond the host)
      */
     FetchResult get(EgressGuard.Approved approved);
+
+    /**
+     * As {@link #get(EgressGuard.Approved)} but overriding/adding request headers ({@code web.search}'s DDG
+     * backend passes a browser-like {@code User-Agent}, #192). A header here REPLACES the implementation's
+     * default of the same name (e.g. the {@code User-Agent}); the default keeps the honest Forvum UA for
+     * {@code web.fetch}. Defaults to {@link #get(EgressGuard.Approved)} so the existing test fakes — which
+     * implement only the 1-arg method — compile unchanged ([#166] default-method recipe); the production
+     * {@link JdkHttpFetcher} overrides it.
+     *
+     * @throws java.io.UncheckedIOException on a network/IO failure (no key/URL detail beyond the host)
+     */
+    default FetchResult get(EgressGuard.Approved approved, Map<String, String> headers) {
+        return get(approved);
+    }
 
     /**
      * A single-hop HTTP response: the status, the resolved content type, the decoded text body, and the

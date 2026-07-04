@@ -13,6 +13,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -56,6 +57,11 @@ public class JdkHttpFetcher implements HttpFetcher {
 
     @Override
     public FetchResult get(EgressGuard.Approved approved) {
+        return get(approved, Map.of());
+    }
+
+    @Override
+    public FetchResult get(EgressGuard.Approved approved, Map<String, String> headers) {
         URI uri = approved.uri();
         InetAddress pin = approved.pinnedAddress();
         boolean http = "http".equalsIgnoreCase(uri.getScheme());
@@ -65,6 +71,12 @@ public class JdkHttpFetcher implements HttpFetcher {
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8")
                 .GET();
+
+        // Apply per-request overrides AFTER the defaults, using setHeader so a same-named header (e.g. a
+        // browser User-Agent from web.search's DDG backend) REPLACES the default rather than duplicating it.
+        if (headers != null) {
+            headers.forEach(builder::setHeader);
+        }
 
         if (http && pin != null) {
             // B2: connect to the validated literal IP, present the original host as the Host header.
