@@ -24,6 +24,8 @@
 #     no status-bearing doc may frame release SBOM/provenance as a named deferral (the DR-6c round file
 #     keeps the pre-#174 deliberation text and, like docs/ISSUES.md, is deliberately not scanned; the SBOM
 #     *attestation* follow-up lives only in docs/SECURITY-GATES.md, also unscanned).
+#     `web.search` has a pluggable module-internal backend with a KEYLESS DuckDuckGo default (#192) — no doc
+#     may frame Brave as the sole backend or the pluggable/keyless default as an unshipped fast-follow.
 #
 # `docs/ISSUES.md` is deliberately NOT scanned: it preserves each step's ORIGINAL proposal as historical
 # text, distinguished from as-built reality by the marker legend at the top of that file.
@@ -94,6 +96,11 @@ ban "three-tier memory loop (#175) stated as not-wired / recordFact unused" \
 #    and lives in the unscanned docs/SECURITY-GATES.md anyway).
 ban "release SBOM/provenance (#174) stated as a named deferral" \
     'SBOM[^.|]{0,40}provenance[^.|]{0,50}(deferral|deferred)'
+
+# 10. web.search has a pluggable backend with a keyless DuckDuckGo default (#192) — no scanned doc may frame
+#     Brave as the only backend, or the pluggable-backend / keyless default as an unshipped fast-follow.
+ban "web.search pluggable backend (#192) stated as Brave-only / an unshipped fast-follow" \
+    'brave is the (single|only) (concrete )?search backend|.?pluggable search backend.? is a (documented )?fast-follow|web\.search[^.|]{0,60}brave search api over a blocking rest client'
 
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."

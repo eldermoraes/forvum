@@ -1955,3 +1955,44 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `dependency-review-action@v5` is a major BRANCH upstream (no v5 tag) — describe GitHub-authored refs
   accurately. GitHub-side settings (secret scanning, push protection, Dependabot alerts/updates) are `gh api`
   PATCHes — half the acceptance criteria live in repo settings, not YAML. [#174]
+- **A pluggable web-search backend is a MODULE-INTERNAL seam (not a public SDK SPI) + an HTML-scrape keyless
+  default, and its single most dangerous edge is flipping `web.search` from inert to network-on-invoke.** #192
+  added a package-private `WebSearchBackend` interface INSIDE `forvum-tools-web` (the issue BINDS the placement
+  — swapping the search provider is an implementation detail, not a new Layer-1 contract), with two impls:
+  `DuckDuckGoBackend` (keyless HTML scrape of `html.duckduckgo.com/html`, the DEFAULT so search works with no
+  key) and `BraveBackend` (the existing keyed `BraveSearchApi`). Precedence (issue wording): an explicit
+  `tools/web.json` `"backend"` wins, else a `braveApiKey` selects `brave`, else `duckduckgo`. Load-bearing
+  decisions/traps: (1) **The keyless default is the trap** — with no config `web.search` now dials the internet,
+  so the module's own no-config `@QuarkusTest` wiring IT (which INVOKED `web.search` and asserted "not configured")
+  would make CI dial DDG. RE-POINT it: seed `tools/web.json = {"backend":"brave"}` (no key) so the invoke resolves
+  to the config-shaped message with ZERO network (grep for every `web.search` invoker before merging — engine hits
+  are name-only belt-glob fixtures, unaffected). Boot inertness is UNCHANGED (config read on demand, no `@Startup`),
+  only default-leg *invocation* changed. (2) **Never a naive `new HttpClient` ([TOOLS-WEB])** — the DDG backend
+  reuses the module's `EgressGuard`(strict, `allowPrivateNetwork` NOT honored since the host is fixed public) +
+  `HttpFetcher`, composing the URL from the FIXED host + `URLEncoder.encode(query)` (the encode IS the input
+  sanitization — the model query can only ride as an encoded param), with a bounded ≤3-redirect loop mirroring
+  `WebFetchTool` (per-hop guard re-check + HTTPS→HTTP downgrade refusal). The **downgrade refusal fires BEFORE the
+  private-IP check**, so a test meaning to prove the guard denies a loopback redirect must target `https://127.0.0.1`
+  (HTTPS) — an `http://` loopback redirect is refused as a downgrade first (a real ordering finding the test caught).
+  (3) **Per-request header override** via a new `default FetchResult get(approved, Map headers)` on `HttpFetcher`
+  (the [#166] default-method recipe, so the two existing test fakes compile unchanged); `JdkHttpFetcher` overrides it
+  applying extras with `setHeader` (REPLACE, not `header`/append) so the DDG browser-UA (OpenClaw parity — lowers the
+  challenge rate on `html.duckduckgo.com`) supplants the honest `Forvum/…` UA on THIS request only. (4) **ZERO new
+  reflection surface** — DDG is HTML→String, so `SearchResult` is a plain internal record deliberately OUTSIDE the
+  `.dto` package with NO `@RegisterForReflection` (the `EgressGuard.Approved` precedent; keeps
+  `.github/reflection-registration.sh`, which greps `.dto.` records, clean). The parser is a faithful Java port of
+  OpenClaw's `ddg-client.ts` regex contract (`result__a`/`result__snippet`, `uddg` unwrap incl. scheme-relative
+  `//`, entity decode, tag strip, `isBotChallenge` = challenge markers only when NO `result__a`). (5) **Degrade
+  contract:** config-shaped (Brave-no-key / unknown backend) RETURNS an actionable message + no network; runtime
+  (non-200 / bot-challenge / zero-parse-from-nonempty = markup drift / redirect cap) THROWS `WebSearchException`
+  (audited `error`, rendered to the model, turn completes); a genuine `no-results` page returns `"no results."`.
+  Fixtures cover results/no-results/challenge/DRIFTED markup ([M4] fixture-realism), not just the happy page. (6) The
+  trailing `Optional<String> searchBackend` on `Spec` gets a 3-arg delegating ctor so the 8+ existing `new Spec(...)`
+  sites compile unchanged ([#170]); `backend` parsing is LENIENT (raw string, resolved only on the search path) so a
+  bad value can't break `web.fetch`, which shares `read()`. (7) `javac` REJECTS `catch (NumberFormatException |
+  IllegalArgumentException)` — NFE is a subclass of IAE, so a multi-catch relating them fails to compile; catch the
+  supertype alone (a "verify the real BUILD SUCCESS/FAILURE, not the pipe exit" catch — a green notification hid a
+  compile failure). (8) **Native + live-test placement** ([M20/Risk#5], [OQ2]): native proof is the local `-Pnative`
+  build + boot-inert + ONE manual live keyless run against the binary with evidence in the PR — the live keyless
+  search is a module `@Tag("live")` test (nightly/manual, scheduled by #181), NOT the per-PR `native-turn` job (a
+  third-party endpoint that challenges datacenter IPs would make that gate permanently flaky). [#192]
