@@ -19,10 +19,12 @@ import java.util.List;
  * bean. A plain (non-sealed) interface: the engine is the sole implementor, so there is no closed
  * implementor set to seal.
  *
- * <p>Reuses #175's storage/provider contract exactly — no second index, no parallel schema. Both calls are
- * scoped to the current turn's identity/agent (read from the engine's scope bindings), so neither can cross
- * a tenant boundary. {@code forvum-sdk} is Quarkus-free; the contract takes/returns only Layer-0 types
- * ({@link MemoryHit}) + JDK types, so it is reflection-free and native-safe.
+ * <p>Reuses #175's local storage (the {@code semantic_memory} index + the local {@code MemoryProvider}) —
+ * no second index, no parallel schema. Both calls target the local store so a deliberate save→recall
+ * round-trips regardless of any configured external provider. Both are scoped to the current turn's
+ * identity/agent (read from the engine's scope bindings), so neither can cross a tenant boundary.
+ * {@code forvum-sdk} is Quarkus-free; the contract takes/returns only Layer-0 types ({@link MemoryHit}) +
+ * JDK types, so it is reflection-free and native-safe.
  */
 public interface MemoryAccess {
 

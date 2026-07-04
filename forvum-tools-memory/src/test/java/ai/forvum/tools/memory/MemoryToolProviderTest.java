@@ -32,6 +32,20 @@ class MemoryToolProviderTest {
     }
 
     @Test
+    void reportsTheMemoryExtensionId() {
+        assertEquals("memory", providerWith(new FakeMemoryAccess()).extensionId());
+    }
+
+    @Test
+    void saveRejectsABlankKeyOrValueWithoutTouchingTheSeam() {
+        FakeMemoryAccess memory = new FakeMemoryAccess();
+        String result = providerWith(memory).invoke("memory.save", Map.of("key", "", "value", "x"));
+
+        assertTrue(memory.saved.isEmpty(), "a blank key never reaches the seam");
+        assertTrue(result.toLowerCase().contains("required"), "the model is told a key and value are required");
+    }
+
+    @Test
     void contributesSaveAndRecallWithTheCorrectScopes() {
         List<ToolSpec> tools = providerWith(new FakeMemoryAccess()).tools();
         assertEquals(2, tools.size());

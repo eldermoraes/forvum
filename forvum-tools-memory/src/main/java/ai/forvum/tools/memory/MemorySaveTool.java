@@ -25,6 +25,9 @@ public final class MemorySaveTool {
     }
 
     static String save(MemoryAccess memory, String key, String value) {
+        if (key == null || key.isBlank() || value == null || value.isBlank()) {
+            return "Both a non-empty key and value are required to save a memory.";
+        }
         boolean stored = memory.save(key, value);
         return stored
                 ? "Saved fact '" + key + "'."

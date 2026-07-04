@@ -10,7 +10,6 @@ import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.memoryquery.EmbeddingSelector;
 import ai.forvum.engine.memoryquery.SemanticMemoryStore;
 import ai.forvum.engine.memoryquery.VectorCodec;
-import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.security.OutputFilteredException;
 import ai.forvum.engine.security.OutputGuardChain;
 import ai.forvum.sdk.HookLayer;
@@ -31,14 +30,16 @@ import java.util.List;
  * mid-turn write/read surface on the EXISTING #175 machinery, introducing no second index and no parallel
  * schema:
  * <ul>
- *   <li><b>save</b> mirrors {@code MemoryWriter.persistFact} exactly — run the value through the DR-6a
+ *   <li><b>save</b> mirrors {@code MemoryWriter.persistFact} — run the value through the DR-6a
  *       pre-memory-write {@link OutputGuardChain} (redact secrets/PII; a Blocked value is not stored),
  *       embed it, and upsert it into {@code semantic_memory} via the same {@link SemanticMemoryStore#upsertFact}
- *       the off-turn Write phase uses.</li>
- *   <li><b>recall</b> delegates to {@link MemorySelector#retrieve} — the same Select path the automatic
- *       pre-prompt retrieval uses (external provider if active, else the local default) — so a saved fact
- *       is retrieved through the installed provider's ranking, and a provider failure degrades to an empty
- *       list rather than failing the turn.</li>
+ *       the off-turn Write phase uses (always the LOCAL store — the {@code MemoryProvider} SPI is
+ *       retrieve-only, so there is no external write path).</li>
+ *   <li><b>recall</b> reads the LOCAL {@link LocalMemoryProvider} directly — deliberately NOT the
+ *       {@code MemorySelector}, which would prefer an active external provider (e.g. Qdrant) and break the
+ *       tool's save→recall round-trip, since save can only write local. The explicit memory tool is thus a
+ *       local-store surface (an external provider stays the out-of-band auto-retrieval index, #175); a
+ *       provider failure degrades to an empty list rather than failing the turn.</li>
  * </ul>
  *
  * <p>The tool runs inside a turn, on the turn's virtual thread, so {@code CURRENT_AGENT} /
@@ -72,7 +73,7 @@ public class EngineMemoryAccess implements MemoryAccess {
     OutputGuardChain outputGuards;
 
     @Inject
-    MemorySelector memorySelector;
+    LocalMemoryProvider localMemory;
 
     @ConfigProperty(name = "forvum.memory.embedding-model", defaultValue = "ollama:nomic-embed-text")
     String embeddingModel;
@@ -92,6 +93,11 @@ public class EngineMemoryAccess implements MemoryAccess {
             LOG.debugf("memory.save value for key '%s' blocked by the pre-memory-write guard; not stored.", key);
             return false;
         }
+        // Two deliberate divergences from the best-effort MemoryWriter (documented, not oversights): (1) an
+        // embedding-model failure here PROPAGATES — surfaced to the model as a tool error, since a deliberate
+        // save that silently returns "saved" without indexing (or is swallowed) is worse than an honest
+        // failure the model can report; (2) this explicit surface is NOT gated by forvum.memory.write.enabled
+        // (which governs only the automatic writer) — belt membership + the MEMORY_WRITE scope are its opt-in.
         byte[] embedding = VectorCodec.encode(
                 embeddings.resolve(ModelRef.parse(embeddingModel)).embed(stored).content().vector());
         semanticStore.upsertFact(identityId, agentId.value(), key, stored, SOURCE, embedding);
@@ -100,8 +106,21 @@ public class EngineMemoryAccess implements MemoryAccess {
 
     @Override
     public List<MemoryHit> recall(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of(); // MemoryQuery rejects blank text; a blank recall means "nothing", not an error.
+        }
         AgentId agentId = CurrentAgent.CURRENT_AGENT.get();
         MemoryQuery mq = new MemoryQuery(agentId.value(), RECALL_SESSION, query);
-        return memorySelector.retrieve(mq, MemoryPolicy.defaults());
+        try {
+            // Read the LOCAL provider directly (the store memory.save writes), NOT MemorySelector, so a
+            // deliberate save->recall round-trips even when an external provider is the active auto-retrieval
+            // path. MemoryPolicy.defaults() (not the persona's policy) is intentional: the explicit tool is
+            // governed by belt membership, orthogonal to the agent's auto-retrieval config — it works even
+            // for a strategy=NONE agent. Degrade to empty on any provider failure (no leak, no turn abort).
+            return localMemory.retrieve(mq, MemoryPolicy.defaults());
+        } catch (RuntimeException e) {
+            LOG.warnf(e, "memory.recall failed for agent '%s'; returning no hits.", agentId.value());
+            return List.of();
+        }
     }
 }

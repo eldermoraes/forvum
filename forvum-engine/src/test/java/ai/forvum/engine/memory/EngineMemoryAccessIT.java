@@ -73,6 +73,12 @@ class EngineMemoryAccessIT {
                 "the raw secret must be redacted by the DR-6a pre-memory-write filter before storage");
     }
 
+    @Test
+    void recallOfABlankQueryDegradesToEmptyInsteadOfThrowing() {
+        List<MemoryHit> hits = as("u1", () -> memory.recall("   "));
+        assertTrue(hits.isEmpty(), "a blank recall query returns no hits, not an IllegalStateException");
+    }
+
     private <T> T as(String identity, Supplier<T> body) {
         return ScopedValue.where(CurrentIdentity.CURRENT_IDENTITY_ID, identity)
                 .where(CurrentAgent.CURRENT_AGENT, AGENT)
