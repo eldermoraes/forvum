@@ -33,6 +33,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Application-scoped registry of file-declared agents (ULTRAPLAN section 5.2). Agents live as
@@ -56,7 +57,14 @@ public class AgentRegistry {
     TaskExecutor taskExecutor;
 
     private final AgentSpecReader specReader = new AgentSpecReader();
-    private final ConcurrentMap<AgentId, AgentSpec> specs = new ConcurrentHashMap<>();
+
+    /** Monotonic generation stamps — never reused, so a delete+recreate of an id is ABA-distinguishable (#178). */
+    private final AtomicLong nextGeneration = new AtomicLong();
+
+    /** Count of hot-reload rebuilds that failed validation and kept the last-known-good spec (#178). */
+    private final AtomicLong reloadFailures = new AtomicLong();
+
+    private final ConcurrentMap<AgentId, LiveAgent> specs = new ConcurrentHashMap<>();
 
     /**
      * The live ephemeral-worker ids (#177). {@link #spawn} adds; {@link #retire} removes. This set is the
@@ -76,7 +84,7 @@ public class AgentRegistry {
      */
     public Agent getOrCreate(AgentId id) {
         if (specs.get(id) == null) {
-            specs.putIfAbsent(id, load(id));
+            specs.putIfAbsent(id, new LiveAgent(nextGeneration.incrementAndGet(), load(id)));
         }
         return agent;
     }
@@ -92,13 +100,32 @@ public class AgentRegistry {
      * {@code spec(id).cycle()}; most callers want only {@link #persona(AgentId)}.
      */
     public AgentSpec spec(AgentId id) {
-        AgentSpec spec = specs.get(id);
-        if (spec == null) {
+        return live(id).spec();
+    }
+
+    /**
+     * The current registered {@link LiveAgent} generation for {@code id}, to be bound into
+     * {@link #CURRENT_AGENT_SPEC} at a turn entry so the whole turn reads one frozen generation (#178).
+     * Throws if {@code id} is not registered (a deleted or never-loaded agent) — the caller surfaces that
+     * as a terminal turn error (rejected new-turn).
+     */
+    public LiveAgent lease(AgentId id) {
+        return live(id);
+    }
+
+    /**
+     * The generation a read resolves to: the per-turn leased snapshot when {@link #CURRENT_AGENT_SPEC} is
+     * bound for {@code id} (so an in-flight turn is immune to a concurrent reload), else the current map
+     * entry. Throws if unregistered.
+     */
+    private LiveAgent live(AgentId id) {
+        LiveAgent found = specs.get(id);
+        if (found == null) {
             throw new IllegalStateException(
                     "Agent '" + id.value() + "' is not registered — call getOrCreate(\""
                   + id.value() + "\") first.");
         }
-        return spec;
+        return found;
     }
 
     /**
@@ -148,7 +175,8 @@ public class AgentRegistry {
         Persona child = new Persona(childId, parent.systemPrompt(), allowedTools,
                 parent.primaryModel(), parentId, childBudget, parent.toolBudget(), null,
                 parent.fallbackModels(), parent.memoryPolicy(), parent.roles(), parent.identityId());
-        if (specs.putIfAbsent(childId, new AgentSpec(child, null)) != null) {
+        if (specs.putIfAbsent(childId, new LiveAgent(nextGeneration.incrementAndGet(),
+                new AgentSpec(child, null))) != null) {
             throw new IllegalStateException(
                     "spawn: agent id '" + childId.value() + "' is already registered; choose a distinct "
                   + "child id (spawn never overwrites an existing agent).");
