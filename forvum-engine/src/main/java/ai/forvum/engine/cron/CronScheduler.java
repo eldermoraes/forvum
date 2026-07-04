@@ -4,6 +4,7 @@ import ai.forvum.core.PermissionScope;
 import ai.forvum.core.Persona;
 import ai.forvum.engine.agent.Agent;
 import ai.forvum.engine.agent.AgentRegistry;
+import ai.forvum.engine.agent.LiveAgent;
 import ai.forvum.engine.agent.RoleRegistry;
 import ai.forvum.engine.config.ChangeType;
 import ai.forvum.engine.config.ChannelReader;
@@ -158,7 +159,10 @@ public class CronScheduler {
         String reply;
         try {
             Agent agent = registry.getOrCreate(spec.agentId());
-            Persona persona = registry.persona(spec.agentId());
+            // #178: lease ONE immutable generation and bind it (below) for the whole cron turn, so a
+            // mid-turn hot reload of this agent cannot split the persona/scopes/model/belt across generations.
+            LiveAgent leased = registry.lease(spec.agentId());
+            Persona persona = leased.persona();
             // #169: a cron turn is governed by the SAME per-agent costBudget as a channel turn — the
             // cron's own model is resolved budget-gated, so an exhausted agent cannot keep burning spend
             // through its schedule (the catch below records the ERROR task and skips delivery).
@@ -179,6 +183,7 @@ public class CronScheduler {
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, effectiveScopes)
                     .where(CurrentIdentity.CURRENT_IDENTITY_ID, CurrentIdentity.DEFAULT_IDENTITY)
                     .where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE)
+                    .where(AgentRegistry.CURRENT_AGENT_SPEC, leased)
                     .call(() -> agent.respond(sessionId, spec.prompt(), model));
             // Record the cron task ONLY after the turn succeeds (persist-after-success; the turn's own
             // ledger rows survive in their own transactions, and a failed turn's ERROR task is recorded

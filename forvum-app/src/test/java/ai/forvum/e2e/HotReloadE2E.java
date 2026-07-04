@@ -27,17 +27,18 @@ import java.nio.file.Path;
 import java.util.Map;
 
 /**
- * E2E scenario 9 (ULTRAPLAN §7.4 / X6): hot reload without restart (M4 + M7). An edit to an
+ * E2E scenario 9 (ULTRAPLAN §7.4 / X6): hot reload without restart (M4 + M7 + #178). An edit to an
  * {@code agents/<id>.json} file under {@code $FORVUM_HOME}, surfaced as the M4 {@code WatchService}'s
- * {@code ConfigurationChangedEvent}, evicts the {@code AgentRegistry}'s cached spec so the NEXT turn
- * re-reads the agent from disk — no process restart.
+ * {@code ConfigurationChangedEvent}, is validated and published ATOMICALLY (#178) so the NEXT turn runs on
+ * the new generation — no process restart, and no {@code getOrCreate} needed to see it.
  *
  * <p>Driven end-to-end in the assembled app: a real turn runs against the originally-pinned fake model,
  * then {@code main.json} is rewritten to a different model id and the config-changed event is fired (the
  * deterministic stand-in for the OS file watcher — the macOS poll latency makes a real watcher non-
  * deterministic, so the e2e fires the same CDI event the watcher would, the discipline used by the engine
- * {@code AgentRegistryTest} reload test). The next {@code persona()} reflects the NEW model, and a second
- * turn still converses through the reloaded spec — proving the agent reloaded live.
+ * {@code AgentRegistryTest} reload test). The reload is published atomically — {@code persona()} reflects
+ * the NEW model IMMEDIATELY (superseding the old evict-and-relazy behavior) — and a second turn still
+ * converses through the reloaded spec, proving the agent reloaded live.
  *
  * <p>Both model ids resolve through the in-process {@code FakeModelProvider} (extension {@code fake}), so
  * the post-reload turn needs no LLM (the suite excludes inference, per the perf-gate convention) while the
@@ -70,10 +71,10 @@ class HotReloadE2E {
         Files.writeString(json, "{ \"primaryModel\": \"fake:reloaded-model\", \"allowedTools\": [] }");
         configChanged.fire(new ConfigurationChangedEvent(Path.of("agents", "main.json"), ChangeType.MODIFIED));
 
-        // The next access re-reads the changed file — no restart.
-        registry.getOrCreate(main);
+        // #178: the reload is published atomically — the new generation is visible to new turns IMMEDIATELY,
+        // with NO getOrCreate (superseding the old evict-and-relazy behavior).
         assertEquals(ModelRef.parse("fake:reloaded-model"), registry.persona(main).primaryModel(),
-                "a changed agent file must be re-read on the next turn (hot reload, no restart)");
+                "a changed agent file is published atomically (hot reload, no restart, no getOrCreate)");
 
         // And the reloaded agent still converses end-to-end (the new model id also resolves to fake).
         String secondReply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, main)

@@ -164,7 +164,11 @@ public class TurnService implements ChannelTurnDriver {
             Optional<Device> device = devices.authenticate(message.channelId(), credential);
 
             registry.getOrCreate(agentId);
-            Persona persona = registry.persona(agentId);
+            // #178: lease ONE immutable generation at entry and bind it (below) for the whole turn, so every
+            // config read — scopes here, then persona/belt/model inside agent.respond — resolves the same
+            // generation even if an operator hot-reloads this agent mid-turn.
+            LiveAgent leased = registry.lease(agentId);
+            Persona persona = leased.persona();
             // #168 identity precedence: a resolved channel identity, else the agent's declared identityId
             // fallback, else the deliberately restricted anonymous identity. Fails CLOSED (throws) when the
             // agent names an undefined fallback, so an unresolved user never escalates to the permissive
@@ -223,6 +227,7 @@ public class TurnService implements ChannelTurnDriver {
                     .where(CurrentAgent.CURRENT_USER_MESSAGE, userMessage)
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, effectiveScopes)
                     .where(CurrentIdentity.CURRENT_IDENTITY_ID, tenantIdentity)
+                    .where(AgentRegistry.CURRENT_AGENT_SPEC, leased)
                     .call(() -> agent.respond(sessionId, message.content()));
 
             // P2-OUTPUTGUARD pre-channel-emit seam (DR-6a §9.2): run the composed OutputGuard chain over

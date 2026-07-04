@@ -12,6 +12,8 @@ import ai.forvum.core.budget.DayWindow;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.agent.Agent;
 import ai.forvum.engine.agent.AgentRegistry;
+import ai.forvum.engine.agent.AgentSpec;
+import ai.forvum.engine.agent.LiveAgent;
 import ai.forvum.engine.agent.RoleRegistry;
 import ai.forvum.engine.routing.LlmSelector;
 import ai.forvum.engine.runtime.CommandMode;
@@ -180,6 +182,13 @@ class CronSchedulerTest {
         public Persona persona(AgentId id) {
             return new Persona(id, "stub persona", List.of(), ModelRef.parse("fake:m"), null, costBudget,
                     null, null);
+        }
+
+        // #178: fire() now leases one generation and reads the persona off it. Model that call on the stub
+        // (the [#167] "a grown collaborator call must be modeled by every hand-built stub" discipline).
+        @Override
+        public LiveAgent lease(AgentId id) {
+            return new LiveAgent(0L, new AgentSpec(persona(id), null));
         }
     }
 
