@@ -11,6 +11,7 @@ import ai.forvum.core.budget.SessionWindow;
 import ai.forvum.core.budget.SpawnConfigurationException;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.config.AgentReader;
+import ai.forvum.engine.config.ChangeType;
 import ai.forvum.engine.config.ConfigurationChangedEvent;
 import ai.forvum.engine.context.AgentContext;
 import ai.forvum.engine.context.CurrentAgent;
@@ -33,6 +34,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Application-scoped registry of file-declared agents (ULTRAPLAN section 5.2). Agents live as
@@ -46,6 +48,18 @@ public class AgentRegistry {
 
     private static final Logger LOG = Logger.getLogger(AgentRegistry.class);
 
+    /**
+     * The per-turn agent snapshot lease (#178). Bound once at each turn entry ({@code TurnService.dispatch},
+     * {@code CronScheduler.fire}) to the {@link LiveAgent} generation the turn runs on; {@link #persona}/
+     * {@link #spec} return it (enforce-iff-bound — the P2-11 {@code CURRENT_EFFECTIVE_SCOPES} pattern) so
+     * every read for that turn observes one consistent generation even as {@link #onConfigChange} publishes
+     * newer ones. It lives here rather than on {@code CurrentAgent} because {@link LiveAgent} is in this
+     * package and a {@code context -> agent} import would create a package cycle; the registry is the
+     * lease's producer and consumer. A worker virtual thread does not inherit it ({@code ScopedValue}
+     * semantics), so a worker reads its own ephemeral child spec from the map — correct.
+     */
+    public static final ScopedValue<LiveAgent> CURRENT_AGENT_SPEC = ScopedValue.newInstance();
+
     @Inject
     AgentReader reader;
 
@@ -56,7 +70,14 @@ public class AgentRegistry {
     TaskExecutor taskExecutor;
 
     private final AgentSpecReader specReader = new AgentSpecReader();
-    private final ConcurrentMap<AgentId, AgentSpec> specs = new ConcurrentHashMap<>();
+
+    /** Monotonic generation stamps — never reused, so a delete+recreate of an id is ABA-distinguishable (#178). */
+    private final AtomicLong nextGeneration = new AtomicLong();
+
+    /** Count of hot-reload rebuilds that failed validation and kept the last-known-good spec (#178). */
+    private final AtomicLong reloadFailures = new AtomicLong();
+
+    private final ConcurrentMap<AgentId, LiveAgent> specs = new ConcurrentHashMap<>();
 
     /**
      * The live ephemeral-worker ids (#177). {@link #spawn} adds; {@link #retire} removes. This set is the
@@ -76,7 +97,7 @@ public class AgentRegistry {
      */
     public Agent getOrCreate(AgentId id) {
         if (specs.get(id) == null) {
-            specs.putIfAbsent(id, load(id));
+            specs.putIfAbsent(id, new LiveAgent(nextGeneration.incrementAndGet(), load(id)));
         }
         return agent;
     }
@@ -92,13 +113,38 @@ public class AgentRegistry {
      * {@code spec(id).cycle()}; most callers want only {@link #persona(AgentId)}.
      */
     public AgentSpec spec(AgentId id) {
-        AgentSpec spec = specs.get(id);
-        if (spec == null) {
+        return live(id).spec();
+    }
+
+    /**
+     * The current registered {@link LiveAgent} generation for {@code id}, to be bound into
+     * {@link #CURRENT_AGENT_SPEC} at a turn entry so the whole turn reads one frozen generation (#178).
+     * Throws if {@code id} is not registered (a deleted or never-loaded agent) — the caller surfaces that
+     * as a terminal turn error (rejected new-turn).
+     */
+    public LiveAgent lease(AgentId id) {
+        return live(id);
+    }
+
+    /**
+     * The generation a read resolves to: the per-turn leased snapshot when {@link #CURRENT_AGENT_SPEC} is
+     * bound for {@code id} (so an in-flight turn is immune to a concurrent reload), else the current map
+     * entry. Throws if unregistered.
+     */
+    private LiveAgent live(AgentId id) {
+        if (CURRENT_AGENT_SPEC.isBound()) {
+            LiveAgent leased = CURRENT_AGENT_SPEC.get();
+            if (leased.persona().id().equals(id)) {
+                return leased; // the turn's frozen generation — immune to a concurrent reload
+            }
+        }
+        LiveAgent found = specs.get(id);
+        if (found == null) {
             throw new IllegalStateException(
                     "Agent '" + id.value() + "' is not registered — call getOrCreate(\""
                   + id.value() + "\") first.");
         }
-        return spec;
+        return found;
     }
 
     /**
@@ -148,7 +194,8 @@ public class AgentRegistry {
         Persona child = new Persona(childId, parent.systemPrompt(), allowedTools,
                 parent.primaryModel(), parentId, childBudget, parent.toolBudget(), null,
                 parent.fallbackModels(), parent.memoryPolicy(), parent.roles(), parent.identityId());
-        if (specs.putIfAbsent(childId, new AgentSpec(child, null)) != null) {
+        if (specs.putIfAbsent(childId, new LiveAgent(nextGeneration.incrementAndGet(),
+                new AgentSpec(child, null))) != null) {
             throw new IllegalStateException(
                     "spawn: agent id '" + childId.value() + "' is already registered; choose a distinct "
                   + "child id (spawn never overwrites an existing agent).");
@@ -183,6 +230,17 @@ public class AgentRegistry {
     /** Live ephemeral worker sub-agents (bounded-observability gauge, #177). */
     public int activeWorkerCount() {
         return ephemeralIds.size();
+    }
+
+    /** Count of hot-reload rebuilds that failed validation and kept the last-known-good spec (#178). */
+    public long reloadFailureCount() {
+        return reloadFailures.get();
+    }
+
+    /** The current registered generation for {@code id}, or {@code -1} if unregistered (#178, test/observability). */
+    public long generation(AgentId id) {
+        LiveAgent found = specs.get(id);
+        return found == null ? -1L : found.generation();
     }
 
     /**
@@ -245,17 +303,21 @@ public class AgentRegistry {
     }
 
     /**
-     * Hot reload: on a change to an {@code agents/<id>.md} or {@code <id>.json} file, evict the affected
-     * agent's cached spec so the next {@link #getOrCreate} re-reads it from disk (the "watches that
-     * directory" half of section 5.2).
+     * Hot reload (#178): a change to {@code agents/<id>.md} or {@code <id>.json} rebuilds the agent's FULL
+     * spec and publishes it atomically for NEW turns, while in-flight turns keep running on the generation
+     * they leased (they hold an immutable {@link LiveAgent} via {@link #CURRENT_AGENT_SPEC}, so a swap here
+     * cannot disrupt them). The publish is a single {@code specs.replace} — the {@code ToolRegistry}
+     * volatile-swap precedent — so a reader sees the whole old or the whole new generation, never a mix.
      *
-     * <p>LIMITATION (deferred to the channel milestones M15–M17): eviction is <em>not</em> safe against
-     * a turn already in flight for that agent on another virtual thread — a concurrent {@link #persona}
-     * read after the evict would miss and throw. The section 5.2 contract (in-flight turns finish on the
-     * OLD spec; the agent's {@code @AgentScoped} instances are torn down via
-     * {@code AgentContext.destroy(AgentId)} on reload) needs a per-turn spec snapshot + drain, which
-     * lands when channels first drive concurrent turns. M7 has no production turn caller, so this is
-     * latent today.
+     * <p>Only a currently-registered (in-use) agent is reloaded; an unloaded agent stays lazy (the next
+     * {@link #getOrCreate} reads it fresh). On {@code DELETED} the entry is removed and its
+     * {@code @AgentScoped} beans destroyed, so a new turn's {@link #lease} throws (rejected new-turn) while
+     * in-flight turns finish on their lease. A rebuild that fails validation (a malformed or half-written
+     * file, or a still-incomplete {@code .md}/{@code .json} pair) is dropped: the current known-good
+     * generation is retained and the failure counted — capabilities are NEVER temporarily widened. The two
+     * files arrive as two separate events; rebuilding the full spec on each is safe (every published
+     * generation is a complete, validated spec — never a mix of fields across generations). The blocking
+     * file read runs OUTSIDE any map compute lock ([M7] — no carrier-thread pinning).
      */
     void onConfigChange(@Observes ConfigurationChangedEvent event) {
         Path path = event.path();
@@ -266,12 +328,42 @@ public class AgentRegistry {
         if (!fileName.endsWith(".md") && !fileName.endsWith(".json")) {
             return; // ignore stray entries (dotfiles, editor temp files) — only agent files map to an id
         }
-        String idValue = fileName.substring(0, fileName.lastIndexOf('.'));
+        AgentId id;
         try {
-            specs.remove(new AgentId(idValue));
-        } catch (IllegalStateException ignored) {
-            // A malformed stem (e.g. a file literally named ".json") is not a valid agent id.
+            id = new AgentId(fileName.substring(0, fileName.lastIndexOf('.')));
+        } catch (IllegalStateException notAnId) {
+            return; // a malformed stem (e.g. a file literally named ".json") is not a valid agent id
         }
+        if (specs.get(id) == null) {
+            return; // not in use — the next getOrCreate loads it fresh (agents stay lazy)
+        }
+        if (event.type() == ChangeType.DELETED) {
+            if (specs.remove(id) != null) {
+                destroyScope(id);
+                LOG.infof("Hot reload: agent '%s' deleted — unregistered; new turns are rejected.",
+                        id.value());
+            }
+            return;
+        }
+        // CREATED/MODIFIED on an in-use agent: rebuild the FULL spec OFF the lock, then swap atomically.
+        AgentSpec rebuilt;
+        try {
+            rebuilt = load(id);
+        } catch (RuntimeException invalid) {
+            reloadFailures.incrementAndGet();
+            LOG.warnf("Hot reload: agent '%s' change rejected (%s) — keeping the last known-good "
+                    + "configuration; capabilities unchanged.", id.value(),
+                    invalid.getClass().getSimpleName());
+            return;
+        }
+        long gen = nextGeneration.incrementAndGet();
+        LiveAgent previous = specs.replace(id, new LiveAgent(gen, rebuilt));
+        if (previous != null) {
+            destroyScope(id); // hygiene: drop any @AgentScoped state derived from the old generation
+            LOG.infof("Hot reload: agent '%s' republished at generation %d.", id.value(), gen);
+        }
+        // previous == null: the agent was deleted concurrently between the get and the replace — do not
+        // resurrect it (the burned generation number is harmless; stamps are monotonic, never reused).
     }
 
     private AgentSpec load(AgentId id) {
