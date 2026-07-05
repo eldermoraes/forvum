@@ -241,7 +241,10 @@ chain of the Forvum binary itself (dependency pinning, SBOM, CI provenance) rema
   warn-on-mismatch install is a silent integrity bypass on the one path that pulls executable code
   from the network. **Settled:** `MavenPluginResolver.remote()` sets
   `CHECKSUM_POLICY_FAIL` on the remote's release policy — a one-line builder change, follow-up on
-  the merged #31 surface.
+  the merged #31 surface. *(As-built #171: `CHECKSUM_POLICY_FAIL` is set explicitly on BOTH the
+  session — a global override — AND every remote's release + snapshot policy, so missing/mismatched
+  checksums abort independently of Resolver defaults; the URL is also restricted to a `{https, file}`
+  scheme allowlist and failure diagnostics redact URL credentials.)*
 - **Signature (PGP) verification is a documented deferral.** Central publishes `.asc` signatures,
   but key-trust management (whose key? pinned where?) is a real subsystem; Maven itself does not
   verify signatures by default. v0.5 documents the gap instead of faking the control. Re-opens with
@@ -252,7 +255,11 @@ chain of the Forvum binary itself (dependency pinning, SBOM, CI provenance) rema
   denies traversal, containing the gap; a hand-made home has no such guarantee. **Settled:** the
   installer creates `plugins/` (and the installed JAR) owner-only via the `InitCommand`
   recipe — a world-writable plugin dir is a code-injection point. Same follow-up class as the
-  checksum line.
+  checksum line. *(As-built #171: a package-private `PluginArtifactInstaller` creates `plugins/`
+  `0700`/the JAR `0600` via an atomic temp-file + `ATOMIC_MOVE` (never a partial JAR), rejects a
+  symlinked dir/target, and — unlike the boot path's repair-and-warn — FAILS the install fail-closed
+  if a pre-existing loose dir cannot be tightened, since an interactive installer staging executable
+  code is not the M4 graceful-boot contract.)*
 - **Native binary: stage-and-warn is correct.** Under `ImageMode.NATIVE_RUN` the command still
   resolves + stages the JAR but warns that only a rebuild loads it (verified in
   `PluginInstallCommand`); the drop-in path stays JVM-fast-jar-only **by design** (§6.2/§6.3) — the
@@ -287,7 +294,7 @@ Revocation is file removal plus the existing hot-reload machinery — no new rev
 | `[DP-7]` | Skill = operator-trusted CONTENT with full front-matter input schema; args validated; template runs under the invoking agent's existing belt — zero scope escalation by skill | Yes | **Ratified (wave directive 2026-06-09)** |
 | `[DP-8]` | Future `SkillInvokerTool` declares a dedicated `SKILL_INVOKE` scope (decided at its landing issue; nothing depends on it this wave) | Recommended | Settled — flagged for maintainer review |
 | `[DP-9]` | T1 drop-in plugins are in-process, unsandboxed, core-equivalent trust once loaded; install act = the trust decision; no prompt-assembly SPI hook; no runtime verifier pretended | Yes (OpenClaw-parity honesty) | Settled — flagged for maintainer review |
-| `[DP-10]` | Plugin supply chain: HTTPS Central + Resolver checksums **hardened to fail** (today `warn` — verified); PGP signatures = documented deferral; `plugins/` + installed JARs created owner-only (today umask — gap named); build-input supply chain stays DR-6c | Yes | Settled — flagged for maintainer review |
+| `[DP-10]` | Plugin supply chain: HTTPS Central + Resolver checksums **hardened to fail** (today `warn` — verified); PGP signatures = documented deferral; `plugins/` + installed JARs created owner-only (today umask — gap named); build-input supply chain stays DR-6c | Yes | Settled — flagged for maintainer review · **as-built → #171** (session+remote `CHECKSUM_POLICY_FAIL`, `{https,file}` scheme allowlist, credential-redacted diagnostics, owner-only atomic symlink-rejecting install fail-closed on un-tightenable dir) |
 | `[DP-11]` | Revocation = file removal + existing hot-reload (`mcp-servers/`/`skills/` watched — verified; #38 resync withdraws specs on DELETED/invalid); T1 = delete JAR + restart (`plugins/` unwatched by design) | Yes | Resync **Ratified (wave directive)**; remainder as-built confirmation |
 
 ---
@@ -306,7 +313,9 @@ Revocation is file removal plus the existing hot-reload machinery — no new rev
   loader, no parallel schema).
 - **#31 (P2-6, merged)** gains two small follow-ups from §6: `CHECKSUM_POLICY_FAIL` on the Central
   remote and owner-only `plugins/` creation. Both are one-liners on the merged surface; tracked with
-  this round's sync, implemented in the next touching PR.
+  this round's sync, implemented in the next touching PR. *(Done — #171: strict checksums on session
+  + every remote, a `{https, file}` scheme allowlist, credential-redacted diagnostics, and an
+  owner-only atomic symlink-rejecting `PluginArtifactInstaller`.)*
 - **TEST-SEC (#65)** gains three negative scenarios from this round: an out-of-belt MCP tool call →
   denied + audited; a role without `MCP_REMOTE` invoking an in-belt MCP tool → denied + audited; a
   skill template attempting an out-of-belt tool call → denied (the prompt-injection-via-skill case,
