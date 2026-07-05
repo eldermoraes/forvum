@@ -100,4 +100,40 @@ class JdkHttpFetcherTest {
             server.stop(0);
         }
     }
+
+    @Test
+    void headerOverrideReplacesTheDefaultUserAgentExactlyOnce() throws Exception {
+        // #192: the 2-arg get() applies per-request headers via setHeader (REPLACE). A regression to
+        // builder.header (APPEND) would send TWO User-Agent values — pin exactly ONE, equal to the
+        // browser UA the DuckDuckGo backend passes. Offline: a loopback server captures the header list.
+        java.util.concurrent.atomic.AtomicReference<java.util.List<String>> seenUserAgents =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);
+        server.createContext("/", exchange -> {
+            seenUserAgents.set(exchange.getRequestHeaders().get("User-Agent"));
+            byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        });
+        server.start();
+        try {
+            int port = server.getAddress().getPort();
+            URI uri = URI.create("http://127.0.0.1:" + port + "/ua");
+            EgressGuard.Approved approved = new EgressGuard.Approved(uri, null);
+
+            HttpFetcher.FetchResult result = new JdkHttpFetcher()
+                    .get(approved, java.util.Map.of("User-Agent", DuckDuckGoBackend.BROWSER_USER_AGENT));
+
+            assertEquals(200, result.status());
+            assertEquals(1, seenUserAgents.get().size(),
+                    "exactly ONE User-Agent header (setHeader REPLACES the default, never appends)");
+            assertEquals(DuckDuckGoBackend.BROWSER_USER_AGENT, seenUserAgents.get().get(0),
+                    "the override rides the wire in place of the Forvum default");
+        } finally {
+            server.stop(0);
+        }
+    }
 }

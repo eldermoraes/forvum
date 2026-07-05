@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>DuckDuckGo</title></head>
+<body>
+<div class="anomaly-modal__wrapper">
+  <h1>Unfortunately, bots use DuckDuckGo too.</h1>
+  <p>Please complete the following challenge to confirm you are a human. Are you a human?</p>
+  <form id="challenge-form" action="/anomaly" method="POST">
+    <input type="hidden" name="challenge" value="opaque-token">
+    <div class="g-recaptcha" data-sitekey="site-key"></div>
+  </form>
+</div>
+</body>
+</html>

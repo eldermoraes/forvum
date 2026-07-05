@@ -43,6 +43,41 @@ class WebToolConfigTest {
         assertFalse(spec.allowPrivateNetwork(), "egress is strict (private blocked) by default");
         assertTrue(spec.allowedPorts().isEmpty(),
                 "no allowedPorts → empty (EgressGuard falls back to its {80,443,default} default)");
+        assertTrue(spec.searchBackend().isEmpty(), "no backend → the precedence default applies");
+    }
+
+    @Test
+    void parsesTheSearchBackend() throws Exception {
+        Spec spec = WebToolConfig.parse(MAPPER.readTree("{ \"backend\": \"duckduckgo\" }"));
+        assertEquals(Optional.of("duckduckgo"), spec.searchBackend());
+    }
+
+    @Test
+    void keepsAnUnknownBackendValueRaw() throws Exception {
+        // The reader is lenient: it does NOT validate the value (so a bad backend cannot break web.fetch,
+        // which shares this reader); resolution happens on the web.search path.
+        Spec spec = WebToolConfig.parse(MAPPER.readTree("{ \"backend\": \"bing\" }"));
+        assertEquals(Optional.of("bing"), spec.searchBackend());
+    }
+
+    @Test
+    void treatsBlankBackendAsAbsent() throws Exception {
+        Spec spec = WebToolConfig.parse(MAPPER.readTree("{ \"backend\": \"   \" }"));
+        assertTrue(spec.searchBackend().isEmpty(), "a blank backend is treated as unset");
+    }
+
+    @Test
+    void emptySpecHasNoBackend() {
+        assertTrue(Spec.empty().searchBackend().isEmpty());
+    }
+
+    @Test
+    void threeArgConstructorDefaultsTheBackendToAbsent() {
+        // The [#170] trailing-component recipe: pre-#192 3-arg construction still compiles and defaults
+        // the backend to empty (this construction IS the backward-compat regression assertion).
+        Spec spec = new Spec(Optional.of("k"), true, java.util.Set.of(8080));
+        assertTrue(spec.searchBackend().isEmpty());
+        assertEquals(Optional.of("k"), spec.braveApiKey());
     }
 
     @Test

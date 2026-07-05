@@ -14,17 +14,21 @@ import java.util.Map;
 
 /**
  * Web tool module (PR-6, resolving the ULTRAPLAN §epic-4 web-tool surface). Contributes {@code web.fetch}
- * (arbitrary-URL fetch over {@code java.net.http}, scope {@code WEB_FETCH}) and {@code web.search} (Brave
- * Search over a blocking REST client, scope {@code WEB_SEARCH}) to the engine's global ToolRegistry, which
- * discovers this {@code @ApplicationScoped} bean via CDI and (M18 Option A) executes them through
+ * (arbitrary-URL fetch over {@code java.net.http}, scope {@code WEB_FETCH}) and {@code web.search}
+ * (pluggable backend #192, scope {@code WEB_SEARCH}) to the engine's global ToolRegistry, which discovers
+ * this {@code @ApplicationScoped} bean via CDI and (M18 Option A) executes them through
  * {@link #invoke(String, Map)}. Both tools are READ-only outbound HTTP, so neither declares
  * {@code userConfirmRequired} — they sit behind the engine's belt + P2-11 RBAC scope gates only, NOT the
  * #39 user-approval gate.
  *
  * <p>This provider only dispatches the permitted call by name to the tool logic (no reflection), mirroring
- * {@code FilesystemToolProvider}. The {@link EgressGuard} (web.fetch's SSRF confinement) and the Brave key
- * (web.search) are read from the live {@code tools/web.json} spec per invocation, so an operator's edit
- * takes effect without a restart and the module is INERT with no {@code ~/.forvum/}.
+ * {@code FilesystemToolProvider}. The {@link EgressGuard} (web.fetch's SSRF confinement) and the search
+ * backend selection + Brave key (web.search) are read from the live {@code tools/web.json} spec per
+ * invocation, so an operator's edit takes effect without a restart. {@code web.search} defaults to the
+ * keyless DuckDuckGo backend (its egress goes through the SAME {@link HttpFetcher}, but always under a
+ * strict {@link EgressGuard} — the search host is fixed public, so {@code allowPrivateNetwork} does NOT
+ * relax it, unlike the arbitrary-URL {@code web.fetch}); {@code web.fetch} stays inert with no
+ * {@code ~/.forvum/}.
  */
 @ForvumExtension
 @ApplicationScoped
@@ -60,8 +64,8 @@ public class WebToolProvider extends AbstractToolProvider {
             case "web.fetch" -> new WebFetchTool(fetcher,
                     new EgressGuard(spec.allowPrivateNetwork(), spec.allowedPorts()),
                     FETCH_MAX_CHARS).fetch(stringArg(arguments, "url"));
-            case "web.search" -> new WebSearchTool(braveApi)
-                    .search(stringArg(arguments, "query"), intArg(arguments, "count", 5), spec.braveApiKey());
+            case "web.search" -> new WebSearchTool(braveApi, fetcher)
+                    .search(stringArg(arguments, "query"), intArg(arguments, "count", 5), spec);
             default -> throw new IllegalArgumentException(
                     "WebToolProvider does not contribute a tool named '" + toolName
                   + "'. It provides web.fetch, web.search.");

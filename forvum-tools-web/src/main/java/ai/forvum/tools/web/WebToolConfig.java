@@ -96,7 +96,15 @@ public class WebToolConfig {
         JsonNode egressNode = root.get("allowPrivateNetwork");
         boolean allowPrivateNetwork = egressNode != null && egressNode.asBoolean(false);
 
-        return new Spec(braveApiKey, allowPrivateNetwork, parseAllowedPorts(root.get("allowedPorts")));
+        // Lenient: keep the backend value RAW (resolved/validated only on the web.search path, so a bad
+        // value can never break web.fetch which shares this reader). Absent/blank → empty.
+        JsonNode backendNode = root.get("backend");
+        Optional<String> searchBackend = backendNode == null || backendNode.asText().isBlank()
+                ? Optional.empty()
+                : Optional.of(backendNode.asText().strip());
+
+        return new Spec(braveApiKey, allowPrivateNetwork,
+                parseAllowedPorts(root.get("allowedPorts")), searchBackend);
     }
 
     /**
@@ -119,19 +127,34 @@ public class WebToolConfig {
     /**
      * The web tools' resolved configuration.
      *
-     * @param braveApiKey         the Brave Search API key, absent when unset (web.search is then inert).
+     * @param braveApiKey         the Brave Search API key, absent when unset.
      * @param allowPrivateNetwork whether web.fetch may reach internal/private addresses (default false).
      * @param allowedPorts        the operator-widened destination-port allowlist; empty = the
      *                            {@link EgressGuard#DEFAULT_ALLOWED_PORTS default} {80, 443, scheme-default}.
+     * @param searchBackend       the {@code web.search} backend id (raw, lower-cased at selection), absent
+     *                            when unset (then the precedence in {@link WebSearchTool#search} applies:
+     *                            a {@code braveApiKey} selects {@code brave}, else the keyless
+     *                            {@code duckduckgo} default).
      */
-    public record Spec(Optional<String> braveApiKey, boolean allowPrivateNetwork, Set<Integer> allowedPorts) {
+    public record Spec(Optional<String> braveApiKey, boolean allowPrivateNetwork, Set<Integer> allowedPorts,
+                       Optional<String> searchBackend) {
 
         public Spec {
             allowedPorts = allowedPorts == null ? Set.of() : Set.copyOf(allowedPorts);
+            searchBackend = searchBackend == null ? Optional.empty() : searchBackend;
+        }
+
+        /**
+         * Backward-compatible 3-arg constructor (no {@code searchBackend}), so every pre-#192
+         * {@code new Spec(key, priv, ports)} call-site compiles unchanged ([#170] trailing-component
+         * recipe) and defaults the backend to absent (the precedence default applies).
+         */
+        public Spec(Optional<String> braveApiKey, boolean allowPrivateNetwork, Set<Integer> allowedPorts) {
+            this(braveApiKey, allowPrivateNetwork, allowedPorts, Optional.empty());
         }
 
         static Spec empty() {
-            return new Spec(Optional.empty(), false, Set.of());
+            return new Spec(Optional.empty(), false, Set.of(), Optional.empty());
         }
     }
 }
