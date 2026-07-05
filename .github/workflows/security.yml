@@ -11,7 +11,7 @@ name: Security
 #   - weekly:   scheduled-deep-scan (Trivy re-scan of the shipped image + a full-transitive SBOM scan).
 #
 # Third-party actions are SHA-pinned with a trailing version comment; GitHub-authored actions (actions/*)
-# stay on major tags. The update process is Dependabot (.github/dependabot.yml).
+# stay on major refs. The update process is Dependabot (.github/dependabot.yml).
 
 on:
   push:
@@ -25,7 +25,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: security-${{ github.ref }}
+  # event_name in the group so a Monday-morning push to main cannot cancel the in-flight weekly deep
+  # scan (both would otherwise share the refs/heads/main group with cancel-in-progress).
+  group: security-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -46,10 +48,11 @@ jobs:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
 
-  # Blocking secret scan. PR: the PR commit range. push(main)/schedule/dispatch: the full history
-  # (fetch-depth: 0). The deliberate fake-token fixtures under **/src/test/** are allowlisted in
-  # .gitleaks.toml; GitHub server-side secret scanning + push protection (repo settings, enabled with
-  # this issue) are the layered control for a REAL provider-shaped token pasted anywhere, incl. tests.
+  # Blocking secret scan. PR: the PR commit range. push(main): the pushed commit range.
+  # schedule/dispatch: the FULL history (the weekly full-history sweep). The deliberate fake-token
+  # fixtures under **/src/test/** are allowlisted in .gitleaks.toml; GitHub server-side secret scanning
+  # + push protection (repo settings, enabled with this issue) are the layered control for a REAL
+  # provider-shaped token pasted anywhere, incl. tests.
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
@@ -57,9 +60,9 @@ jobs:
       contents: read
       pull-requests: write   # lets gitleaks-action comment the finding on the PR (the gate itself is the red check)
     steps:
-      # Full history so gitleaks can resolve the PR base..head range (and the full-history scan on
-      # push/schedule). No GITLEAKS_LICENSE is needed — this is a personal-account repo (org repos would
-      # need a free key). If a license nag ever appears, fall back to the ghcr.io/gitleaks/gitleaks
+      # Full clone so gitleaks can resolve the PR/push base..head ranges (and the full-history scan on
+      # schedule/dispatch). No GITLEAKS_LICENSE is needed — this is a personal-account repo (org repos
+      # would need a free key). If a license nag ever appears, fall back to the ghcr.io/gitleaks/gitleaks
       # container binary with the same .gitleaks.toml (documented in docs/SECURITY-GATES.md).
       - uses: actions/checkout@v4
         with:
@@ -69,6 +72,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
+          # Pin the scan ENGINE — without this the action downloads the LATEST gitleaks at run time (a
+          # mutable input, against this PR's own pinning policy). 8.30.1 is the version .gitleaks.toml
+          # (the [[allowlists]] syntax) was validated against in both directions; bump deliberately and
+          # re-validate the config with it.
+          GITLEAKS_VERSION: '8.30.1'
 
   # Blocking lint of every workflow + the .github/*.sh gate scripts. actionlint shellchecks every
   # `run:` block and flags untrusted-input-in-run / bad expressions; shellcheck covers the gate scripts.
@@ -81,17 +89,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Download the pinned actionlint release binary (no piping curl into bash — the fetched script is
-      # version-pinned and run explicitly). actionlint shellchecks every `run:` block on the ubuntu
-      # runner, which ships shellcheck; the next step shellchecks the standalone .github/*.sh gate scripts.
+      # commit-pinned and run explicitly; the one non-action third-party input, pinned like the actions).
+      # actionlint shellchecks every `run:` block on the ubuntu runner, which ships shellcheck; the next
+      # step shellchecks the standalone .github/*.sh gate scripts.
       # Keep this pin CURRENT: an actionlint older than the newest GitHub runner labels false-positives on
       # them (1.7.7 did not know macos-15-intel, release.yml's macos-x64 leg — caught by the #174 canary
-      # PRs); the remedy for a future new-label false positive is bumping this one version line.
+      # PRs); the remedy for a future new-label false positive is bumping the version + the script SHA.
       - name: Install actionlint
         env:
           ACTIONLINT_VERSION: '1.7.12'
+          # The commit the v1.7.12 tag points at — immutable script source.
+          ACTIONLINT_COMMIT: '914e7df21a07ef503a81201c76d2b11c789d3fca'
         run: |
           curl -fsSL -o download-actionlint.bash \
-            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+            "https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_COMMIT}/scripts/download-actionlint.bash"
           bash download-actionlint.bash "${ACTIONLINT_VERSION}"
       - name: 'Run actionlint (also shellchecks run: blocks)'
         run: ./actionlint -color

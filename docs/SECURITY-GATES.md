@@ -24,7 +24,7 @@ resource — gains zero jobs.
 |---|---|---|---|
 | Dependency diff | `actions/dependency-review-action` | pull_request | `security.yml` → `dependency-review` |
 | Dependency graph submission (feeds Dependabot alerts) | `advanced-security/maven-dependency-submission-action` | push `main` | `security.yml` → `dependency-submission` |
-| Secret scan | `gitleaks/gitleaks-action` | PR (range) + push/schedule (full history) | `security.yml` → `secrets` + `.gitleaks.toml` |
+| Secret scan | `gitleaks/gitleaks-action` (engine pinned via `GITLEAKS_VERSION`) | PR (PR range) + push `main` (push range) + weekly schedule/dispatch (full history) | `security.yml` → `secrets` + `.gitleaks.toml` |
 | Workflow + shell lint | actionlint + shellcheck | pull_request + push + schedule | `security.yml` → `workflow-lint` |
 | SAST — Java + Actions | `github/codeql-action` | PR + push + weekly | `codeql.yml` |
 | Deep scan — image + full SBOM | `aquasecurity/trivy-action` | weekly (Mon 05:00 UTC) + `workflow_dispatch` | `security.yml` → `scheduled-deep-scan` |
@@ -105,7 +105,7 @@ curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum
 shasum -a 256 -c forvum-linux-x64.sha256        # or: sha256sum -c
 
 # 2. SBOM presence — each release carries a Maven-closure SBOM and a container SBOM:
-#      forvum-<version>-sbom.cdx.json        (CycloneDX, the whole Maven closure)
+#      forvum-<version>-maven-sbom.cdx.json  (CycloneDX, the whole Maven closure)
 #      forvum-<version>-image-sbom.cdx.json  (CycloneDX, the GHCR image: base + native binary)
 gh release view "$VER" --repo eldermoraes/forvum --json assets \
   --jq '.assets[].name | select(endswith(".cdx.json"))'
@@ -115,9 +115,11 @@ gh attestation verify forvum-linux-x64 --repo eldermoraes/forvum
 gh attestation verify oci://ghcr.io/eldermoraes/forvum:${VER#v}-native --repo eldermoraes/forvum
 ```
 
-A missing SBOM asset means the release job failed (`fail_on_unmatched_files: true`) — a published release
-always has both SBOMs. `gh attestation verify` checks the predicate identity (repository, workflow path,
-commit SHA, ref) against the signed attestation.
+The release job enumerates every expected asset class in its `files:` list (the 4 binaries, their checksums,
+the two mutually-exclusive SBOM patterns, the installer), and `fail_on_unmatched_files: true` is checked PER
+pattern — so a missing SBOM (or binary/checksum/installer) fails the release, and a published release always
+has both SBOMs. `gh attestation verify` checks the predicate identity (repository, workflow path, commit
+SHA, ref) against the signed attestation.
 
 ---
 
@@ -126,10 +128,13 @@ commit SHA, ref) against the signed attestation.
 - **Third-party actions are pinned to a full commit SHA** with a trailing `# vX.Y.Z` version comment:
   `graalvm/setup-graalvm`, `softprops/action-gh-release`, `azure/setup-helm`, `gitleaks/gitleaks-action`,
   `aquasecurity/trivy-action`, `advanced-security/maven-dependency-submission-action`.
-- **GitHub-authored actions (`actions/*`, `github/*`) stay on major tags** — the ecosystem-standard trust
-  cut for the platform owner's own, tag-protected actions: `actions/checkout`, `actions/setup-java`,
-  `actions/upload-artifact`, `actions/download-artifact`, `actions/dependency-review-action`,
-  `actions/attest-build-provenance`, `github/codeql-action`.
+- **GitHub-authored actions (`actions/*`, `github/*`) stay on major refs** — the ecosystem-standard trust
+  cut for the platform owner's own actions: `actions/checkout`, `actions/setup-java`,
+  `actions/upload-artifact`, `actions/download-artifact`, `actions/attest-build-provenance`,
+  `github/codeql-action` (major tags), and `actions/dependency-review-action` (whose `v5` major ref is a
+  BRANCH upstream, not a tag — same GitHub-owned trust class, recorded here for accuracy).
+- The one non-action third-party input — the actionlint download script — is commit-pinned in
+  `security.yml` (`ACTIONLINT_COMMIT`), and the gitleaks scan engine is version-pinned (`GITLEAKS_VERSION`).
 - **Update process = Dependabot** (`.github/dependabot.yml`): weekly PRs for the `github-actions` (bumps the
   SHA-pins + their comments), `maven` (root, minor/patch grouped), and `docker` (the base-image digest)
   ecosystems. Version bumps stay maintainer decisions (`forvum-bom` is the single Maven bump point;

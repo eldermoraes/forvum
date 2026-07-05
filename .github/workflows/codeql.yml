@@ -22,7 +22,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: codeql-${{ github.ref }}
+  # event_name in the group so a push to main cannot cancel the in-flight weekly scheduled analysis.
+  group: codeql-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
