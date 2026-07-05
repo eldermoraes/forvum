@@ -109,7 +109,7 @@ jobs:
       # linux-amd64 uses Mandrel 25.0.x-Final (M1's named native-image distribution).
       - name: Set up Mandrel (Linux)
         if: runner.os == 'Linux'
-        uses: graalvm/setup-graalvm@v1
+        uses: graalvm/setup-graalvm@cabbb10818fabc989d6dbd508e4846596d20dd2d   # v1.6.0
         with:
           distribution: mandrel
           version: mandrel-25.0.3.0-Final
@@ -120,7 +120,7 @@ jobs:
       # (the equivalent native builder accepted by CLAUDE.md section 2).
       - name: Set up GraalVM CE (macOS)
         if: runner.os == 'macOS'
-        uses: graalvm/setup-graalvm@v1
+        uses: graalvm/setup-graalvm@cabbb10818fabc989d6dbd508e4846596d20dd2d   # v1.6.0
         with:
           distribution: graalvm-community
           java-version: '25'
@@ -168,7 +168,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set up Mandrel (Linux)
-        uses: graalvm/setup-graalvm@v1
+        uses: graalvm/setup-graalvm@cabbb10818fabc989d6dbd508e4846596d20dd2d   # v1.6.0
         with:
           distribution: mandrel
           version: mandrel-25.0.3.0-Final

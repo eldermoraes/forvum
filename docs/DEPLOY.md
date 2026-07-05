@@ -168,6 +168,15 @@ Ollama. It pulls `ghcr.io/eldermoraes/forvum:<version>-native`, published by the
 [`deploy/docker/README.md`](../deploy/docker/README.md). The systemd + binary path above works today
 with the existing binary release and needs no container runtime.
 
+The image carries a GitHub OIDC build-provenance attestation and is scanned (blocking) before it is
+pushed. Verify the provenance of a pulled tag with:
+
+```bash
+gh attestation verify oci://ghcr.io/eldermoraes/forvum:<version>-native --repo eldermoraes/forvum
+```
+
+See [`docs/SECURITY-GATES.md`](SECURITY-GATES.md) for the full supply-chain posture.
+
 ---
 
 ## Persistence and backups

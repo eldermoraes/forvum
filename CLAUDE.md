@@ -348,6 +348,12 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **Security-test layer** under `forvum-app/.../security/`: prompt-injection → no tool escalation; path
   traversal → denied; spawn-boundary identity override → rejected; `PermissionScope` mismatch → denied
   + audited.
+- **CI security gates (#174):** per-PR = blocking `dependency-review` + `gitleaks` (with the
+  `**/src/test/**` fake-fixture allowlist) + `CodeQL` (Java + Actions) + `actionlint`/`shellcheck`
+  (`security.yml`/`codeql.yml`); weekly Trivy deep scan of the shipped image; release = CycloneDX SBOMs
+  (Maven closure + image) + OIDC build-provenance attestations (4 binaries + GHCR image) + a blocking
+  pre-push image scan (`release.yml`). Third-party Actions are SHA-pinned (Dependabot updates them).
+  Committed thresholds / SLA / suppression policy: `docs/SECURITY-GATES.md`.
 - **Concurrency discipline (§3.8):** **virtual threads first** — blocking, imperative code on virtual
   threads is the default model, not reactive programming; reactive types (Mutiny/Reactor) are allowed
   only at a framework-mandated boundary bridged to a VT, with a justification, and reactive code where
@@ -1924,3 +1930,28 @@ Generalizable lessons from completed milestones; append here as milestones land.
   caught the throw and silently dropped delivery. Native is the sanctioned [M4] `WatchService` OS-polling
   carve-out — the deterministic event-fire is the tested path on both JVM and native; the reload machinery is
   pure map/`ScopedValue` (no reflection), native-identical. [#178]
+- **CI security gates (#174) — placement, canaries, and four pin-the-pin traps.** Placement: per-PR gates are
+  parallel-ubuntu seconds-to-minutes jobs (`dependency-review`/`gitleaks`/`actionlint`+`shellcheck`/CodeQL
+  `java-kotlin build-mode: none` + `actions`), push-`main` submits the Maven dependency graph (feeds
+  Dependabot alerts), weekly runs the network-sensitive Trivy deep scan, release owns SBOM + provenance + the
+  blocking pre-push image scan — nothing joins the ~37 min critical path, macOS gains zero jobs. **Prove each
+  gate fires with canary PRs, both directions**: a checksum-INVALID well-formed token (random `ghp_`+36) is
+  the perfect secret canary — GitHub push protection validates checksums so the push goes through, while
+  gitleaks' regex fires (and the same token in `src/test` proves the allowlist); `log4j-core:2.14.1` in a leaf
+  pom proves dependency-review names the GHSA. The canaries also caught a REAL false positive — which is the
+  point. Traps, all of the shape "the pin you add is itself an unpinned input": (1) **actionlint pin-currency**
+  — an actionlint older than the newest GitHub runner labels false-positives on them (1.7.7 did not know
+  `macos-15-intel`); pin the CURRENT release AND the download script by commit SHA, and bump both together.
+  (2) **gitleaks-action downloads the LATEST engine at run time** — pin `GITLEAKS_VERSION` to the version the
+  `.gitleaks.toml` was validated against (`[[allowlists]]` is newer-engine syntax; an older parser ignores it
+  silently = the allowlist is inert). Validate the config locally with the SAME engine version in BOTH
+  directions before trusting a green scan. (3) **`fail_on_unmatched_files` is per-PATTERN** — a single
+  `release/*` glob is vacuously satisfied by any one file; ENUMERATE the asset classes (each binary, each
+  checksum, each SBOM, the installer), and name sibling globs mutually exclusive (`-maven-sbom` vs
+  `-image-sbom` — a bare `*-sbom.cdx.json` matches either). (4) **concurrency groups need
+  `github.event_name`** or a Monday push cancels the in-flight weekly scheduled scan sharing the ref group.
+  Also: `makeAggregateBom` is an AGGREGATOR — run it at the reactor root (never `-pl`), after a `package`;
+  `docker inspect RepoDigests` populates only AFTER push (attest the image digest post-push);
+  `dependency-review-action@v5` is a major BRANCH upstream (no v5 tag) — describe GitHub-authored refs
+  accurately. GitHub-side settings (secret scanning, push protection, Dependabot alerts/updates) are `gh api`
+  PATCHes — half the acceptance criteria live in repo settings, not YAML. [#174]

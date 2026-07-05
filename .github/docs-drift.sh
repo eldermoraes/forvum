@@ -19,6 +19,11 @@
 #     doc may frame it as a fail-open path that reinserts the raw text. The three-tier memory Write/Select
 #     loop (#175) is WIRED into normal turns (LocalMemoryProvider default retrieval + MemoryWriter off-turn
 #     write) — no doc may frame the default install as writing/reading only the short-term messages tier.
+#     SBOM + signed provenance attestations SHIP on every release (#174: CycloneDX Maven+image SBOMs +
+#     GitHub OIDC build-provenance for the 4 binaries + the GHCR image; policy in docs/SECURITY-GATES.md) —
+#     no status-bearing doc may frame release SBOM/provenance as a named deferral (the DR-6c round file
+#     keeps the pre-#174 deliberation text and, like docs/ISSUES.md, is deliberately not scanned; the SBOM
+#     *attestation* follow-up lives only in docs/SECURITY-GATES.md, also unscanned).
 #
 # `docs/ISSUES.md` is deliberately NOT scanned: it preserves each step's ORIGINAL proposal as historical
 # text, distinguished from as-built reality by the marker legend at the top of that file.
@@ -81,6 +86,14 @@ ban "compression-failure fallback (#176) stated as fail-open / reinserting raw" 
 #    reading only the short-term messages tier, or recordFact as having no production caller.
 ban "three-tier memory loop (#175) stated as not-wired / recordFact unused" \
     'recordFact has no production caller|MemorySelector (only wires|wires only) Qdrant|not (yet )?wired into normal turns by default|default install[^.|]{0,40}(never|does not yet) (write|read|retriev)'
+
+# 9. SBOM + signed provenance SHIP on every release (#174) — no status-bearing doc may frame release-side
+#    SBOM/provenance as an unshipped deferral. Targets the pre-#174 phrasing (SBOM ... [signed] provenance
+#    ... named deferral/deferred), NOT the legitimate as-built "SBOM attestation is the one named follow-up"
+#    (that names the attest-sbom sub-item, has no "provenance" token between SBOM and the follow-up word,
+#    and lives in the unscanned docs/SECURITY-GATES.md anyway).
+ban "release SBOM/provenance (#174) stated as a named deferral" \
+    'SBOM[^.|]{0,40}provenance[^.|]{0,50}(deferral|deferred)'
 
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."

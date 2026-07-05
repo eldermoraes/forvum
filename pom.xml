@@ -66,6 +66,9 @@
         <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
         <!-- JaCoCo 0.8.15 is the first line to read Java 25 (class file 69) bytecode. -->
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+        <!-- CycloneDX aggregate SBOM (#174) — invoked explicitly at release / weekly, never bound to a
+             build phase, so `./mvnw verify` pays nothing. Managed here as the single version bump point. -->
+        <cyclonedx-maven-plugin.version>2.9.2</cyclonedx-maven-plugin.version>
 
         <!-- Coverage gate (X3 / ULTRAPLAN section 10): 80% LINE + 75% BRANCH, measured from Surefire unit
              tests (coverage runs in `verify`). Module-local overrides relax these where the code is
@@ -106,6 +109,11 @@
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>${jacoco-maven-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.cyclonedx</groupId>
+                    <artifactId>cyclonedx-maven-plugin</artifactId>
+                    <version>${cyclonedx-maven-plugin.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>
@@ -186,6 +194,20 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <!-- CycloneDX SBOM (#174). Declared root-only (`inherited=false`) with NO execution binding:
+                 the `makeAggregateBom` goal is an aggregator invoked explicitly by the release / weekly
+                 workflows (`mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom`), so every dev/PR
+                 `verify` pays ZERO cost. Output is `target/bom.json` (json, name `bom`), the whole Maven
+                 closure — one SBOM covers all four platform binaries (identical dependency set). -->
+            <plugin>
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+                <inherited>false</inherited>
+                <configuration>
+                    <outputFormat>json</outputFormat>
+                    <outputName>bom</outputName>
+                </configuration>
             </plugin>
         </plugins>
     </build>

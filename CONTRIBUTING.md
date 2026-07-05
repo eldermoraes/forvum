@@ -81,6 +81,12 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
   stays a signal, not a gate, until a baseline exists.
 - **Live-provider tests** are tagged `live` and are **default-off** (they hit real model providers);
   they run in nightly CI only.
+- **CI security gates (#174):** every PR also runs a blocking dependency-diff (`dependency-review`),
+  secret scan (`gitleaks` — deliberate fake-token fixtures under `**/src/test/**` are allowlisted in
+  `.gitleaks.toml`), `CodeQL` (Java + the Actions workflows), and `actionlint`/`shellcheck`. Third-party
+  GitHub Actions are SHA-pinned (Dependabot bumps them). The committed thresholds, SLA, and
+  suppression-with-expiry process live in [`docs/SECURITY-GATES.md`](docs/SECURITY-GATES.md); never
+  silence a finding without an owner + reason + expiry.
 
 ## Native-first rules (MUST follow)
 

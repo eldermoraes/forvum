@@ -1,0 +1,29 @@
+# gitleaks configuration (#174) — repository secret scanning.
+#
+# Extends the built-in gitleaks ruleset (all default provider patterns stay active). The single
+# allowlist below scopes OUT the test tree, where the security suites deliberately hold fake, well-formed
+# provider-shaped tokens (SecretRedactor / OutputGuard / api-key-resolution / Slack / Copilot fixtures —
+# ~28 files under **/src/test/**). Allowlisting the test tree is the maintainable choice over enumerating
+# files that grow with every security PR; main-source hits are prefix SHAPES in Javadoc/regex patterns
+# (e.g. "sk-***", the SecretRedactor rules), not token values, and are NOT allowlisted.
+#
+# Residual risk — a REAL secret pasted into a test — is covered by the layered server-side control:
+# GitHub secret scanning + push protection (repo settings, enabled with #174) match VALID provider-shaped
+# tokens everywhere, including tests. If a future test needs a realistic-shaped fake token, keep it
+# invalid-shaped (short/truncated) so it trips neither gate; see docs/SECURITY-GATES.md.
+#
+# SUPPRESSION PROCESS (committed policy): every NEW allowlist entry MUST carry an owner, a reason, and a
+# review date in a comment. Review cadence: each release. Do NOT widen the path to docs or main source.
+
+title = "Forvum gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Owner: maintainer (@eldermoraes). Reason: deliberate fake fixtures — the SecretRedactor / OutputGuard /
+provider api-key-resolution / Slack / Copilot test suites hold well-formed but fake provider-shaped
+tokens by design. Review: each release.
+"""
+paths = ['''.*/src/test/.*''']

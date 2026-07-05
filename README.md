@@ -76,8 +76,14 @@ VER=v0.5.0                                     # the release tag to install
 curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum-linux-x64"
 curl -fsSLO "https://github.com/eldermoraes/forvum/releases/download/$VER/forvum-linux-x64.sha256"
 shasum -a 256 -c forvum-linux-x64.sha256       # or: sha256sum -c
+# Optionally verify GitHub OIDC build provenance (repo + workflow + commit + tag):
+gh attestation verify forvum-linux-x64 --repo eldermoraes/forvum
 chmod +x forvum-linux-x64 && sudo mv forvum-linux-x64 /usr/local/bin/forvum
 ```
+
+Releases also ship a CycloneDX SBOM (`forvum-<version>-maven-sbom.cdx.json`) and an image SBOM; the full
+supply-chain posture (gates, thresholds, suppression policy, verification) is in
+[`docs/SECURITY-GATES.md`](docs/SECURITY-GATES.md).
 
 </details>
 
