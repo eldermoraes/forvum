@@ -85,7 +85,7 @@ final class DuckDuckGoBackend implements WebSearchBackend {
                             "DuckDuckGo search refused: too many redirects (cap " + MAX_REDIRECTS + ").");
                 }
                 URI current = pinned.uri();
-                URI target = current.resolve(result.location().orElseThrow().strip());
+                URI target = resolveLocation(current, result.location().orElseThrow());
                 if ("https".equalsIgnoreCase(current.getScheme())
                         && "http".equalsIgnoreCase(target.getScheme())) {
                     throw new WebSearchException(
@@ -99,6 +99,20 @@ final class DuckDuckGoBackend implements WebSearchBackend {
                         "DuckDuckGo search returned HTTP " + result.status() + ".");
             }
             return result.body();
+        }
+    }
+
+    /**
+     * Resolve a possibly-relative redirect {@code Location} against the current hop, refusing a malformed
+     * one with an actionable message (mirrors {@code WebFetchTool.resolveLocation} — a raw
+     * {@code IllegalArgumentException} would reach the model as an unexplained internal error).
+     */
+    private static URI resolveLocation(URI current, String location) {
+        try {
+            return current.resolve(location.strip());
+        } catch (IllegalArgumentException e) {
+            throw new WebSearchException(
+                    "DuckDuckGo search got a malformed redirect Location: " + location);
         }
     }
 

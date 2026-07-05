@@ -173,4 +173,15 @@ class DuckDuckGoBackendTest {
         WebSearchException e = assertThrows(WebSearchException.class, () -> backend.search("q", 5));
         assertTrue(e.getMessage().toLowerCase().contains("downgrade"), e.getMessage());
     }
+
+    @Test
+    void aMalformedRedirectLocationIsRefusedWithAnActionableMessage() {
+        // URI.resolve throws IllegalArgumentException on an unparseable Location; the backend must turn it
+        // into the actionable WebSearchException, not leak the raw internal error (mirrors WebFetchTool).
+        RecordingFetcher fetcher = new RecordingFetcher(redirectTo("ht tp://bad location"));
+        DuckDuckGoBackend backend = new DuckDuckGoBackend(fetcher);
+
+        WebSearchException e = assertThrows(WebSearchException.class, () -> backend.search("q", 5));
+        assertTrue(e.getMessage().toLowerCase().contains("malformed redirect location"), e.getMessage());
+    }
 }

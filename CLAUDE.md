@@ -1995,4 +1995,11 @@ Generalizable lessons from completed milestones; append here as milestones land.
   compile failure). (8) **Native + live-test placement** ([M20/Risk#5], [OQ2]): native proof is the local `-Pnative`
   build + boot-inert + ONE manual live keyless run against the binary with evidence in the PR — the live keyless
   search is a module `@Tag("live")` test (nightly/manual, scheduled by #181), NOT the per-PR `native-turn` job (a
-  third-party endpoint that challenges datacenter IPs would make that gate permanently flaky). [#192]
+  third-party endpoint that challenges datacenter IPs would make that gate permanently flaky). **The `live`
+  exclusion MUST be a POM `<properties><excludedGroups>live</excludedGroups></properties>` Surefire USER property
+  (the forvum-tools-browser precedent), never a literal inside the plugin `<configuration>`** — an explicit plugin-XML
+  value is CLI-un-overridable (Maven ignores `-D` for an XML-set parameter), so the documented opt-in
+  `-DexcludedGroups= -Dgroups=live` silently runs ZERO tests and the live test is unrunnable as shipped (qdrant/
+  telegram still carry the hardcoded form — a pre-existing pattern for #181 to sweep). (9) A `sed -i.bak`+`mv`
+  red-check restore PRESERVES the old mtime, so Maven's incremental compiler keeps the MUTATED class in
+  `target/classes` — `touch` the source (or clean the module) after restoring, or the next build runs the mutant. [#192]

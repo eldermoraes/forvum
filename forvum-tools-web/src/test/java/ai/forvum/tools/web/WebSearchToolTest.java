@@ -29,6 +29,7 @@ class WebSearchToolTest {
     private static final class FakeBraveApi implements BraveSearchApi {
         boolean called = false;
         String lastKey;
+        String lastQuery;
         int lastCount;
         BraveSearchResponse next = new BraveSearchResponse(new BraveWebResults(List.of(
                 new BraveWebResult("Brave First", "https://a.example/1", "first snippet"),
@@ -38,6 +39,7 @@ class WebSearchToolTest {
         public BraveSearchResponse search(String apiKey, String query, int count) {
             called = true;
             lastKey = apiKey;
+            lastQuery = query;
             lastCount = count;
             return next;
         }
@@ -106,11 +108,12 @@ class WebSearchToolTest {
         FakeFetcher ddg = new FakeFetcher(ddgResults());
         WebSearchTool tool = new WebSearchTool(brave, ddg);
 
-        String out = tool.search("q", 5, spec(Optional.of("BSA-key"), Optional.empty()));
+        String out = tool.search("rust async traits", 5, spec(Optional.of("BSA-key"), Optional.empty()));
 
         assertTrue(brave.called, "a braveApiKey with no explicit backend selects Brave");
         assertFalse(ddg.called, "DuckDuckGo must not be called when Brave is selected");
         assertEquals("BSA-key", brave.lastKey);
+        assertEquals("rust async traits", brave.lastQuery, "the user's query reaches the Brave API verbatim");
         assertTrue(out.contains("Brave First"), out);
     }
 

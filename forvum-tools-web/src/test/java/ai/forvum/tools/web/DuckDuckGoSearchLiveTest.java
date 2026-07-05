@@ -10,10 +10,12 @@ import java.util.List;
 
 /**
  * A LIVE keyless search against the real DuckDuckGo HTML endpoint (#192), driving the production
- * {@link JdkHttpFetcher} + {@link DuckDuckGoBackend}. Default-OFF: {@code @Tag("live")}, which the module
- * pom excludes; opt in with {@code -DexcludedGroups= -Dgroups=live} (nightly / manual). It is the drift
- * alarm for the HTML scrape and the only place the browser-UA HTTP request is exercised end-to-end; a
- * datacenter IP may hit a bot challenge, so it is deliberately not in any per-PR gate.
+ * {@link JdkHttpFetcher} + {@link DuckDuckGoBackend}. Default-OFF: {@code @Tag("live")}, excluded via the
+ * pom's {@code <properties><excludedGroups>live</excludedGroups></properties>} Surefire USER PROPERTY (not
+ * plugin XML, which a CLI {@code -D} could not override — the forvum-tools-browser precedent); opt in with
+ * {@code -DexcludedGroups= -Dgroups=live} (nightly / manual). It is the drift alarm for the HTML scrape and
+ * the only place the browser-UA HTTP request is exercised live end-to-end; a datacenter IP may hit a bot
+ * challenge, so it is deliberately not in any per-PR gate.
  */
 @Tag("live")
 class DuckDuckGoSearchLiveTest {

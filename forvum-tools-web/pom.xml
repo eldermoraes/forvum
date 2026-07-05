@@ -12,12 +12,21 @@
 
     <artifactId>forvum-tools-web</artifactId>
 
+    <properties>
+        <!-- @Tag("live") tests (a real keyless DuckDuckGo search — DuckDuckGoSearchLiveTest) are off by
+             default. Excluded via this Surefire user property (so a bare CLI -DexcludedGroups= can clear
+             it — a value hardcoded in the plugin <configuration> could NOT be overridden, the
+             forvum-tools-browser precedent). Run the live test with: -DexcludedGroups= -Dgroups=live -->
+        <excludedGroups>live</excludedGroups>
+    </properties>
+
     <name>Forvum Tools — Web</name>
     <description>Layer-3 Forvum extension (PR-6): web.fetch (WEB_FETCH, arbitrary URL over java.net.http)
-        and web.search (WEB_SEARCH, Brave Search API over a blocking REST client). Both are READ-only
-        outbound HTTP — neither is in the #39 user-approval gate; both sit behind the engine's belt + RBAC
-        scope gates. A self-contained EgressGuard blocks SSRF (loopback/link-local/private ranges) on the
-        SSRF-exposed web.fetch surface. No AI library, no engine dependency.</description>
+        and web.search (WEB_SEARCH, pluggable backend #192: keyless DuckDuckGo HTML default, keyed Brave
+        option over a blocking REST client). Both are READ-only outbound HTTP — neither is in the #39
+        user-approval gate; both sit behind the engine's belt + RBAC scope gates. A self-contained
+        EgressGuard blocks SSRF (loopback/link-local/private ranges) on the SSRF-exposed web.fetch surface
+        and guards the fixed-host search egress. No AI library, no engine dependency.</description>
 
     <dependencyManagement>
         <dependencies>
@@ -95,12 +104,12 @@
                 <configuration>
                     <!-- A @QuarkusTest *IT here boots Quarkus in-JVM (no HTTP server needed); it also runs
                          through the reactor build under Surefire (CI `verify`). @Tag("live") tests (a real
-                         Brave API) are excluded by default; opt in with -DexcludedGroups= -Dgroups=live. -->
+                         keyless DuckDuckGo search) are excluded by default via the ${excludedGroups}
+                         property (above); opt in with -DexcludedGroups= -Dgroups=live. -->
                     <includes>
                         <include>**/*Test.java</include>
                         <include>**/*IT.java</include>
                     </includes>
-                    <excludedGroups>live</excludedGroups>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>
