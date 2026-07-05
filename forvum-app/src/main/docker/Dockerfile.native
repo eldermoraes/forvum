@@ -9,8 +9,10 @@
 # ubi9/ubi-micro is the minimal glibc base Quarkus uses for native images (a true `scratch` base needs a
 # statically linked binary; the default Forvum native build links against glibc + the Xerial SQLite JNI).
 # Pinned to an immutable digest (#174) so the build input cannot be tampered with; Dependabot (docker
-# ecosystem, .github/dependabot.yml) keeps the 9.6 digest fresh.
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.6@sha256:990002083442f6a93cd3249da32ecb7c3f6be778a1bec3a73a9c17fbc40edc15
+# ecosystem, .github/dependabot.yml) keeps the digest fresh.
+# Bumped 9.6 -> 9.8 on 2026-07-05 for CVE-2026-4878 (HIGH, libcap 2.48-9.el9_2 -> 2.48-10.el9_8.1): the
+# 9.6 tag's live digest still shipped the vulnerable libcap, so the release Trivy gate (#174) blocked it.
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.8@sha256:35de56a9413112f1474e392ebc35e0cf6f0fb484c8e8877bbae59b513694b41f
 
 WORKDIR /work/
 COPY --chown=1001:root target/*-runner /work/forvum
