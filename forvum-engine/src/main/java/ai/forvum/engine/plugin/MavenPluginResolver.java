@@ -36,7 +36,10 @@ import java.util.Locale;
  * independently of Resolver defaults and of how any remote was constructed. A missing OR mismatched checksum
  * aborts resolution and leaves no loadable JAR. Repositories are restricted to the {@code {https, file}}
  * scheme allowlist — plaintext {@code http://} (a MITM downgrade) is rejected; {@code file://} is retained
- * for local mirrors / the hermetic test path (checksum verification still applies to it).
+ * for local mirrors / the hermetic test path (checksum verification still applies to it). Documented
+ * residual: an approved https repository that redirects to http is followed by Resolver 1.9.x's HTTP
+ * transport — accepted because repositories are operator-approved, and disabling redirects would break
+ * legitimate https-to-https mirrors.
  *
  * <p><strong>Local-cache trust boundary.</strong> An artifact already in {@code ~/.m2/repository} resolves
  * with NO checksum re-verification — identical to Maven itself: the cache is the operator's own disk, inside
@@ -172,8 +175,9 @@ public class MavenPluginResolver {
         try {
             scheme = URI.create(url).getScheme();
         } catch (IllegalArgumentException e) {
+            // URISyntaxException's message echoes the full raw input (credentials included) — redact it too.
             throw new PluginResolutionException(
-                    "Malformed plugin repository URL '" + redact(url) + "': " + e.getMessage(), e);
+                    "Malformed plugin repository URL '" + redact(url) + "': " + redact(e.getMessage()), e);
         }
         scheme = scheme == null ? "" : scheme.toLowerCase(Locale.ROOT);
         if (!scheme.equals("https") && !scheme.equals("file")) {

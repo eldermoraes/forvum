@@ -85,8 +85,9 @@ final class PluginArtifactInstaller {
         Path tmp = null;
         try {
             ensureDir(pluginsDir, posix);
-            // A symlink planted at the canonical target name is a planted redirect — refuse it rather than
-            // replace-through (the atomic move onto a symlink would follow it and write the victim).
+            // A symlink planted at the canonical target name is tampering evidence — refuse the install.
+            // (ATOMIC_MOVE/rename REPLACES a target symlink; it never follows it, so this is not about
+            // preventing a write-through — a plugins dir someone planted links into is not trustworthy.)
             if (Files.isSymbolicLink(target)) {
                 throw new PluginInstallException("plugin target " + target + " is a symbolic link — "
                         + "refusing to replace it (possible path substitution); "

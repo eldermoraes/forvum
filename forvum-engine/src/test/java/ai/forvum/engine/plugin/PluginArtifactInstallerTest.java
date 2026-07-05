@@ -59,7 +59,8 @@ class PluginArtifactInstallerTest {
         Path resolved = writeJar(tmp.resolve(JAR_NAME));
         Path plugins = tmp.resolve("plugins");
         Files.createDirectories(plugins);
-        Files.setPosixFilePermissions(plugins, PosixFilePermissions.fromString("rwxr-xr-x")); // 0755, loose
+        // World-WRITABLE (0777) — the code-injection shape the issue names, not merely world-readable.
+        Files.setPosixFilePermissions(plugins, PosixFilePermissions.fromString("rwxrwxrwx"));
 
         PluginArtifactInstaller.install(resolved, plugins);
 
@@ -73,14 +74,18 @@ class PluginArtifactInstallerTest {
         Path resolved = writeJar(tmp.resolve(JAR_NAME));
         Path victim = tmp.resolve("victim-dir");
         Files.createDirectories(victim);
+        Set<PosixFilePermission> victimPermsBefore = Files.getPosixFilePermissions(victim);
         Path plugins = tmp.resolve("plugins-link");
         Files.createSymbolicLink(plugins, victim);
 
         assertThrows(PluginInstallException.class, () -> PluginArtifactInstaller.install(resolved, plugins),
                 "a symlinked plugins dir is a path-substitution vector and must be rejected");
-        // The victim directory the link pointed at must be untouched (no JAR written through it).
+        // The victim directory the link pointed at must be untouched: no JAR written through it, and its
+        // permissions unchanged (guards a reorder that would chmod THROUGH the link before rejecting).
         assertTrue(listing(victim).isEmpty(),
                 () -> "the link target must not be written through; saw: " + listing(victim));
+        assertEquals(victimPermsBefore, Files.getPosixFilePermissions(victim),
+                "the link target's permissions must not be modified through the link");
     }
 
     @Test

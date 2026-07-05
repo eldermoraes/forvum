@@ -119,10 +119,14 @@ class MavenPluginResolverTest {
         Path remote = seedRemoteRepository(tmp.resolve("remote"));
         Path plugins = tmp.resolve("plugins");
 
-        assertThrows(PluginResolutionException.class, () -> new MavenPluginResolver().install(
-                GROUP + ":" + ARTIFACT + ":" + VERSION,
-                plugins, tmp.resolve("local-cache"), List.of(fileRemote(remote))),
+        PluginResolutionException thrown = assertThrows(PluginResolutionException.class,
+                () -> new MavenPluginResolver().install(
+                        GROUP + ":" + ARTIFACT + ":" + VERSION,
+                        plugins, tmp.resolve("local-cache"), List.of(fileRemote(remote))),
                 "a missing checksum must abort resolution under CHECKSUM_POLICY_FAIL");
+        // Pin the FAILURE MODE: the abort must be the checksum policy, not some other resolution error.
+        assertTrue(thrown.getMessage().toLowerCase().contains("checksum"),
+                () -> "the diagnostic must name the checksum failure; got: " + thrown.getMessage());
         assertTrue(noArtifactStaged(plugins),
                 () -> "a rejected artifact must leave no JAR/.tmp in the plugins dir; saw: " + listing(plugins));
     }
@@ -149,12 +153,15 @@ class MavenPluginResolverTest {
     @Test
     void httpRepositoryUrlIsRejected() {
         MavenPluginResolver resolver = new MavenPluginResolver();
-        resolver.remoteRepositoryUrl = "http://insecure.example.com/maven2/";
+        // Credentialed on purpose: the rejection message echoes the URL, so it must redact the userinfo.
+        resolver.remoteRepositoryUrl = "http://user:hunter2@insecure.example.com/maven2/";
 
         PluginResolutionException thrown = assertThrows(PluginResolutionException.class, resolver::remote,
                 "plaintext http:// is a MITM downgrade and must be rejected");
         assertTrue(thrown.getMessage().contains("https"),
                 () -> "the rejection must name the accepted https scheme; got: " + thrown.getMessage());
+        assertFalse(thrown.getMessage().contains("hunter2"),
+                () -> "the rejection must NOT leak the URL credential; got: " + thrown.getMessage());
     }
 
     @Test
@@ -174,9 +181,10 @@ class MavenPluginResolverTest {
     @Test
     void resolutionFailureDiagnosticOmitsUrlCredentials(@TempDir Path tmp) {
         // An unresolvable artifact through a userinfo-bearing remote: the failure message must carry the
-        // coordinates and host but NOT the secret in the URL userinfo.
+        // coordinates and host but NOT the secret in the URL userinfo. host.invalid (RFC 6761) never
+        // resolves, keeping the test hermetic — no live DNS.
         RemoteRepository credentialed = new RemoteRepository.Builder(
-                "test", "default", "https://user:hunter2@host.example.com/maven2/").build();
+                "test", "default", "https://user:hunter2@host.invalid/maven2/").build();
 
         PluginResolutionException thrown = assertThrows(PluginResolutionException.class,
                 () -> new MavenPluginResolver().install(
@@ -185,6 +193,21 @@ class MavenPluginResolverTest {
                 "an unresolvable coordinate must raise PluginResolutionException");
         assertTrue(thrown.getMessage().contains("no-such-artifact"),
                 () -> "the diagnostic must name the coordinate; got: " + thrown.getMessage());
+        assertFalse(thrown.getMessage().contains("hunter2"),
+                () -> "the diagnostic must NOT leak the URL credential; got: " + thrown.getMessage());
+    }
+
+    @Test
+    void malformedCredentialedRepositoryUrlDoesNotLeakTheCredential() {
+        MavenPluginResolver resolver = new MavenPluginResolver();
+        // Malformed (space in path) AND credentialed: URI.create's exception message echoes the FULL raw
+        // input, so the malformed-URL diagnostic must redact the exception message too, not just the URL.
+        resolver.remoteRepositoryUrl = "https://user:hunter2@host.invalid/maven2/bad path";
+
+        PluginResolutionException thrown = assertThrows(PluginResolutionException.class, resolver::remote,
+                "a malformed repository URL must be rejected");
+        assertTrue(thrown.getMessage().contains("Malformed plugin repository URL"),
+                () -> "the diagnostic must name the malformed-URL context; got: " + thrown.getMessage());
         assertFalse(thrown.getMessage().contains("hunter2"),
                 () -> "the diagnostic must NOT leak the URL credential; got: " + thrown.getMessage());
     }

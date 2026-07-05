@@ -2014,8 +2014,7 @@ Generalizable lessons from completed milestones; append here as milestones land.
   `.jar`+`.pom` but NO `.sha1` and passed only because `warn` tolerates it — flip RED; the fix is
   fixture-side (write a valid `.jar.sha1` via `MessageDigest`/`HexFormat`) and the old no-sha1 shape is
   promoted to the `missingChecksumIsRejected*` negative test (the [#176] rewrite-the-test-that-encoded-the-bug
-  arc). NEGATIVE-
-  TEST TRAP: a cached artifact resolves with NO checksum re-verification (the operator's own `~/.m2` disk is
+  arc). NEGATIVE-TEST TRAP: a cached artifact resolves with NO checksum re-verification (the operator's own `~/.m2` disk is
   trusted — the local-cache boundary), so a tampered-remote test reusing a warm cache passes for the wrong
   reason — use a FRESH local-cache `@TempDir` per negative case (the per-test dirs already comply). A
   concrete-version `resolveArtifact` does NOT fetch the `.pom`, so only the `.jar.sha1` governs. RED-CHECK:
