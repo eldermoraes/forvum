@@ -1,6 +1,6 @@
 # Trivy suppression file (#174) — image + SBOM scanning.
 #
-# EMPTY by design: no suppressions today. The release image scan and the weekly deep scan run with
+# The release image scan, the release SBOM scan, and the weekly deep scan run with
 # `ignore-unfixed: true` (ubi9/ubi-micro carries unfixable base CVEs — fixable-only keeps the gate
 # actionable) and `severity: CRITICAL,HIGH`. A CRITICAL/HIGH fixable finding fails the release job and
 # the weekly job; it is FIXED (bump the dependency / base) or suppressed HERE, never silently ignored.
@@ -9,11 +9,45 @@
 #   - id:         the CVE / advisory id.
 #   - statement:  owner (@eldermoraes) + the concrete reason (why it is not exploitable / not fixable now).
 #   - expired_at: a mandatory expiry date (YYYY-MM-DD). After it, Trivy re-surfaces the finding.
-# Format (uncomment and fill when a real, justified suppression is needed):
 #
-# vulnerabilities:
-#   - id: CVE-0000-00000
-#     statement: "Owner @eldermoraes — not reachable: <reason>. Revisit at expiry."
-#     expired_at: 2026-01-01
+# CURRENT ENTRIES — found by the FIRST full-transitive SBOM scan (the #174 validation dispatch, run
+# 28725633724): 9 HIGH (0 CRITICAL), all fixable upstream, all Quarkus-platform-BOM-managed transitives
+# (quarkus-bom 3.33.2 pins jackson-databind 2.21.2 + netty 4.1.133.Final). The repo rule (CLAUDE.md
+# section 2) forbids pinning Quarkus-managed deps independently, so the remediation is the next Quarkus
+# 3.33.x platform patch bump (a maintainer decision; Dependabot alerts + security-update PRs surface it
+# automatically once the dependency graph is submitted on merge to main). Expiry = the 30-day HIGH SLA
+# (docs/SECURITY-GATES.md section 3); Trivy re-surfaces everything on 2026-08-04 if the platform has not
+# been bumped by then.
 
-vulnerabilities: []
+vulnerabilities:
+  # com.fasterxml.jackson.core:jackson-databind 2.21.2 -> fixed in 2.21.4 (platform-managed)
+  - id: CVE-2026-54512
+    statement: "Owner @eldermoraes - jackson-databind (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying 2.21.4+. Re-triage at expiry."
+    expired_at: 2026-08-04
+  - id: CVE-2026-54513
+    statement: "Owner @eldermoraes - jackson-databind (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying 2.21.4+. Re-triage at expiry."
+    expired_at: 2026-08-04
+  # io.netty:netty-codec-haproxy 4.1.133.Final -> fixed in 4.1.135.Final (platform-managed)
+  - id: CVE-2026-44893
+    statement: "Owner @eldermoraes - netty-codec-haproxy (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying netty 4.1.135.Final+. Re-triage at expiry."
+    expired_at: 2026-08-04
+  - id: CVE-2026-48059
+    statement: "Owner @eldermoraes - netty-codec-haproxy (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying netty 4.1.135.Final+. Re-triage at expiry."
+    expired_at: 2026-08-04
+  # io.netty:netty-handler 4.1.133.Final -> fixed in 4.1.135.Final (platform-managed)
+  - id: CVE-2026-44249
+    statement: "Owner @eldermoraes - netty-handler (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying netty 4.1.135.Final+. Re-triage at expiry."
+    expired_at: 2026-08-04
+  - id: CVE-2026-45416
+    statement: "Owner @eldermoraes - netty-handler (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying netty 4.1.135.Final+. Re-triage at expiry."
+    expired_at: 2026-08-04
+  - id: CVE-2026-50010
+    statement: "Owner @eldermoraes - netty-handler (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying netty 4.1.135.Final+. Re-triage at expiry."
+    expired_at: 2026-08-04
+  # io.netty:netty-resolver-dns 4.1.133.Final -> fixed in 4.1.135.Final (platform-managed)
+  - id: CVE-2026-45674
+    statement: "Owner @eldermoraes - netty-resolver-dns (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying netty 4.1.135.Final+. Re-triage at expiry."
+    expired_at: 2026-08-04
+  - id: CVE-2026-47691
+    statement: "Owner @eldermoraes - netty-resolver-dns (quarkus-bom 3.33.2 transitive); remediation = Quarkus 3.33.x platform bump to a line carrying netty 4.1.135.Final+. Re-triage at expiry."
+    expired_at: 2026-08-04

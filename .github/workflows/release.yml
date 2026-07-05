@@ -117,6 +117,20 @@ jobs:
           cp target/bom.json "dist/forvum-${VERSION}-maven-sbom.cdx.json"
           ls -lh dist
 
+      # SBOM<->scan correlation (#174): scan the EXACT shipped Maven closure, blocking. A native binary
+      # hides the jars from the image scan below, so this is the release gate for Java-dependency CVEs.
+      # Fixable CRITICAL/HIGH only; suppressions (owner + reason + expired_at) in .trivyignore.yaml.
+      - name: Trivy — scan the Maven SBOM (blocking)
+        if: matrix.platform == 'linux-x64'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
+        with:
+          scan-type: sbom
+          scan-ref: target/bom.json
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'
+          trivyignores: .trivyignore.yaml
+
       # Publish the native single-binary OCI image to GHCR (linux leg only — the image is linux/amd64).
       # The Helm chart (deploy/helm) and docs/DEPLOY.md's Docker path pull this image. The native runner
       # built above sits at forvum-app/target/*-runner, which Dockerfile.native COPYs (context=forvum-app).
