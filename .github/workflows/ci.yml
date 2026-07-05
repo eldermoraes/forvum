@@ -26,7 +26,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-14]   # linux-amd64 + macos-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -96,7 +96,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-14]   # linux-amd64 + macos-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # GitHub macOS runners have no resolvable hostname, so InetAddress.getLocalHost() — which the
       # OpenTelemetry host-resource detector and the Vert.x address resolver call at startup, independent
       # of the HTTP listener — stalls ~5 s, blowing the cold-start gate (and slowing the native smoke).
@@ -166,7 +166,7 @@ jobs:
         ports:
           - 11434:11434
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Mandrel (Linux)
         uses: graalvm/setup-graalvm@cabbb10818fabc989d6dbd508e4846596d20dd2d   # v1.6.0
         with:

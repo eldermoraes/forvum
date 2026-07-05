@@ -39,7 +39,7 @@ jobs:
           - os: macos-15-intel   # macos-x64 (Intel macOS runner, GraalVM CE)
             platform: macos-x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # GitHub macOS runners have no resolvable hostname, so InetAddress.getLocalHost()
       # stalls ~5 s at startup (OpenTelemetry host-resource detector + Vert.x resolver).
@@ -219,7 +219,7 @@ jobs:
     permissions:
       contents: write   # create the GitHub Release + upload assets
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download all platform assets
         uses: actions/download-artifact@v4
