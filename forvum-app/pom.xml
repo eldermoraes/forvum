@@ -134,6 +134,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-memory</artifactId>
         </dependency>
+        <!-- Layer-3 Text-to-speech tool (#186): contributes tts.speak (MEDIA_SYNTHESIZE) to the
+             ToolRegistry, driving the operator-installed piper binary as a subprocess. No AI library,
+             no reflection; inert (an actionable error) when tools/tts.json is absent. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-tts</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>

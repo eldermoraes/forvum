@@ -36,4 +36,12 @@ class ToolRegistryDiscoveryInAppClasspathTest {
         assertTrue(names.containsAll(Set.of("fs.read", "fs.write", "fs.list")),
                 "the filesystem tool module must be discovered + registered on the app classpath, found: " + names);
     }
+
+    @Test
+    void theTtsToolIsDiscoveredOnTheAssembledClasspath() {
+        Set<String> names = registry.all().stream().map(ToolSpec::name).collect(Collectors.toSet());
+
+        assertTrue(names.contains("tts.speak"),
+                "the forvum-tools-tts module (#186) must be discovered + registered on the app classpath, found: " + names);
+    }
 }

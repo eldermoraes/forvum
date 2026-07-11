@@ -101,13 +101,13 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 
 30. **#189** `feat(tools)`: session + sub-agent introspection tools (`agents.list` / `sessions.*`) — depends on #167/#168.
 31. **#193** ✅ `[LOW]` `feat(tools)`: explicit `memory.save` / `memory.recall` tool. *Done:* a Layer-3 `forvum-tools-memory` module contributes model-callable `memory.save` (MEMORY_WRITE) / `memory.recall` (MEMORY_READ) over a new `forvum-sdk` `MemoryAccess` seam (Resolution-B, engine-implemented `EngineMemoryAccess`), reusing #175's `SemanticMemoryStore.upsertFact` + the DR-6a pre-memory-write filter + `MemorySelector` — no second index, no migration. `MEMORY_READ`/`MEMORY_WRITE` added to `PermissionScope` (auto-flow into `default-user`); round-trip + cross-identity-isolation + blocked-filter ITs and a `MemoryWriteScopeDeniedTest` RBAC-audit test land with it.
-32. **#186** ▸ `feat(tools)`: text-to-speech (`tts.speak`) tool — reuses the voice-channel Piper subprocess pattern.
+32. **#186** ✅ `feat(tools)`: text-to-speech (`tts.speak`) tool. *Done:* a Layer-3 `forvum-tools-tts` module contributes the model-callable `tts.speak(text, [voice])` tool (new `PermissionScope.MEDIA_SYNTHESIZE`, auto-flow into `default-user`), synthesizing a WAV under `<workspace>/tts/` by driving the operator-installed piper binary (`tools/tts.json`: `piperBin` + `piperVoice` + an optional `voices` name→path map) through the module's own copy of the voice channel's bounded-drain `SubprocessRunner` (stdin write-then-close, `{PATH,HOME,LANG}` env scrub) — no AI library, no reflection, inert (an actionable error) when unconfigured. `userConfirmRequired=false` (fs-write-class). A real-piper synthesis is a `@Tag("live")` test (default-off); the app-classpath discovery guard + native compile/boot cover the rest.
 33. **#187** ▸ `feat(tools)`: media-generation tools (image/video/music) via a new `GenerationProvider` SPI.
 34. **#194** `[HIGH]` `feat(app)`: interactive first-run onboarding wizard (`forvum onboard`) — composes #184 + #192; **pullable forward** right after Wave 5 if adoption is a priority.
 
 ## Wave 8 — Deferred / blocked *(do when unblocked)*
 
-35. **#75** `chore(deps)`: bump `quarkus-langchain4j` 1.11.0.CR2 → 1.11.0 GA — upstream shipped; in flight.
+35. **#75** ✅ `chore(deps)`: bump `quarkus-langchain4j` 1.11.0.CR2 → 1.11.0 GA. *Done:* merged (PR #231) — `forvum-bom` now pins `quarkus-langchain4j-bom:1.11.0` (GA, targeting Quarkus 3.33.2) and LangChain4j core `1.16.2` rides transitively.
 36. **#138** *(deferred, arch-touching)* Approval R2: exact checkpoint/resume of a parked turn across restart — reverses the M18 R6 no-checkpointer stance; do deliberately later.
 37. **#125** `[blocked: native crypto]` `feat(channel-matrix)`: E2EE room support — needs a native-clean JVM crypto path.
 
@@ -122,7 +122,7 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 
 If you want visible progress toward OpenClaw parity + SOTA context engineering **while the security spine
 lands**, the `▸`-marked items have no dependency on the authz spine and can run as a second stream from day
-one: **#160, #179, #184, #192, #185, #190, #191, #195, #197** (and #186/#187 later). The items that *must*
+one: **#160, #179, #184, #192, #185, #190, #191, #195, #197** (and #187 later; #186 ✅ done). The items that *must*
 wait for Wave 1 are **#188** (after #170), **#189** (after #167/#168), and **#175 → #193 / #196**.
 
 ## How this list was derived

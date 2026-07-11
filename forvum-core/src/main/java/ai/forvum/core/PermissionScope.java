@@ -66,7 +66,16 @@ public enum PermissionScope {
      * {@code default-user} role ({@code EnumSet.allOf}) includes it; a restricted role can grant recall
      * ({@link #MEMORY_READ}) while withholding write.
      */
-    MEMORY_WRITE;
+    MEMORY_WRITE,
+    /**
+     * Authority to synthesize speech via {@code tts.speak} (#186, {@code forvum-tools-tts}) — driving the
+     * operator-installed piper binary to write a synthesized WAV under the workspace. Distinct from
+     * {@link #FS_WRITE} so a role can grant filesystem write without granting audio synthesis / a
+     * subprocess launch. The permissive {@code default-user} role ({@code EnumSet.allOf}) includes it; a
+     * restricted role can withhold it. The read-side sibling {@code MEDIA_ANALYZE} (#185) is not yet
+     * declared.
+     */
+    MEDIA_SYNTHESIZE;
 
     /**
      * Parses a string into a {@code PermissionScope}, throwing a contextual

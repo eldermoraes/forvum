@@ -2037,3 +2037,39 @@ Generalizable lessons from completed milestones; append here as milestones land.
   install-time is the enforced gate (no startup observer — §13 simplicity; a future drop-in scanner must
   re-validate). Zero new native surface (pure `java.nio` + method-body-only resolver refs, the P2-6
   inertness invariant preserved), zero new config, zero new deps. [#171]
+- **A model-callable TTS tool is the shell/filesystem Layer-3 recipe + the VOICE channel's subprocess pair
+  (NOT shell's) — because the two copied recipes differ on the ONE thing that matters: stdin.** #186's
+  `forvum-tools-tts` (`tts.speak`) lifts piper out of the voice CHANNEL into an ordinary turn's tool
+  surface. The load-bearing copy choice: `ShellExecutor` closes the child's stdin IMMEDIATELY after start
+  (it feeds nothing — a `cat`/`grep` with no operand must see EOF at once), whereas piper is stdin-FED (the
+  text to synthesize rides on standard input) — so the base is the voice `DefaultSubprocessRunner`'s
+  write-the-text-then-close (try-with-resources on `getOutputStream()`, IOException on early child exit
+  tolerated), NOT a blind `ShellExecutor` copy (which would synthesize EMPTY audio with exit 0). The #186
+  delta on the voice runner is the ShellExecutor env scrub (`environment().clear()` + re-add
+  `{PATH,HOME,LANG}`); everything else (concurrent VT drains via `AtomicReference`, kill-tree, the bounded
+  post-settle `join(DRAIN_GRACE_MILLIS)` so an escaped/reparented descendant holding the pipe cannot hang
+  the turn) is copied verbatim. A Layer-3 plugin cannot depend on a sibling, so the runner pair + the
+  `WorkspaceRoot`-style resolution are COPIED per the established per-module convention ([#173]). New
+  `PermissionScope.MEDIA_SYNTHESIZE` (append-only enum → `PermissionScopeTest` count 9→10 + a round-trip
+  case is the only pin — the [#167] enum-append-ripple; `default-user`'s `EnumSet.allOf` auto-grows).
+  `tools()` returns a CONSTANT SPEC (zero boot IO, [P2-13]); config (`tools/tts.json`: `piperBin` +
+  `piperVoice` + an optional `voices` name→path map) is read on demand into a hand-parsed record (no
+  `@RegisterForReflection` — the voice `Spec` precedent), inert (an actionable "not configured" error) when
+  absent. `userConfirmRequired=false` (fs-write-class: operator-fixed program/argv/voice/output, model
+  controls only the stdin text + a config-resolved voice NAME — a raw model-supplied `.onnx` path would be
+  an untrusted-path-to-subprocess surface, which the name→path map forecloses). Output is a generated
+  collision-free name (`speech-<yyyyMMdd-HHmmss>-<8 hex>.wav`) under a FIXED `<workspace>/tts/` subdir, so
+  there is no model-supplied path to confine (copying the fs/shell two-stage `WorkspaceRoot` confinement
+  would be machinery for an impossible input, §2). The synthesizer is pure (runner + workspace-root
+  ctor-injected) so a `FakeRunner` that records argv/stdin/timeout AND writes bytes to the `-f` path drives
+  every branch hermetically; the real piper round-trip is a `@Tag("live")` test excluded via the POM
+  `<excludedGroups>live</excludedGroups>` USER property (never a plugin-XML literal — CLI-un-overridable,
+  [#192]), never gating the native compile (the shell/voice posture). **NATIVE TRAP the local `-Pnative`
+  build caught (green JVM `verify` hid it):** a `private static final SecureRandom RANDOM = new
+  SecureRandom()` for the unique file-name suffix is initialized at class-init and BAKED INTO the image
+  heap — native-image FAILS with `UnsupportedFeatureException: Detected an instance of Random/SplittableRandom
+  class in the image heap` (its cached seed would make it non-random at run time). A static
+  `Random`/`SecureRandom` field is a native-image no-go; use `UUID.randomUUID()` (its `SecureRandom` is a
+  run-time-initialized holder INSIDE `UUID`, not a field on your class) or create the instance at call
+  time. The [M14] rule stands — a Layer-3 module only native-COMPILEs once `forvum-app` depends on it, so
+  RUN the local `-Pnative` build in the same PR; the JVM suite cannot catch an image-heap constraint. [#186]

@@ -1,0 +1,163 @@
+package ai.forvum.tools.tts;
+
+import jakarta.enterprise.context.ApplicationScoped;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
+/**
+ * The production {@link SubprocessRunner}: a thin {@link ProcessBuilder} wrapper. It launches the piper
+ * binary with a SCRUBBED environment, drains its standard output and standard error on dedicated virtual
+ * threads (so a chatty process can never deadlock by filling a pipe buffer while we block on the other
+ * stream — the classic {@code ProcessBuilder} trap), writes the text on {@code stdin} and closes it (so
+ * piper sees EOF immediately after its input rather than blocking), and force-kills the process (and its
+ * descendants) if it overruns {@code timeout}.
+ *
+ * <p>Per CLAUDE.md §3.8 the wait is BLOCKING (not reactive); the stream drains run on
+ * {@link Thread#ofVirtual() virtual threads} and the {@link Process#waitFor} runs on the calling
+ * (virtual) thread, so the whole driver is on virtual threads and links no native audio code.
+ *
+ * <p><strong>Scrubbed environment (#186).</strong> {@code environment().clear()} then re-add exactly
+ * {@code PATH}, {@code HOME}, {@code LANG} from the host environment (the {@code ShellExecutor} recipe) —
+ * a subprocess is not handed the parent process's full environment.
+ *
+ * <p><strong>stdin: write-then-close (NOT close-immediately).</strong> Piper is stdin-FED (the text to
+ * synthesize rides on standard input), unlike {@code shell.exec} which closes the child's stdin
+ * immediately because it feeds nothing. The text is written and the stream closed (try-with-resources),
+ * so the child sees EOF at once after its input and never blocks on an open stdin.
+ *
+ * <p><strong>Bounded drain.</strong> After the process settles (natural exit or forced kill) the calling
+ * thread waits for each drain to observe EOF and publish, but only up to {@link #DRAIN_GRACE_MILLIS} —
+ * mirroring {@code ShellExecutor}. A force-killed process can leave a double-forked / reparented
+ * descendant that escaped {@code descendants()} yet keeps the output pipe's write end open; a naive
+ * {@code readAllBytes()} (or an {@code ExecutorService} whose {@code close()} awaits its tasks) would then
+ * wait for an EOF that only arrives when that descendant exits, hanging the worker far past the process's
+ * own completion. The bounded join proceeds with whatever each drain captured. The drain threads are
+ * virtual (always daemon), so an abandoned blocked drain never keeps the JVM alive.
+ */
+@ApplicationScoped
+public class DefaultSubprocessRunner implements SubprocessRunner {
+
+    /**
+     * Grace given to each drain thread to observe EOF after the process settles before the calling thread
+     * gives up on it. Bounds the wait so an escaped/reparented descendant holding an output pipe open
+     * cannot hang the worker; on expiry we proceed with whatever was captured.
+     */
+    static final long DRAIN_GRACE_MILLIS = 2_000;
+
+    /** The only environment variables the piper subprocess inherits (#186; the ShellExecutor recipe). */
+    private static final List<String> PASSTHROUGH_ENV = List.of("PATH", "HOME", "LANG");
+
+    @Override
+    public Result run(List<String> argv, String stdin, Duration timeout)
+            throws IOException, InterruptedException {
+        ProcessBuilder builder = new ProcessBuilder(argv);
+
+        // Scrub the environment to PATH/HOME/LANG only (#186): a subprocess is not handed the parent's
+        // full environment. A binary needing another variable (e.g. TERM) fails — acceptable for v0.1.
+        Map<String, String> env = builder.environment();
+        Map<String, String> host = System.getenv();
+        env.clear();
+        for (String key : PASSTHROUGH_ENV) {
+            String value = host.get(key);
+            if (value != null) {
+                env.put(key, value);
+            }
+        }
+
+        Process process = builder.start();
+
+        // Drain stdout/stderr concurrently so a full pipe buffer can never block the process (and us).
+        AtomicReference<String> out = new AtomicReference<>("");
+        AtomicReference<String> err = new AtomicReference<>("");
+        Thread outDrain = Thread.ofVirtual().name("tts-subproc-stdout")
+                .start(() -> out.set(readFully(process.getInputStream())));
+        Thread errDrain = Thread.ofVirtual().name("tts-subproc-stderr")
+                .start(() -> err.set(readFully(process.getErrorStream())));
+
+        if (stdin != null) {
+            try (OutputStream in = process.getOutputStream()) {
+                in.write(stdin.getBytes(StandardCharsets.UTF_8));
+            } catch (IOException ignored) {
+                // The process may close stdin early (e.g. it has all it needs); that is not an error
+                // by itself — the exit code / output is what the caller judges on.
+            }
+        }
+
+        boolean finished;
+        try {
+            finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            // An interrupt must not orphan the started piper (the ShellExecutor discipline): kill the
+            // process tree exactly as on timeout, reap it, give each drain its bounded grace, then
+            // restore the interrupt flag and rethrow.
+            killTree(process);
+            reapQuietly(process);
+            joinQuietly(outDrain);
+            joinQuietly(errDrain);
+            Thread.currentThread().interrupt();
+            throw e;
+        }
+        if (!finished) {
+            killTree(process);
+            process.waitFor();
+        }
+        // Let the drains observe EOF (after the natural exit or the forced kill) and publish — bounded, so
+        // an escaped descendant holding an output pipe open cannot hang us past the process's completion.
+        outDrain.join(DRAIN_GRACE_MILLIS);
+        errDrain.join(DRAIN_GRACE_MILLIS);
+
+        int exitCode = finished ? process.exitValue() : Result.TIMED_OUT;
+        return new Result(exitCode, out.get(), err.get());
+    }
+
+    /** Force-kill the process and every descendant — the timeout AND interrupt kill sequence. */
+    private static void killTree(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+    }
+
+    /**
+     * Reap a just-killed process, tolerating a second interrupt (the caller is already handling one and
+     * restores the flag; the JVM's process reaper collects the child regardless).
+     */
+    private static void reapQuietly(Process process) {
+        try {
+            process.waitFor();
+        } catch (InterruptedException ignored) {
+            // Already handling an interrupt; the caller restores the flag.
+        }
+    }
+
+    /** Bounded drain join, tolerating a second interrupt (the drain is a daemon virtual thread). */
+    private static void joinQuietly(Thread drain) {
+        try {
+            drain.join(DRAIN_GRACE_MILLIS);
+        } catch (InterruptedException ignored) {
+            // Already handling an interrupt; proceed with whatever the drain captured.
+        }
+    }
+
+    /**
+     * Read an input stream fully to a UTF-8 string. A read error after a forced kill is expected (the
+     * stream is closed under us), so it yields the empty string rather than propagating — the caller
+     * judges on the exit code / timeout sentinel, not on a post-kill drain failure. Package-private so a
+     * test can pin the swallow directly with a throwing stream.
+     */
+    static String readFully(InputStream stream) {
+        try (stream) {
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            // The stream is closed under us when the process is destroyed; a read error after a kill is
+            // expected, so capture nothing rather than crashing the drain thread.
+            return "";
+        }
+    }
+}
