@@ -1,0 +1,7 @@
+{
+  "extension_id": "tts",
+  "module_name": "forvum-tools-tts",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.tts.TtsToolProvider" }
+  ]
+}
