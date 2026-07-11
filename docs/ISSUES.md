@@ -50,7 +50,7 @@ post-v0.5 work is in [`docs/IMPLEMENTATION-ORDER.md`](IMPLEMENTATION-ORDER.md), 
 
 ## Version baseline (from `forvum-bom`, §2.1)
 
-Quarkus 3.33.x LTS (3.33.2) · `quarkus-langchain4j-bom` 1.11.0.CR2 (PRE-RELEASE; brings LangChain4j core 1.16.1; stable fallback 1.10.0 → 1.14.1) ·
+Quarkus 3.33.x LTS (3.33.2) · `quarkus-langchain4j-bom` 1.11.0 (GA; brings LangChain4j core 1.16.2) ·
 `langgraph4j-core` 1.8.17 · `tamboui-bom` 0.3.0 (TUI) · Java 25 · GraalVM CE 25 / Mandrel 25.0.x-Final · Xerial SQLite JDBC
 ≥ 3.40.1.0 (use ~3.53.x). All version-bearing issues pin through `forvum-bom`, the single bump point.
 
@@ -243,7 +243,7 @@ not the reactor skeleton (§3.9).
 
 **Scope / Deliverables.** Create parent + bom + core + sdk + engine + app POMs; Maven Wrapper; compiler
 config `maven.compiler.release=25`; `.gitignore`. Lock Java 25 and the Quarkus 3.33.x LTS platform BOM.
-`forvum-bom` imports `quarkus-langchain4j-bom:1.11.0.CR1` (PRE-RELEASE; stable fallback 1.10.0) and pins `langgraph4j-core:1.8.17` and
+`forvum-bom` imports `quarkus-langchain4j-bom:1.11.0` (GA) and pins `langgraph4j-core:1.8.17` and
 `org.xerial:sqlite-jdbc` (≥ 3.40.1.0) as the single bump point (§2.1).
 
 **Files.** `pom.xml` (parent), `forvum-bom/pom.xml`, `forvum-core/pom.xml`, `forvum-sdk/pom.xml`,
@@ -256,7 +256,7 @@ config `maven.compiler.release=25`; `.gitignore`. Lock Java 25 and the Quarkus 3
 - **[NATIVE]** the bootstrapped `-Pnative` profile native-compiles a trivial `forvum-app` to a runner
   binary in CI from day one (native gated from M1, §6 / §3.7); Mandrel 25.0.x-Final used as the
   `native-image` distribution.
-- `forvum-bom` is the single version source: `quarkus-langchain4j-bom:1.11.0.CR1`, `langgraph4j-core:1.8.17`,
+- `forvum-bom` is the single version source: `quarkus-langchain4j-bom:1.11.0`, `langgraph4j-core:1.8.17`,
   `sqlite-jdbc` ≥ 3.40.1.0 present; no version pinned outside the BOM.
 - **[PLUGIN]** platform version + extension wiring harvested via `quarkus/create` (throwaway app),
   coordinates transplanted into the hand-authored reactor; the reactor wiring the plugin cannot
@@ -382,7 +382,7 @@ boundary; §4.3.1 ties V2 to M6 consumption).
   native resources (SQLite-only SQL); forward-only Flyway CI check applies. The pinning mitigation
   holds in native.
 - **[PLUGIN]** `quarkus/skills` for `hibernate-orm-panache` + `flyway` before code; `quarkus/searchDocs`
-  for SQLite dialect config; tests via Dev MCP. NOTE: adopting qlc4j 1.11.0.CR1 on Quarkus 3.33.1 (a matched
+  for SQLite dialect config; tests via Dev MCP. NOTE: adopting qlc4j 1.11.0 GA on Quarkus 3.33.2 (a matched
   pair) resolves the demo-branch Quarkiverse-vs-Quarkus build-step incompatibility recorded in
   deferral D8 (qlc4j 0.26.1 vs Quarkus 3.31.4).
 
@@ -476,7 +476,7 @@ hierarchy, NOT string-matched HTTP codes; record the failing exception's FQCN in
   two rows, second `is_fallback = 1`.
 - **[NATIVE]** decorator + langchain4j-core native-clean.
 - **[PLUGIN]** `context7` for the LangChain4j `ChatModel`/`StreamingChatModel`/`dev.langchain4j.exception`
-  API (core 1.15.1 via qlc4j 1.11.0.CR1); `quarkus/searchDocs` for `quarkus-langchain4j` wiring.
+  API (core 1.16.2 via qlc4j 1.11.0); `quarkus/searchDocs` for `quarkus-langchain4j` wiring.
 
 **Dependencies.** M5 (writes `provider_calls`). Unblocks: M9–M12, M15, M17, M18.
 

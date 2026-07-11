@@ -107,7 +107,7 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 
 ## Wave 8 — Deferred / blocked *(do when unblocked)*
 
-35. **#75** `[blocked: upstream]` `chore(deps)`: bump `quarkus-langchain4j` 1.11.0.CR2 → 1.11.0 GA — when upstream ships.
+35. **#75** `chore(deps)`: bump `quarkus-langchain4j` 1.11.0.CR2 → 1.11.0 GA — upstream shipped; in flight.
 36. **#138** *(deferred, arch-touching)* Approval R2: exact checkpoint/resume of a parked turn across restart — reverses the M18 R6 no-checkpointer stance; do deliberately later.
 37. **#125** `[blocked: native crypto]` `feat(channel-matrix)`: E2EE room support — needs a native-clean JVM crypto path.
 
