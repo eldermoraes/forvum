@@ -91,10 +91,22 @@ public class DefaultSubprocessRunner implements SubprocessRunner {
             }
         }
 
-        boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        boolean finished;
+        try {
+            finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            // An interrupt must not orphan the started piper (the ShellExecutor discipline): kill the
+            // process tree exactly as on timeout, reap it, give each drain its bounded grace, then
+            // restore the interrupt flag and rethrow.
+            killTree(process);
+            reapQuietly(process);
+            joinQuietly(outDrain);
+            joinQuietly(errDrain);
+            Thread.currentThread().interrupt();
+            throw e;
+        }
         if (!finished) {
-            process.descendants().forEach(ProcessHandle::destroyForcibly);
-            process.destroyForcibly();
+            killTree(process);
             process.waitFor();
         }
         // Let the drains observe EOF (after the natural exit or the forced kill) and publish — bounded, so
@@ -104,6 +116,33 @@ public class DefaultSubprocessRunner implements SubprocessRunner {
 
         int exitCode = finished ? process.exitValue() : Result.TIMED_OUT;
         return new Result(exitCode, out.get(), err.get());
+    }
+
+    /** Force-kill the process and every descendant — the timeout AND interrupt kill sequence. */
+    private static void killTree(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+    }
+
+    /**
+     * Reap a just-killed process, tolerating a second interrupt (the caller is already handling one and
+     * restores the flag; the JVM's process reaper collects the child regardless).
+     */
+    private static void reapQuietly(Process process) {
+        try {
+            process.waitFor();
+        } catch (InterruptedException ignored) {
+            // Already handling an interrupt; the caller restores the flag.
+        }
+    }
+
+    /** Bounded drain join, tolerating a second interrupt (the drain is a daemon virtual thread). */
+    private static void joinQuietly(Thread drain) {
+        try {
+            drain.join(DRAIN_GRACE_MILLIS);
+        } catch (InterruptedException ignored) {
+            // Already handling an interrupt; proceed with whatever the drain captured.
+        }
     }
 
     /**

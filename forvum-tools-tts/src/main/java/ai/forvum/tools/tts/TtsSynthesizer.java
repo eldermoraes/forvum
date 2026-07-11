@@ -59,8 +59,8 @@ public final class TtsSynthesizer {
             throw new TtsException("tts.speak is not configured: create $FORVUM_HOME/tools/tts.json with "
                     + "piperBin (path to the piper binary) and piperVoice (path to an .onnx voice model).");
         }
-        String piperBin = spec.piperBin().orElseThrow(() -> new TtsException(
-                "tts.speak is not configured: set piperBin in $FORVUM_HOME/tools/tts.json."));
+        // Present by the isReady() guard above — a plain unwrap keeps a single "not configured" message.
+        String piperBin = spec.piperBin().orElseThrow();
         String voice = spec.resolveVoice(voiceName);
 
         Path ttsDir = workspaceRoot.resolve(TTS_SUBDIR);
@@ -105,9 +105,10 @@ public final class TtsSynthesizer {
             move(temp, outFile);
             Path relative = workspaceRoot.relativize(outFile);
             return "wrote " + size + " bytes to " + relative + " (absolute: " + outFile + ").";
-        } catch (TtsException e) {
+        } finally {
+            // Cleanup on every exit path (the VoicePipeline discipline). After the successful
+            // ATOMIC_MOVE the temp no longer exists, so this is a safe no-op on success.
             deleteQuietly(temp);
-            throw e;
         }
     }
 

@@ -145,7 +145,9 @@ public class TtsConfig {
 
         /**
          * Resolve the ONNX voice model path for a requested voice name. A blank/absent name selects the
-         * default {@code piperVoice}; a named voice must appear in the {@code voices} map.
+         * default {@code piperVoice}; a named voice must appear in the {@code voices} map. Callers check
+         * {@link #isReady()} first, so the default voice is present on every production path (the plain
+         * unwrap keeps the single "not configured" message on the {@code isReady()} guard).
          *
          * @param requestedVoice the voice name from the tool call, or {@code null}/blank for the default
          * @return the resolved ONNX voice model path
@@ -153,8 +155,7 @@ public class TtsConfig {
          */
         public String resolveVoice(String requestedVoice) {
             if (requestedVoice == null || requestedVoice.isBlank()) {
-                return piperVoice().orElseThrow(() -> new TtsException(
-                        "tts.speak is not configured: set piperVoice in $FORVUM_HOME/tools/tts.json."));
+                return piperVoice().orElseThrow();
             }
             String voice = requestedVoice.strip();
             String path = voices.get(voice);

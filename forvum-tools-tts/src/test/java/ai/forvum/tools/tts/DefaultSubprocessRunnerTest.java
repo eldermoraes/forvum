@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The {@link DefaultSubprocessRunner} {@link ProcessBuilder} seam, driven against tiny inline
@@ -119,6 +120,47 @@ class DefaultSubprocessRunnerTest {
         assertTrue(elapsedMillis < 10_000,
                 "the bounded drain must not wait on an escaped descendant holding the pipe (took "
                         + elapsedMillis + "ms)");
+    }
+
+    @Test
+    void anInterruptForceKillsTheProcessInsteadOfOrphaningIt() throws Exception {
+        // Interrupting the calling thread mid-waitFor must kill the started child (the same sequence as a
+        // timeout) and rethrow InterruptedException promptly — never leave the child orphaned/running.
+        String sleep = binaryOrSkip("/bin/sleep", "/usr/bin/sleep");
+        String token = "28.31459"; // a unique sleep duration = the marker to find the child by
+        AtomicReference<Throwable> thrown = new AtomicReference<>();
+        Thread worker = Thread.ofVirtual().name("tts-interrupt-test").start(() -> {
+            try {
+                runner.run(List.of(sleep, token), null, Duration.ofSeconds(30));
+            } catch (Throwable t) {
+                thrown.set(t);
+            }
+        });
+
+        // Wait (bounded) until the child is visible as a direct child of this JVM, then interrupt.
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (System.nanoTime() < deadline && !childRunning(token)) {
+            Thread.sleep(50);
+        }
+        assumeTrue(childRunning(token), "the child process is visible in this JVM's process table");
+        worker.interrupt();
+        worker.join(10_000);
+
+        assertFalse(worker.isAlive(), "the interrupted runner returns promptly (no unbounded wait)");
+        assertTrue(thrown.get() instanceof InterruptedException,
+                "the interrupt is rethrown as InterruptedException, got: " + thrown.get());
+        // The child must be killed, not orphaned: it disappears from the JVM's children promptly.
+        deadline = System.nanoTime() + 5_000_000_000L;
+        while (System.nanoTime() < deadline && childRunning(token)) {
+            Thread.sleep(50);
+        }
+        assertFalse(childRunning(token), "the interrupt killed the child instead of orphaning it");
+    }
+
+    /** Whether a direct child of this JVM carries {@code token} on its command line. */
+    private static boolean childRunning(String token) {
+        return ProcessHandle.current().children().anyMatch(ph ->
+                ph.info().commandLine().map(cl -> cl.contains(token)).orElse(false));
     }
 
     @Test
