@@ -34,7 +34,7 @@ cd "$(dirname "$0")/.."
 
 # The status-bearing docs the #179 audit reconciled.
 docs=(README.md CLAUDE.md CONTRIBUTING.md docs/ULTRAPLAN.md docs/CONTEXT-ENGINEERING-MAPPING.md \
-      docs/SCENARIO-FORMAT.md docs/IMPLEMENTATION-ORDER.md)
+      docs/SCENARIO-FORMAT.md docs/IMPLEMENTATION-ORDER.md docs/lessons/*.md)
 
 fail=0
 ban() {
