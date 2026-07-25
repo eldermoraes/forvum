@@ -153,9 +153,16 @@ test runner cannot attach. Both run their tests directly via Maven Surefire (e.g
 
 Test layout: unit `*Test` (Surefire, no Quarkus boot/IO) → integration `*IT` (`@QuarkusTest`, real
 SQLite via `@TempDir`) → E2E under `forvum-app/src/test/java/ai/forvum/e2e/` (ten scripts, landing
-milestone by milestone). Live-provider tests are `*-LiveTest` `@Tag("live")`, default-off in CI,
-nightly only — except the Risk #5 native real-provider turn (`OllamaNativeTurnIT`, a Failsafe `*IT`
-also `@Tag("live")`), the one live test the per-PR linux-only `native-turn` job gates on (retry budget 1).
+milestone by milestone). Live tests carry `@Tag("live")` (the class-name suffix is historical, not the
+selector), default-off in CI — the `<excludedGroups>live</excludedGroups>` Surefire **user-property** form
+in every module owning one, so a CLI `-DexcludedGroups=none` re-enables them (a plugin-XML value could
+NOT be overridden). They run in `.github/workflows/nightly-live.yml` (cron 03:00 UTC + `workflow_dispatch`:
+provider / browser / sandbox / web-search / TTS jobs, retry budget 1 via `-Dsurefire.rerunFailingTestsCount=1`,
+skip-if-absent secrets → green-by-skip). Canonical opt-in: Surefire `-DexcludedGroups=none` (+ `-Dtest=<Class>`
+or `-Dgroups=live`); Failsafe `-DitGroups=live -DitExcludedGroups=none`. The exception is the Risk #5 native
+real-provider turn (`OllamaNativeTurnIT`, a Failsafe `*IT` also `@Tag("live")`, with `MemorySearchNativeIT` /
+`EvalLlmJudgeIT`), which the per-PR linux-only `native-turn` job in ci.yml gates on (retry budget 1) — a
+strictly stronger cadence than nightly, so it is not duplicated in nightly-live.yml.
 
 ---
 
@@ -342,9 +349,12 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
   GC outliers blow the raw 200 ms p95 (e.g. `median=88 ms, p95=317 ms`); the median enforces the documented
   budget and the ×3 p95 ceiling is the sanctioned CI-hardware multiplier (§5/§10 carve-out), not a silent
   drop. A regression alarm on the shared engine turn, not a per-channel transport micro-benchmark.
-- **Flaky-test quarantine:** `*-LiveTest` `@Tag("live")`, default-off, nightly with retry budget 1 —
-  except `OllamaNativeTurnIT` (the Risk #5 native turn), which the per-PR `native-turn` job gates on, also
-  retry budget 1.
+- **Flaky-test quarantine:** `@Tag("live")`, default-off, scheduled in `.github/workflows/nightly-live.yml`
+  (cron 03:00 UTC + `workflow_dispatch`) with retry budget 1 (`-Dsurefire.rerunFailingTestsCount=1`) —
+  except the native live trio (`OllamaNativeTurnIT` / `MemorySearchNativeIT` / `EvalLlmJudgeIT`), which the
+  per-PR linux-only `native-turn` job in ci.yml gates on (also retry budget 1) and which nightly-live.yml
+  does not duplicate. `.github/live-ownership.sh` (nightly `preflight`) asserts every `@Tag("live")` class
+  is scheduled by a workflow.
 - **Security-test layer** under `forvum-app/.../security/`: prompt-injection → no tool escalation; path
   traversal → denied; spawn-boundary identity override → rejected; `PermissionScope` mismatch → denied
   + audited.
@@ -543,6 +553,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [X7] A "milestone gap" can be a docs-ownership gap; fold, don't multiply milestones → docs/lessons/testing-ci.md
 - [P2-14] Wall-clock/poll-window assertions are flaky on loaded CI; assert semantics, warm persistence → docs/lessons/testing-ci.md
 - [P2-2/#27] A parallel build-agent workflow must not pass -Djacoco.skip; the integrator pays coverage → docs/lessons/testing-ci.md
+- [#181] Scheduling the live layer = property-form excludedGroups sweep + preflight-secret-outputs skip + a skip-guard, not just a cron → docs/lessons/testing-ci.md
 
 ### CLI app & commands — `docs/lessons/cli-app.md`
 - [M20] The cold-start lever skips DB/IO in every startup observer; test both directions → docs/lessons/cli-app.md

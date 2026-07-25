@@ -39,8 +39,13 @@ import java.util.Map;
  * NON-live {@link CdpProtocolTest}/{@link CdpFrameRouterTest}/{@link BrowserOperationsTest} +
  * {@link BrowserToolProviderWiringIT} remain the CI gate.
  *
- * <p>Run from the module: {@code ./mvnw -pl forvum-tools-browser test -DexcludedGroups= -Dgroups=live
- * -Dforvum.live.home=$(mktemp -d)} (the home dir is seeded in {@link #launchChrome}; see {@link Profile}).
+ * <p>The Chrome binary is resolved in order: the {@code forvum.live.chrome} system property, then the
+ * {@code CHROME_BIN} environment variable (the nightly Linux runner sets this), then the macOS dev default
+ * ({@code /Applications/Google Chrome.app/...}). The nightly {@code browser} job of {@code nightly-live.yml}
+ * runs this on ubuntu Chrome; on the dev Mac the default path keeps working unchanged.
+ *
+ * <p>Run from the module: {@code ./mvnw -pl forvum-tools-browser test -Dtest=BrowserLiveIT
+ * -DexcludedGroups=none -Dgroups=live} (the home dir is seeded in {@link #launchChrome}; see {@link Profile}).
  */
 @QuarkusTest
 @TestProfile(BrowserLiveIT.Profile.class)
@@ -66,7 +71,7 @@ class BrowserLiveIT {
 
     @BeforeAll
     static void launchChrome() throws IOException, InterruptedException {
-        Path chromeBinary = Path.of("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+        Path chromeBinary = resolveChromeBinary();
         if (!Files.isExecutable(chromeBinary)) {
             chromeLaunched = false;
             return;
@@ -138,6 +143,22 @@ class BrowserLiveIT {
     }
 
     // --- helpers ---------------------------------------------------------------------------------
+
+    /**
+     * Resolve the Chrome/Chromium binary: the {@code forvum.live.chrome} system property, then the
+     * {@code CHROME_BIN} environment variable (set by the nightly Linux runner), then the macOS dev default.
+     */
+    private static Path resolveChromeBinary() {
+        String sysprop = System.getProperty("forvum.live.chrome");
+        if (sysprop != null && !sysprop.isBlank()) {
+            return Path.of(sysprop);
+        }
+        String env = System.getenv("CHROME_BIN");
+        if (env != null && !env.isBlank()) {
+            return Path.of(env);
+        }
+        return Path.of("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+    }
 
     /** Poll Chrome's {@code /json/version} until it answers (the remote-debugging server is up), or give up. */
     private static boolean waitForDebugEndpoint() throws InterruptedException {

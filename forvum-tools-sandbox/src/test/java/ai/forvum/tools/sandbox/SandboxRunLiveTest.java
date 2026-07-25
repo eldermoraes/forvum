@@ -18,11 +18,12 @@ import java.util.Optional;
 /**
  * Live acceptance for {@code sandbox.run}: drives a REAL container through the provider end-to-end. This is
  * the only test that needs a container runtime (podman/docker), so it is {@code @Tag("live")} (the CLAUDE.md
- * §4/§11 default-off-in-CI convention) AND it SKIPS itself via JUnit {@link org.junit.jupiter.api.Assumptions}
- * when no runtime is present — so the default suite stays hermetic both on a CI cell with no runtime and on a
- * developer/CI machine that DOES have podman/docker but runs a plain {@code verify}. To run it locally:
- * install podman (or docker) and {@code podman pull busybox:latest}, then
- * {@code ./mvnw -pl forvum-tools-sandbox test}.
+ * §4/§11 default-off-in-CI convention, enforced by the module pom's {@code ${excludedGroups}} property) AND
+ * it SKIPS itself via JUnit {@link org.junit.jupiter.api.Assumptions} when no runtime is present — so the
+ * default suite stays hermetic both on a CI cell with no runtime and on a developer/CI machine that DOES have
+ * podman/docker but runs a plain {@code verify}. It runs in the {@code sandbox} job of {@code nightly-live.yml}.
+ * To run it locally: install podman (or docker) and {@code podman pull busybox:latest}, then
+ * {@code ./mvnw -pl forvum-tools-sandbox test -Dtest=SandboxRunLiveTest -DexcludedGroups=none}.
  *
  * <p>The two acceptance properties it proves on a real container:
  * <ol>

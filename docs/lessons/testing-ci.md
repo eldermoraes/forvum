@@ -82,6 +82,25 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   JUnit method order; (3) keep the configured timeout + poll window generous and the poll window under the
   timeout. macos-14 is the slow cell that catches this — ubuntu green is not enough confidence. [P2-14]
 
+- **Scheduling the live layer is a selection-contract sweep + a skip-guard, not just a new cron workflow.**
+  #181 added `.github/workflows/nightly-live.yml` (cron 03:00 UTC + `workflow_dispatch`, one job per
+  integration). The load-bearing details: (1) the `live` exclusion MUST be the Surefire
+  `<properties><excludedGroups>live</excludedGroups></properties>` USER property in every owning module — a
+  plugin-XML `<configuration>` value is CLI-un-overridable (Maven ignores `-D` for an XML-set parameter), so
+  `forvum-tools-sandbox` (no exclusion → an accidental per-PR busybox run) and `forvum-provider-memory-qdrant`
+  (plugin-XML form) both needed the fix; telegram was already clean. (2) Every invocation carries
+  `-DexcludedGroups=none` (NOT `""` — a blank Failsafe `<excludedGroups>` discovers ZERO tests) AND
+  `-DfailIfNoTests=true` so selection drift goes red. (3) A cloud-provider job gates on
+  `if: needs.preflight.outputs.<p> == 'true'` — a job-level `if:` CANNOT read `secrets`, so a preflight job
+  probes presence (never the value) into outputs; an absent secret renders the job `skipped` (green-by-skip,
+  the mandated merge state with zero secrets). (4) A skip-guard step parses `TEST-*.xml` and FAILS the job if
+  `skipped != 0` — on the guaranteed-env nightly runner a self-skip means breakage, not "no runtime"; prove
+  it red-checks both directions. (5) An ownership gate (`.github/live-ownership.sh`) greps `@Tag("live")`
+  ANNOTATION lines (`^[[:space:]]*@Tag`, never a javadoc `* {@code @Tag(...)}` mention) and asserts each
+  class is named in an owning workflow. (6) Workflow `run:` bash is shellchecked by actionlint under
+  `-eo pipefail`: avoid `grep | head` (SIGPIPE → non-zero) — use `grep -om1`; and an empty bash array under
+  `set -u` (`"${arr[@]}"`) errors on macOS bash 3.2 — guard with `[ "${#arr[@]}" -gt 0 ]`. [#181]
+
 - **A parallel build-agent Workflow MUST NOT pass `-Djacoco.skip` — the integrator pays the coverage gate.**
   PR-6's Wave-2 build fanned out one worktree-isolated agent per module; the shell stream's `-am` build was
   told to skip jacoco for speed, so shell + the co-built filesystem shipped BELOW the branch gate (0.738)

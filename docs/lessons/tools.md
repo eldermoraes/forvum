@@ -209,8 +209,9 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   exclusion MUST be a POM `<properties><excludedGroups>live</excludedGroups></properties>` Surefire USER property
   (the forvum-tools-browser precedent), never a literal inside the plugin `<configuration>`** — an explicit plugin-XML
   value is CLI-un-overridable (Maven ignores `-D` for an XML-set parameter), so the documented opt-in
-  `-DexcludedGroups= -Dgroups=live` silently runs ZERO tests and the live test is unrunnable as shipped (qdrant/
-  telegram still carry the hardcoded form — a pre-existing pattern for #181 to sweep). (9) A `sed -i.bak`+`mv`
+  `-DexcludedGroups= -Dgroups=live` silently runs ZERO tests and the live test is unrunnable as shipped (qdrant
+  carried the hardcoded form — swept to the property form by #181; telegram was already clean, no
+  `excludedGroups` anywhere). (9) A `sed -i.bak`+`mv`
   red-check restore PRESERVES the old mtime, so Maven's incremental compiler keeps the MUTATED class in
   `target/classes` — `touch` the source (or clean the module) after restoring, or the next build runs the mutant. [#192]
 

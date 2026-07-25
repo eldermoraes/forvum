@@ -12,6 +12,16 @@
 
     <artifactId>forvum-tools-sandbox</artifactId>
 
+    <properties>
+        <!-- @Tag("live") tests (a real container via podman/docker — SandboxRunLiveTest) are off by
+             default. Excluded via this Surefire user property (so a bare CLI -DexcludedGroups=none
+             re-enables them, which a plugin-XML value would NOT — the forvum-tools-browser precedent).
+             This closes an as-built gap: without it, a developer/CI machine that HAS a container runtime
+             ran the live busybox test under a plain reactor `verify`. Run the live test with:
+             -Dtest=SandboxRunLiveTest -DexcludedGroups=none -->
+        <excludedGroups>live</excludedGroups>
+    </properties>
+
     <name>Forvum Tools — Sandbox</name>
     <description>Layer-3 Forvum extension (PR-6 / P2-2 #27, ULTRAPLAN §9.2.5): contributes the sandbox.run
         ToolSpec — running a code snippet (or argv) inside an EPHEMERAL container (podman/docker) with no
@@ -87,11 +97,12 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <!-- forvum-tools-sandbox is a headless Quarkus library with no `build` goal; its
-                         *IT tests run via Surefire (CLAUDE.md section 4 exception). The live container
-                         tests do NOT use a JUnit tag (this module defines no excludedGroups default and
-                         a reactor `verify` would otherwise run them); they skip themselves via JUnit
-                         Assumptions when no podman/docker runtime is present (CI has none) — the
-                         ShellExecutorTest binaryOrSkip pattern. -->
+                         *IT tests run via Surefire (CLAUDE.md section 4 exception). @Tag("live") tests
+                         (a real container — SandboxRunLiveTest) are excluded by default via the
+                         ${excludedGroups} user property (above), so a plain reactor `verify` never
+                         launches a container even on a machine that has one; opt in with
+                         -Dtest=SandboxRunLiveTest -DexcludedGroups=none. The live test additionally
+                         self-skips via JUnit Assumptions when no podman/docker runtime is present. -->
                     <includes>
                         <include>**/*Test.java</include>
                         <include>**/*IT.java</include>

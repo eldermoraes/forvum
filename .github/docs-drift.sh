@@ -26,6 +26,9 @@
 #     *attestation* follow-up lives only in docs/SECURITY-GATES.md, also unscanned).
 #     `web.search` has a pluggable module-internal backend with a KEYLESS DuckDuckGo default (#192) — no doc
 #     may frame Brave as the sole backend or the pluggable/keyless default as an unshipped fast-follow.
+#   - The @Tag("live") suites are SCHEDULED in .github/workflows/nightly-live.yml (#181: provider / browser /
+#     sandbox / web-search / TTS, cron 03:00 UTC + workflow_dispatch, green-by-skip) — no scanned doc may
+#     claim the live layer has no CI owner / is not yet scheduled.
 #
 # `docs/ISSUES.md` is deliberately NOT scanned: it preserves each step's ORIGINAL proposal as historical
 # text, distinguished from as-built reality by the marker legend at the top of that file.
@@ -101,6 +104,11 @@ ban "release SBOM/provenance (#174) stated as a named deferral" \
 #     Brave as the only backend, or the pluggable-backend / keyless default as an unshipped fast-follow.
 ban "web.search pluggable backend (#192) stated as Brave-only / an unshipped fast-follow" \
     'brave is the (single|only) (concrete )?search backend|.?pluggable search backend.? is a (documented )?fast-follow|web\.search[^.|]{0,60}brave search api over a blocking rest client'
+
+# 11. The @Tag("live") suites are SCHEDULED in nightly-live.yml (#181) — no scanned doc may claim the live
+#     provider/browser/sandbox/web-search/TTS layer has no CI owner or is not yet scheduled.
+ban "live suites (#181) stated as unscheduled / without a CI owner" \
+    'nightly live layer[^.|]{0,40}does not exist|live[- ](provider[- ])?(tests?|suites?)[^.|]{0,60}(not (yet )?scheduled|no (scheduled )?ci owner|unscheduled in ci)'
 
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."
