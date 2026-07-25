@@ -19,8 +19,9 @@ import java.util.Optional;
  * CONTENT (a named prompt template, never code; ULTRAPLAN §4.1 / DR-6b T3): an optional leading
  * {@code ---}-fenced JSON front-matter ({@code name}/{@code description}/{@code inputSchema}) followed by
  * the template. The front-matter's {@code inputSchema} (if present) is checked for well-formedness on read
- * via the SAME {@link OutputSchemaValidator} the future {@code SkillInvokerTool} enforces invocation
- * arguments against — one validator, no parallel schema (the P2-9 doctor lesson). A skill with
+ * via the SAME {@link OutputSchemaValidator} the engine-resident {@code SkillToolProvider}
+ * ({@code skill.invoke}, #191) enforces invocation arguments against — one validator, no parallel schema
+ * (the P2-9 doctor lesson). A skill with
  * no front-matter is valid (the whole file is the template). This is the "real reader" the skill-install
  * command validates through (P2-7 #32).
  */

@@ -14,6 +14,8 @@ import ai.forvum.engine.config.ConfigLoader;
 import ai.forvum.engine.config.CronReader;
 import ai.forvum.engine.config.DeviceReader;
 import ai.forvum.engine.config.ForvumHome;
+import ai.forvum.engine.config.SkillReader;
+import ai.forvum.engine.config.SkillSpecException;
 import ai.forvum.engine.cron.CronSpec;
 import ai.forvum.engine.cron.CronSpecReader;
 import ai.forvum.engine.graph.OutputSchemaException;
@@ -101,6 +103,7 @@ public final class ConfigDoctor {
         checkChannelSecurity(findings);
         checkRawJsonDirectory(findings, home.mcpServers(), "mcp-servers");
         checkDevices(findings);
+        checkSkills(findings);
         checkRootConfig(findings);
 
         return new DoctorReport(findings);
@@ -369,6 +372,27 @@ public final class ConfigDoctor {
                       + new TreeSet<>(device.approvedScopes()) + " (awaiting " + pending + ")",
                         "Approve with `forvum pair approve " + id + "`, or reject it with "
                       + "`forvum pair reject " + id + "`."));
+            }
+        }
+    }
+
+    /**
+     * Validate {@code skills/} through the SAME {@link SkillReader} the engine's {@code SkillToolProvider}
+     * reads with at invoke time (#191, reader-as-oracle): a malformed skill (unclosed front-matter, non-object
+     * front-matter, or an {@code inputSchema} that is not a usable JSON Schema) throws {@link SkillSpecException}
+     * there and errors the {@code skill.invoke} call at turn time, so doctor surfaces it proactively. A skill
+     * with no front-matter (the whole file is the template) is valid; an absent/empty {@code skills/} yields no
+     * findings. This is also the deterministic driver that exercises the SkillReader parse + networknt schema
+     * compile inside the native binary (the {@code SkillDoctorNativeIT} recipe, #124/#191).
+     */
+    private void checkSkills(List<Finding> findings) {
+        SkillReader reader = new SkillReader(loader, home);
+        for (String id : reader.ids()) {
+            String location = "skills/" + id + ".md";
+            try {
+                reader.readSpec(id);
+            } catch (SkillSpecException e) {
+                findings.add(new Finding(Severity.ERROR, location, e.getMessage(), "Fix " + location + "."));
             }
         }
     }

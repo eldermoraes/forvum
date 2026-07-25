@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.request.json.JsonArraySchema;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 
 import org.junit.jupiter.api.Test;
@@ -150,6 +151,56 @@ class ToolCallBridgeTest {
                 "a sibling scalar string property is still a string schema");
         assertTrue(spec.parameters().required().contains("argv"),
                 "the required array property is carried through");
+    }
+
+    @Test
+    void specificationsForCarriesAFreeFormObjectProperty() {
+        ToolCallBridge bridge = bridge(new InMemoryToolInvocationRecorder(), echoProvider());
+
+        // skill.invoke's args: a single-level free-form object (the #191 seam this method owns).
+        List<ToolSpecification> specs = bridge.specificationsFor(List.of(new ToolSpec(
+                "skill.invoke", "Invoke a skill", PermissionScope.SKILL_INVOKE,
+                "{\"type\":\"object\",\"properties\":{"
+              + "\"name\":{\"type\":\"string\"},"
+              + "\"args\":{\"type\":\"object\",\"description\":\"the skill args bag\"}},"
+              + "\"required\":[\"name\"]}")));
+
+        ToolSpecification spec = specs.get(0);
+        var args = spec.parameters().properties().get("args");
+        assertTrue(args instanceof JsonObjectSchema,
+                "an object-typed property is offered to the model as an object schema, not a string, got: " + args);
+        assertEquals("the skill args bag", ((JsonObjectSchema) args).description(),
+                "the property description is preserved");
+        assertTrue(spec.parameters().properties().get("name") instanceof JsonStringSchema,
+                "a sibling scalar string property is still a string schema");
+    }
+
+    @Test
+    void aNestedObjectArgumentReachesTheProviderAsAMap() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        ToolSpec spec = new ToolSpec("a.obj", "takes an object", PermissionScope.SKILL_INVOKE, "{}");
+        ToolProvider typeReporter = new AbstractToolProvider() {
+            @Override
+            public String extensionId() {
+                return "a";
+            }
+
+            @Override
+            public List<ToolSpec> tools() {
+                return List.of(spec);
+            }
+
+            @Override
+            public String invoke(String toolName, Map<String, Object> arguments) {
+                return arguments.get("args") instanceof Map ? "map" : "not-a-map";
+            }
+        };
+        ToolCallBridge bridge = bridge(recorder, typeReporter);
+
+        String result = bridge.dispatch("s1", new AgentId("main"), List.of(spec),
+                "a.obj", "{\"args\":{\"who\":\"Ada\"}}");
+
+        assertEquals("map", result, "a nested-object argument is parsed to a Map before reaching the provider");
     }
 
     @Test

@@ -371,3 +371,41 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   a tool call, and a vision model is multi-GB); no `@Tag("live")` class is added, so `live-ownership.sh`
   stays satisfied. [#185]
 
+- **The skill-invocation surface is the FIRST production ENGINE-RESIDENT `ToolProvider` — a plain
+  `@ApplicationScoped` CDI bean, NOT a `@ForvumExtension` Layer-3 plugin — and its whole hot-reload story
+  is "read at invoke time", so there is no cache, no eviction, and no registry resync.** #191's
+  `ai.forvum.engine.skills.SkillToolProvider` (`skill.invoke` / `skill.list`) contributes two tools the
+  engine's `ToolRegistry` discovers through the SAME `Instance<ToolProvider>` CDI scan as every Layer-3
+  module — an engine bean needs no `@ForvumExtension` (that annotation is the native `plugin.json`/reflection
+  marker for a Layer-3 JAR; a CDI bean on the engine classpath is discovered regardless), only
+  `extensionId()` + `@ApplicationScoped`. `tools()` returns a CONSTANT spec pair (zero boot IO, the P2-13
+  `onStart` lesson), so the registry never rebuilds for a `skills/` change: `SkillReader` is uncached and
+  `skill.invoke` reads `skills/<name>.md` at invoke time, so an edit is visible on the next call and a
+  `rm` is revocation — the acceptance is a direct-freshness unit test, never a `WatchService` test ([M4]).
+  Load-bearing shape decisions: (1) **args validated BEFORE expansion** through the SAME
+  `OutputSchemaValidator` the agent-`outputSchema` path uses (its `validate` widened package-private→public,
+  the P2-9 one-validator rule) — a schema-less skill accepts args unvalidated; (2) **literal single-pass
+  `{{key}}` expansion** (string values raw, other JSON values compact, unmatched placeholders verbatim —
+  nothing speculative, no nesting/conditionals/escape); (3) a fixed **`MAX_EXPANDED_CHARS = 32_000`** cap
+  checked AFTER expansion (args can balloon content) — never COMPRESSED (summarizing procedural
+  INSTRUCTIONS destroys them, unlike data — the [#176] `BoundedCompressor` does not apply); (4) a
+  missing-skill / arg-validation / over-cap failure throws a plain `IllegalArgumentException`, so the
+  `SupervisorGraph` generic arm renders it back to the model and the turn COMPLETES — NEVER a
+  `SupervisorGraphException` turn abort (a skill mistake must not kill the turn). #191 OWNS the one shared
+  seam it needs: `ToolCallBridge.addProperty` gains a `case "object"` → a single-level free-form
+  `JsonObjectSchema` (`additionalProperties(true)`) so `skill.invoke`'s `args` bag is offered to the model
+  as an object, not stringified (the [P2-2] tool-owns-its-seam rule; verified against the LC4j **1.16.2**
+  `JsonObjectSchema.Builder`). `invoke` is lenient on `args` (a `Map`, a JSON-object STRING, or omitted;
+  anything else a clear error). Containment is STRUCTURAL, not a new gate: the expanded template runs under
+  the CALLER's belt + effective scopes, so any tool call it induces still crosses belt → RBAC → approval →
+  budget (proven at the `SupervisorGraph` level — a skill whose text says "call fs.write" gets the induced
+  `fs.write` DENIED + audited when the belt is `skill.invoke`-only, turn still completes). New
+  `PermissionScope.SKILL_INVOKE` (append-only enum → `PermissionScopeTest` count 11→12 + a round-trip case;
+  auto-flows into `default-user`'s `EnumSet.allOf`, withheld from `cron`/`anonymous`). **Native stance
+  (#124/#179 adaptation, BINDING):** the issue's "exercised in the native turn path" line is met by a
+  DETERMINISTIC default-leg `SkillDoctorNativeIT` driving `forvum doctor` over a schema-carrying skill
+  (exercising `SkillReader` parse + the networknt schema compile in the binary), NOT a live skill-invoking
+  turn in the gating `native-turn` job (a tiny CI model won't reliably emit a tool call — a permanent
+  flake); a `@Tag("live")` skill turn is deferred to the #181 nightly sweep. Zero new reflection surface
+  (name-switch dispatch, no serialized DTO, the enum needs nothing). [#191]
+

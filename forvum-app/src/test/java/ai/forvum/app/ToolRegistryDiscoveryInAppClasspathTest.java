@@ -52,4 +52,12 @@ class ToolRegistryDiscoveryInAppClasspathTest {
         assertTrue(names.containsAll(Set.of("image.analyze", "pdf.analyze")),
                 "the forvum-tools-multimodal module (#185) must be discovered + registered on the app classpath, found: " + names);
     }
+
+    @Test
+    void theSkillToolsAreDiscoveredOnTheAssembledClasspath() {
+        Set<String> names = registry.all().stream().map(ToolSpec::name).collect(Collectors.toSet());
+
+        assertTrue(names.containsAll(Set.of("skill.invoke", "skill.list")),
+                "the engine-resident SkillToolProvider (#191) must be discovered + registered on the app classpath, found: " + names);
+    }
 }

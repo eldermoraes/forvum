@@ -87,13 +87,16 @@ public final class OutputSchemaValidator {
     }
 
     /**
-     * Validate {@code finalText} against {@code schemaJson} and return the decoded {@link JsonNode}.
+     * Validate {@code finalText} against {@code schemaJson} and return the decoded {@link JsonNode}. Beyond
+     * the P2-12 {@code outputSchema} reply check, this also validates a {@code skill.invoke} call's arguments
+     * against the skill's declared {@code inputSchema} before expansion (#191) — one validator, no parallel
+     * schema (the P2-9 reader-as-oracle design).
      *
      * @throws OutputSchemaException if {@code finalText} is not valid JSON, the schema itself is not a
      *         usable JSON Schema, or the decoded value violates the schema. The message lists the failing
      *         instance location(s) and the validation reason(s) reported by the JSON-Schema engine.
      */
-    JsonNode validate(String schemaJson, String finalText) {
+    public JsonNode validate(String schemaJson, String finalText) {
         JsonSchema schema;
         try {
             schema = FACTORY.getSchema(schemaJson, InputFormat.JSON);

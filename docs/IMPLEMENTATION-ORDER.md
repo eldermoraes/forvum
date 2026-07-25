@@ -105,7 +105,7 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 ## Wave 6 — Context-engineering differentiator arc *(the north star's SOTA edge)*
 
 25. **#190** ▸ `feat(tools)`: structured planning `update_plan` tool — **Write** pillar; strongest single driver of multi-step coherence. Plan in the session scratchpad with a compaction `block_type`.
-26. **#191** ▸ `[HIGH]` `feat(engine)`: `SkillInvokerTool` skill-invocation surface — **Select** (procedural); unlocks the skills axis. (Phase-1 X7 #73 leftover.)
+26. **#191** ✅ `[HIGH]` `feat(engine)`: skill-invocation surface — **Select** (procedural); unlocks the skills axis. (Phase-1 X7 #73 leftover.) **DONE** — the engine-resident `SkillToolProvider` (`skill.invoke` / `skill.list`), belt-gated by the new `SKILL_INVOKE` scope, `{{key}}` expansion with inputSchema-validated args + a 32 000-char cap, invoke-time freshness, `ConfigDoctor.checkSkills`.
 27. **#195** ▸ `[new]` `feat(capr)`: replace the always-`passed` turn verdict with a real per-turn judge — **closes the CAPR measurement loop** the whole CE paradigm is built around (`Agent.java:117` records a constant verdict today). Off the critical path, off by default.
 28. **#196** ▸ `[new]` `[unblocked: #175 ✅]` `feat(memory)`: upgrade Select from single-shot retrieval to iterative/agentic RAG — the PT doc's headline ask ("Agentic RAG dinâmico") + OpenClaw's `active-memory` pattern; bounded retrieve→evaluate→decompose as an Isolate-respecting sub-agent.
 29. **#197** ▸ `[new]` `feat(context)`: mid-turn context pruning for tool results & images — the one **Compress** mechanism OpenClaw has (`context-pruning/pruner.ts`) and Forvum lacks; distinct from #176 and the between-turn compactor.
