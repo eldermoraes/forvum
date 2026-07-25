@@ -2,6 +2,7 @@ package ai.forvum.sdk;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.ToolSpec;
@@ -54,5 +55,16 @@ class ToolProviderContractTest {
                 List.of(new ToolSpec("a.read", "Read a thing", PermissionScope.FS_READ, "{}")));
 
         assertEquals("invoked:a.read:notes.md", provider.invoke("a.read", Map.of("path", "notes.md")));
+    }
+
+    @Test
+    void configGapsDefaultsToEmpty() {
+        // #184: a provider that does not override configGaps() reports every tool ready (no gap). This keeps
+        // the SDK JaCoCo gate honest over the new default method (run `./mvnw verify`, not just `test`).
+        ToolProvider provider = provider(
+                List.of(new ToolSpec("a.read", "Read a thing", PermissionScope.FS_READ, "{}")));
+
+        assertTrue(provider.configGaps().isEmpty(),
+                "the default configGaps() must be empty — no tool is reported unconfigured");
     }
 }

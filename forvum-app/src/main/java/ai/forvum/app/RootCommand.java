@@ -32,7 +32,8 @@ import java.util.concurrent.Callable;
  * {@code qa suite}/{@code qa <channel>} runs the packaged QA scenario pack and fails by default on a
  * missing/failed scenario; {@code eval} runs a CAPR-gated evaluation suite and exits non-zero on a
  * regression below its floor; {@code memory query}/{@code memory search}/{@code memory reindex} query
- * the semantic-memory store (read-only SQL + vector nearest-neighbor over the SQLite store, P3-2).
+ * the semantic-memory store (read-only SQL + vector nearest-neighbor over the SQLite store, P3-2);
+ * {@code tools} lists every built-in tool with its scope, belt membership, and readiness (#184).
  */
 @CommandLine.Command(
         name = "forvum",
@@ -42,7 +43,7 @@ import java.util.concurrent.Callable;
         subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class, SessionReplayCommand.class,
                 PluginCommand.class, SkillCommand.class, McpCommand.class, CopilotCommand.class,
                 PairCommand.class, DevicesCommand.class, ProviderCommand.class, QaCommand.class,
-                EvalCommand.class, MemoryCommand.class })
+                EvalCommand.class, MemoryCommand.class, ToolsCommand.class })
 public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";

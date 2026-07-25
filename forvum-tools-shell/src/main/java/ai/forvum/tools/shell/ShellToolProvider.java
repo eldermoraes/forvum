@@ -47,6 +47,18 @@ public class ShellToolProvider extends AbstractToolProvider {
         return List.of(ShellExecTool.SPEC);
     }
 
+    /**
+     * {@code shell.exec}'s config gap (#184): fail-closed with an empty {@code allowedCommands}, so the
+     * discovery surfaces ({@code forvum tools}/{@code doctor}) name the exact file + field to enable it.
+     */
+    @Override
+    public Map<String, String> configGaps() {
+        if (allowlist.read().allowedCommands().isEmpty()) {
+            return Map.of("shell.exec", "set \"allowedCommands\" in ~/.forvum/tools/shell.json");
+        }
+        return Map.of();
+    }
+
     @Override
     public String invoke(String toolName, Map<String, Object> arguments) {
         if (!"shell.exec".equals(toolName)) {

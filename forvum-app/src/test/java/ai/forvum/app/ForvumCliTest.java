@@ -1,5 +1,8 @@
 package ai.forvum.app;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
 import io.quarkus.test.junit.main.Launch;
@@ -15,6 +18,8 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -57,6 +62,21 @@ class ForvumCliTest {
         Assertions.assertTrue(Files.exists(home.resolve("agents").resolve("main.json")), "agents/main.json scaffolded");
         Assertions.assertTrue(Files.exists(home.resolve("identities").resolve("default.json")), "identities/default.json scaffolded");
         Assertions.assertTrue(Files.exists(home.resolve("channels").resolve("tui.json")), "channels/tui.json scaffolded");
+
+        // #184: the scaffolded main.json carries the WIDENED default belt + the identityId pointer (so a
+        // fresh install resolves to the 'default' identity, not anonymous, and the belt is actually offered).
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode mainSpec = mapper.readTree(Files.readString(home.resolve("agents").resolve("main.json")));
+        List<String> belt = new ArrayList<>();
+        mainSpec.get("allowedTools").forEach(t -> belt.add(t.asText()));
+        Assertions.assertEquals(InitCommand.DEFAULT_ALLOWED_TOOLS, belt,
+                "the scaffolded belt must be exactly InitCommand.DEFAULT_ALLOWED_TOOLS");
+        Assertions.assertEquals(InitCommand.DEFAULT_IDENTITY_ID, mainSpec.get("identityId").asText(),
+                "the scaffolded main.json must point identityId at 'default'");
+        JsonNode identity = mapper.readTree(
+                Files.readString(home.resolve("identities").resolve("default.json")));
+        Assertions.assertTrue(identity.has("channelAccounts"),
+                "the scaffolded identities/default.json must parse and declare channelAccounts");
 
         // The tree later holds credentials (e.g. channels/telegram.json botToken), so init must restrict
         // it to the owner on POSIX (0700 dirs / 0600 files), not the world-readable umask default.

@@ -6,6 +6,7 @@ import ai.forvum.engine.doctor.ConfigDoctor;
 import ai.forvum.engine.doctor.DoctorReport;
 import ai.forvum.engine.doctor.Finding;
 import ai.forvum.sdk.ModelProvider;
+import ai.forvum.sdk.ToolProvider;
 
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -45,13 +46,17 @@ public class DoctorCommand implements Callable<Integer> {
     @Inject
     Instance<ModelProvider> providers;
 
+    @Inject
+    Instance<ToolProvider> toolProviders;
+
     @Override
     public Integer call() {
         Set<String> knownProviders = providers.stream()
                 .map(ModelProvider::extensionId)
                 .collect(Collectors.toUnmodifiableSet());
 
-        DoctorReport report = new ConfigDoctor(home, loader, knownProviders).check();
+        DoctorReport report = new ConfigDoctor(home, loader, knownProviders,
+                ToolInventoryCollector.collect(toolProviders).toInventory()).check();
 
         System.out.println("Forvum doctor: checking " + home.root());
         for (Finding finding : report.findings()) {

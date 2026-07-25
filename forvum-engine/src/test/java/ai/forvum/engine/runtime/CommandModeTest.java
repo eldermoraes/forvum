@@ -35,6 +35,8 @@ class CommandModeTest {
                 "'devices' only lists devices/ — it must skip the DB/watcher/cron boot (#44)");
         assertTrue(CommandMode.isOneShotCommand(new String[] {"provider", "add", "anthropic"}),
                 "'provider add' stores a 0600 key + runs a DB-free smoke chat — it must skip the DB/watcher/cron boot (P2-10)");
+        assertTrue(CommandMode.isOneShotCommand(new String[] {"tools"}),
+                "'tools' lists registered tools without connecting — it must skip the DB/watcher/cron boot (#184)");
     }
 
     @Test
@@ -43,6 +45,8 @@ class CommandModeTest {
         assertFalse(CommandMode.isOneShotCommand(null), "null args = default run");
         assertFalse(CommandMode.isOneShotCommand(new String[] {"tui"}),
                 "an unrecognised arg is not a one-shot command (falls through to the default run)");
+        assertFalse(CommandMode.isOneShotCommand(new String[] {"tool"}),
+                "'tool' (singular) is not the registered 'tools' subcommand — not a one-shot (#184)");
     }
 
     @Test

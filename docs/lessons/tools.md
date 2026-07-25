@@ -286,3 +286,42 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   time. The [M14] rule stands — a Layer-3 module only native-COMPILEs once `forvum-app` depends on it, so
   RUN the local `-Pnative` build in the same PR; the JVM suite cannot catch an image-heap constraint. [#186]
 
+- **A "usable default tool belt" is TWO fixes — widen the scaffold belt AND wire an identity — because a
+  fresh-init home resolves anonymous and the whole belt is filtered before it ever reaches the model.** #184's
+  headline symptom ("no tools") had a non-obvious second cause: `init` scaffolded an fs-only belt, but even
+  that was invisible because `main.json` had no `identityId`, so `IdentityResolver` fell back to the
+  `ANONYMOUS_IDENTITY` (empty scopes) and `SupervisorGraph.scopeVisibleBelt` filtered EVERY tool out of the
+  model-facing set (the `ToolExecutor` denies a coerced call anyway). The scaffold fix is BOTH: a widened
+  `DEFAULT_ALLOWED_TOOLS` (only tools that WORK or degrade to user-caused config guidance with zero setup —
+  `fs.*`, `web.fetch`/`web.search` keyless via #192, `memory.*` local via #175; NOT the confirm-gated /
+  fail-closed / dependency-needing `shell.exec`/`sandbox.run`/`browser.*`/`tts.speak`/`mcp.*`) PLUS
+  `"identityId": "default"` pointing at the already-scaffolded `identities/default.json` (no `roles` → the
+  permissive `default-user` `EnumSet.allOf`, #168). Both files are written in one `InitCommand.call()`, so the
+  fail-closed `IdentityResolutionException` (an `identityId` naming a missing file) can never arise from a
+  fresh scaffold — do NOT reorder the writes behind conditionals. Explicit tool IDs, not globs: a future
+  binary shipping a tool matching `fs.*`/`web.*` must not silently widen the default belt. The executable
+  proof is two turn tests through the real `TurnService → SupervisorGraph`: WITH the identity wiring the first
+  `ChatRequest.toolSpecifications()` includes the belt tools; WITHOUT it, only the engine built-in
+  `spawn_worker` is offered (`generate()` ALWAYS appends `spawn_worker`, so the anonymous assertion is
+  "the belt tools are absent", never "the offered set is empty"). [#184]
+
+- **Discoverability (`forvum tools`) gathers from `Instance<ToolProvider>`, NOT the registry — and MUST skip
+  the MCP bridge instance — because a one-shot deliberately leaves the registry unmaterialized.** #184's
+  `forvum tools` (and the `forvum doctor` belt-gap check) is a `CommandMode` one-shot, so
+  `ToolRegistry.onStart` returns early and the registry is empty; both surfaces discover directly through CDI
+  via a shared `ToolInventoryCollector`. It skips the concrete `McpBridgeToolProvider` by `instanceof` (the
+  [M12] `.class` discipline, never a string) because `McpBridgeToolProvider.tools()` is a blocking network
+  connect per configured server (P2-13) — configured MCP servers are listed from the `mcp-servers/` FILES
+  (URL through `McpListCommand.redactUrl`) pointing at `forvum mcp list` to materialize. A present-but-
+  unconfigured tool self-describes via a NEW `ToolProvider.configGaps()` SDK default method (empty = all
+  ready): the tool-id → config-field mapping lives in the OWNING module (each override reads its own on-demand
+  config offline — no network, no reachability probe, never a config VALUE), so `forvum tools`, `doctor`, and
+  the tool's own "not configured" runtime message cannot drift. Reuse the existing selection logic rather than
+  re-deriving it (web.search's brave-no-key / unknown-backend gap shares `WebSearchTool`'s precedence helper).
+  Belt membership is reader-as-oracle (`AgentSpecReader` + `ToolFilter`), so `-`/`yes`/`no` agrees with how the
+  engine actually filters. Zero new native reflection surface: printed text only, `configGaps` is an interface
+  default, no new DTO/serialization. **CDI TRAP** ([M7] proxy discipline): a test that reads a captured field
+  off an `@ApplicationScoped` provider (e.g. a scripted model recording its `ChatRequest`s) sees the client
+  proxy's always-empty field — expose the capture through a METHOD so the call is dispatched to the contextual
+  instance. [#184]
+

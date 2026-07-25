@@ -238,7 +238,7 @@ The entire user-editable surface sits under `$FORVUM_HOME`, which defaults to `~
 │   └── default.json                     # Identity records — linked channel accounts, display name
 ├── agents/
 │   ├── main.md                          # Main agent persona (free-form markdown, used as system prompt)
-│   ├── main.json                        # Main agent spec — allowedTools, LLM chain, memory policy
+│   ├── main.json                        # Main agent spec — identityId + a usable default allowedTools belt (#184), LLM chain, memory policy
 │   ├── researcher.md                    # Sub-agent persona
 │   └── researcher.json                  # Sub-agent spec
 ├── skills/
@@ -1397,6 +1397,8 @@ File-driven creation means the user can create or rename an agent by editing `~/
 ### 5.3 Tool filtering and identity resolution
 
 The global `ToolRegistry` knows every `ToolSpec` contributed by every `ToolProvider` plugin. When an agent is materialized, the registry intersects those specs against the agent's `allowedTools` glob list. The result is an immutable `List<ToolSpec>` cached on the `@AgentScoped AgentToolBelt`. The LLM only ever sees this filtered list; there is no code path that bypasses the filter to grant "just this one call" access — that kind of ad-hoc elevation is what leads to tool-misuse incidents and is explicitly forbidden by the design. Tool filtering is the Select pillar applied to capability: each agent's window is offered only the ultra-relevant subset of the global `ToolRegistry`, keeping the tool-spec block in the prompt small and on-topic.
+
+**As-built — the scaffolded default belt + discoverability (#184).** `forvum init` scaffolds `main.json` with a usable default belt (`fs.read`/`fs.write`/`fs.list`, `web.fetch`/`web.search`, `memory.save`/`memory.recall` — every tool that works, or degrades to user-caused config guidance, with zero setup) plus `identityId: "default"` — without which the turn resolves to the anonymous identity (no scopes) and `SupervisorGraph.scopeVisibleBelt` filters the ENTIRE belt, so even the filesystem tools are never offered. `shell.exec`/`sandbox.run`/`browser.*`/`tts.speak`/`mcp.*` stay belt-excluded by default (confirm-gated / fail-closed / needing an operator dependency). `forvum tools` (a config-read `CommandMode` one-shot that never connects) lists every compiled-in tool with its scope, confirm marker, owning extension, belt membership, and readiness — a present-but-unconfigured tool self-describes via `ToolProvider.configGaps()`, and `forvum doctor` warns on a belted-but-unconfigured tool (and on a belt dead-by-anonymity on an upgraded install).
 
 Identity resolution happens at channel-message entry. Each channel's inbound handler translates its native user id (Telegram user id, web session cookie, OS username) into a Forvum `Identity` by consulting `identities/<id>.json`. The resolved `Identity` is bound to a `ScopedValue<Identity>` for the duration of the turn, parallel to `CURRENT_AGENT`. Sub-agents inherit their parent's identity — a sub-agent does not "become" a different user, and there is no API to override identity across the spawn boundary. This is a security property, not just a convenience: tools that use `Identity` for authorization cannot be tricked by a spawned sub-agent.
 

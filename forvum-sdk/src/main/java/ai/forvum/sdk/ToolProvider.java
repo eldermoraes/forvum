@@ -48,4 +48,20 @@ public sealed interface ToolProvider permits AbstractToolProvider {
      * @return the tool's result, serialized to a string for the model
      */
     String invoke(String toolName, Map<String, Object> arguments);
+
+    /**
+     * Tool-name → actionable config hint for tools this extension contributes that are present in the
+     * registry but NOT yet configured to actually run (#184). An empty map (the default) means every
+     * contributed tool is ready; an entry maps a {@link ToolSpec#name()} to a one-line hint naming the
+     * exact file + field the operator must set (e.g. {@code set "allowedCommands" in ~/.forvum/tools/shell.json}).
+     *
+     * <p>Consumed by the discovery surfaces — {@code forvum tools} and {@code forvum doctor} — to flag a
+     * belted-but-unconfigured tool. The contract is OFFLINE: an implementation only reads its own on-demand
+     * local config (no network, no subprocess, no reachability probe), and NEVER returns a configuration
+     * VALUE (only a hint). The tool-id → config-field mapping stays in the owning module so the discovery
+     * surfaces cannot drift from the tool's own "not configured" behavior.
+     */
+    default Map<String, String> configGaps() {
+        return Map.of();
+    }
 }
