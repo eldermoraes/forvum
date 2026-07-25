@@ -86,7 +86,20 @@ public enum PermissionScope {
      * includes it; the restricted {@code cron} role ({@code EnumSet.of(FS_READ)}) does not — an operator
      * opts a cron in via {@code roles/cron.json}.
      */
-    MEDIA_ANALYZE;
+    MEDIA_ANALYZE,
+    /**
+     * Authority to invoke an installed skill via {@code skill.invoke} / list them via {@code skill.list}
+     * (#191, the engine-resident {@code SkillToolProvider}) — pulling a named {@code skills/<id>.md} prompt
+     * template into the invoking agent's turn after validating the call's arguments against the skill's
+     * declared {@code inputSchema}. Both tools share this ONE scope (the {@code skill.*} glob family). The
+     * skill is operator-trusted CONTENT (a prompt template, never code; ULTRAPLAN §9.3.3 [6b-DP-7/8]): it
+     * carries no scope/belt/identity of its own, so any tool call it induces still crosses belt → RBAC →
+     * approval → budget under the CALLER's identity. Decided at this tool's landing issue ([6b-DP-8]). The
+     * permissive {@code default-user} role ({@code EnumSet.allOf}) includes it; {@code cron}
+     * ({@code EnumSet.of(FS_READ)}) and {@code anonymous} ({@code EnumSet.noneOf}) do not — an operator
+     * grants it to a restricted role via {@code roles/<name>.json}.
+     */
+    SKILL_INVOKE;
 
     /**
      * Parses a string into a {@code PermissionScope}, throwing a contextual

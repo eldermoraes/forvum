@@ -89,6 +89,42 @@ class ConfigDoctorTest {
     }
 
     @Test
+    void aValidSchemaCarryingSkillProducesNoFinding() throws IOException {
+        // #191: a skill with a well-formed inputSchema passes the reader-as-oracle check cleanly.
+        writeValidMainAgent();
+        write("identities/default.json", "{\"channelAccounts\":{}}");
+        write("skills/greeting.md", "---\n{\"description\":\"Greet a person\","
+                + "\"inputSchema\":{\"type\":\"object\",\"required\":[\"who\"],"
+                + "\"properties\":{\"who\":{\"type\":\"string\"}}}}\n---\nHello {{who}}");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.healthy(), () -> "a valid skill must not break the bill of health: " + report.findings());
+    }
+
+    @Test
+    void aMalformedSkillIsAnErrorNamingTheFile() throws IOException {
+        // An unclosed front-matter fence is malformed — doctor surfaces it through the SkillReader oracle.
+        write("skills/broken.md", "---\n{\"name\":\"x\"}\nHello — the front-matter fence is never closed");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(hasError(report, "skills/broken.md"),
+                () -> "a malformed skill must be an ERROR at its file: " + report.findings());
+    }
+
+    @Test
+    void anAbsentSkillsDirectoryProducesNoSkillFindings() throws IOException {
+        writeValidMainAgent();
+        write("identities/default.json", "{\"channelAccounts\":{}}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(hasError(report, "skills"),
+                () -> "an absent skills/ directory yields no skill findings: " + report.findings());
+    }
+
+    @Test
     void anAbsentHomeIsAnError() {
         // home @TempDir exists but is empty; point at a non-existent child to simulate an uninitialised home.
         ForvumHome missing = new ForvumHome(Optional.of(home.resolve("does-not-exist").toString()));

@@ -29,6 +29,9 @@
 #   - The @Tag("live") suites are SCHEDULED in .github/workflows/nightly-live.yml (#181: provider / browser /
 #     sandbox / web-search / TTS, cron 03:00 UTC + workflow_dispatch, green-by-skip) — no scanned doc may
 #     claim the live layer has no CI owner / is not yet scheduled.
+#   - The skill-invocation surface SHIPPED (#191): the engine-resident SkillToolProvider (skill.invoke /
+#     skill.list, belt-gated by SKILL_INVOKE, {{key}} expansion with inputSchema-validated args + a 32k cap,
+#     read at invoke time) — no scanned doc may frame it as a future/unbuilt SkillInvokerTool.
 #
 # `docs/ISSUES.md` is deliberately NOT scanned: it preserves each step's ORIGINAL proposal as historical
 # text, distinguished from as-built reality by the marker legend at the top of that file.
@@ -109,6 +112,11 @@ ban "web.search pluggable backend (#192) stated as Brave-only / an unshipped fas
 #     provider/browser/sandbox/web-search/TTS layer has no CI owner or is not yet scheduled.
 ban "live suites (#181) stated as unscheduled / without a CI owner" \
     'nightly live layer[^.|]{0,40}does not exist|live[- ](provider[- ])?(tests?|suites?)[^.|]{0,60}(not (yet )?scheduled|no (scheduled )?ci owner|unscheduled in ci)'
+
+# 12. The skill-invocation surface SHIPPED (#191: the engine-resident SkillToolProvider — skill.invoke /
+#     skill.list, belt-gated by SKILL_INVOKE) — no scanned doc may frame it as a future/unbuilt tool.
+ban "skill-invocation surface (#191) framed as future / not-yet-in-code" \
+    'future .?skillinvokertool|skill\.invoke[^.|]{0,50}(not (yet )?(built|in code|shipped)|is planned)|skillinvokertool[^.|]{0,50}not (yet )?in code'
 
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."

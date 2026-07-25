@@ -499,6 +499,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [#184] A usable default belt is TWO fixes: widen the scaffold belt AND wire identityId, else anonymous filters it all → docs/lessons/tools.md
 - [#184] `forvum tools`/doctor gather from Instance<ToolProvider> (registry empty one-shot); skip the MCP bridge; configGaps owns the hint → docs/lessons/tools.md
 - [#185] Multimodal tools carry NO langchain4j: a Resolution-B MediaAnalysis seam keeps content types engine-side; PDFBox native = resource-config only + jboss-logging bridge → docs/lessons/tools.md
+- [#191] The skill surface is the first engine-resident production ToolProvider (a plain CDI bean, not @ForvumExtension); read-at-invoke = free hot-reload; validate args before expansion; owns the ToolCallBridge object-schema seam → docs/lessons/tools.md
 
 ### Engine, graph & scheduling — `docs/lessons/engine-graph.md`
 - [M7] Guard registry mutations; keep blocking IO off computeIfAbsent lock paths → docs/lessons/engine-graph.md

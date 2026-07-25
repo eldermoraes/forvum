@@ -83,8 +83,10 @@ public class ToolCallBridge {
      * name, description, and {@code parametersJsonSchema} — with NO reflection (the M18 tool_loop offers
      * these to the model). The JSON-schema string is parsed into a {@link JsonObjectSchema}; v0.1 handles
      * flat {@code string}/{@code integer}/{@code number}/{@code boolean} properties + {@code required}
-     * (the filesystem tools' shape) plus a single-level {@code array}-of-scalar-{@code string} property
-     * (PR-6 #27: {@code shell.exec}'s {@code argv} is an array of strings). Richer schemas (nested objects,
+     * (the filesystem tools' shape), a single-level {@code array}-of-scalar-{@code string} property
+     * (PR-6 #27: {@code shell.exec}'s {@code argv} is an array of strings), and a single-level free-form
+     * {@code object} property (#191: {@code skill.invoke}'s {@code args} bag, whose inner shape the skill's
+     * own {@code inputSchema} governs at invoke time). Richer schemas (typed nested-object properties,
      * arrays of objects, enums) are a later extension.
      */
     public List<ToolSpecification> specificationsFor(List<ToolSpec> belt) {
@@ -130,8 +132,24 @@ public class ToolCallBridge {
             case "number" -> schema.addNumberProperty(name, description);
             case "boolean" -> schema.addBooleanProperty(name, description);
             case "array" -> schema.addProperty(name, arraySchema(property, description));
+            case "object" -> schema.addProperty(name, freeFormObjectSchema(description));
             default -> schema.addStringProperty(name, description);
         }
+    }
+
+    /**
+     * A single-level free-form object property (#191 {@code skill.invoke}'s {@code args} bag): an open
+     * {@code JsonObjectSchema} with {@code additionalProperties=true} and no declared inner properties, so
+     * the model may pass an arbitrary key/value object. The inner shape is not offered to the model here —
+     * the skill's own {@code inputSchema} validates the args at invoke time. Typed nested-object properties
+     * are a later extension.
+     */
+    private static JsonObjectSchema freeFormObjectSchema(String description) {
+        JsonObjectSchema.Builder object = JsonObjectSchema.builder().additionalProperties(true);
+        if (description != null) {
+            object.description(description);
+        }
+        return object.build();
     }
 
     /**
