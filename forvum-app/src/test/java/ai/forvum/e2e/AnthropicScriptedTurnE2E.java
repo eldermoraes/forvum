@@ -42,7 +42,7 @@ import java.util.Map;
  * <p>{@code @Tag("live")} — excluded from the default build via the {@code ${excludedGroups}} Surefire
  * user property (defaulted to {@code live} in {@code forvum-app/pom.xml}). To run manually:
  * <pre>{@code
- *   QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY=sk-... ./mvnw -pl forvum-app test -Dgroups=live -DexcludedGroups=
+ *   QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY=sk-... ./mvnw -pl forvum-app test -Dtest=AnthropicScriptedTurnE2E -DexcludedGroups=none
  * }</pre>
  *
  * <p>NOT {@code @Transactional}: {@link Agent#respond} owns the turn's transaction boundary (the M7/M8
