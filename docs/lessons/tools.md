@@ -364,7 +364,7 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   (standard-14 text pages exercise the AFM metrics; 128-bit `StandardProtectionPolicy` encrypts with JDK
   crypto, no BC needed). The engine seam test drives the REAL `LlmSelector` (a capturing `ModelProvider`
   records the `ChatRequest`) to prove the exact base64 + prompt reach the model and a `maxTokens:0` agent is
-  stopped pre-call (the budget-gated path); the app `MultimodalTurnIT` proves the full
+  stopped pre-call (the budget-gated path); the app `MultimodalTurnTest` proves the full
   orchestrator→ToolExecutor→provider→seam→sub-generation wiring on the assembled classpath. The live native
   vision/PDF turn is proven by a local `-Pnative` build (the [M14]/[#186] Layer-3 discipline — a module only
   native-COMPILEs once `forvum-app` depends on it), NOT a per-PR CI job (a tiny CI model won't reliably emit

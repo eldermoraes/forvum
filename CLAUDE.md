@@ -555,6 +555,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [P2-14] Wall-clock/poll-window assertions are flaky on loaded CI; assert semantics, warm persistence → docs/lessons/testing-ci.md
 - [P2-2/#27] A parallel build-agent workflow must not pass -Djacoco.skip; the integrator pays coverage → docs/lessons/testing-ci.md
 - [#181] Scheduling the live layer = property-form excludedGroups sweep + preflight-secret-outputs skip + a skip-guard, not just a cron → docs/lessons/testing-ci.md
+- [#185] In forvum-app a @QuarkusTest turn test must be `*Test` (Surefire), never `*IT` — a `*IT` runs in Failsafe and its port-8081 boot collides with the native-binary ITs → docs/lessons/testing-ci.md
 
 ### CLI app & commands — `docs/lessons/cli-app.md`
 - [M20] The cold-start lever skips DB/IO in every startup observer; test both directions → docs/lessons/cli-app.md

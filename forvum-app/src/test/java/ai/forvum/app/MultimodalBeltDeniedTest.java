@@ -28,13 +28,13 @@ import java.util.Map;
 
 /**
  * The #185 belt-gate red-check: an agent whose belt does NOT contain {@code image.analyze} denies the
- * scripted call and never reaches the vision sub-generation (the companion to {@link MultimodalTurnIT}'s
+ * scripted call and never reaches the vision sub-generation (the companion to {@link MultimodalTurnTest}'s
  * success path — separate class because a turn always routes to the single {@code main} agent, so the
  * belt-present and belt-absent cases need distinct homes). Non-live; runs in the default build.
  */
 @QuarkusTest
-@TestProfile(MultimodalBeltDeniedIT.EmptyBeltHomeProfile.class)
-class MultimodalBeltDeniedIT {
+@TestProfile(MultimodalBeltDeniedTest.EmptyBeltHomeProfile.class)
+class MultimodalBeltDeniedTest {
 
     @Inject
     TurnService turns;
@@ -78,7 +78,7 @@ class MultimodalBeltDeniedIT {
                 Files.writeString(tools.resolve("multimodal.json"), "{ \"model\": \"vision-capture:vision\" }");
 
                 Path workspace = Files.createDirectories(home.resolve("workspace"));
-                Files.write(workspace.resolve("a.png"), MultimodalTurnIT.PNG_BYTES);
+                Files.write(workspace.resolve("a.png"), MultimodalTurnTest.PNG_BYTES);
                 return home;
             } catch (IOException e) {
                 throw new UncheckedIOException(e);

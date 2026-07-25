@@ -40,11 +40,11 @@ import java.util.Map;
  * engine-backed {@code MediaAnalysis} sub-generation — resolved (via the {@code tools/multimodal.json} model
  * override) to a capturing vision model. Proves the exact image bytes reach the sub-generation as
  * {@link ImageContent}, the {@code tool_invocations} row is {@code ok}, and the turn completes with a terminal
- * {@code Done}. The belt gate for the same call is proven by {@link MultimodalBeltDeniedIT}.
+ * {@code Done}. The belt gate for the same call is proven by {@link MultimodalBeltDeniedTest}.
  */
 @QuarkusTest
-@TestProfile(MultimodalTurnIT.MultimodalHomeProfile.class)
-class MultimodalTurnIT {
+@TestProfile(MultimodalTurnTest.MultimodalHomeProfile.class)
+class MultimodalTurnTest {
 
     static final byte[] PNG_BYTES = {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 1, 2, 3, 4};
 

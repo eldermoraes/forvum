@@ -15,7 +15,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.List;
 
 /**
- * A deterministic in-process orchestrator model (extension id {@code scripted-mm}) for {@code MultimodalTurnIT}:
+ * A deterministic in-process orchestrator model (extension id {@code scripted-mm}) for {@code MultimodalTurnTest}:
  * on the first turn it emits an {@code image.analyze} tool call over a workspace image; once the tool result is
  * fed back it answers {@code "done"}. Stateless across turns (it decides from the conversation it is handed).
  */
