@@ -124,4 +124,29 @@ class TtsToolProviderTest {
                 () -> provider.invoke("tts.synth", args("hi", null)),
                 "a name this provider does not contribute is a programming error");
     }
+
+    // ---- #184 configGaps(): unconfigured (no piper) is a gap; a ready config is not ----
+
+    @Test
+    void configGapsFlagsTtsSpeakWhenUnconfigured(@TempDir Path home, @TempDir Path workspace) {
+        // No tools/tts.json → not ready → tts.speak is a config gap naming the file + both fields.
+        TtsToolProvider provider = providerFor(home, workspace, new WritingRunner());
+
+        Map<String, Object> gaps = Map.copyOf(provider.configGaps());
+        assertTrue(gaps.containsKey("tts.speak"), () -> "an unconfigured tts is a gap; got " + gaps);
+        assertTrue(gaps.get("tts.speak").toString().contains("piperBin"),
+                () -> "the hint names piperBin; got " + gaps);
+        assertTrue(gaps.get("tts.speak").toString().contains("piperVoice"),
+                () -> "the hint names piperVoice; got " + gaps);
+        assertTrue(gaps.get("tts.speak").toString().contains("tools/tts.json"),
+                () -> "the hint names the file; got " + gaps);
+    }
+
+    @Test
+    void configGapsIsEmptyWhenReady(@TempDir Path home, @TempDir Path workspace) throws IOException {
+        writeConfig(home, "{\"piperBin\":\"/opt/piper\",\"piperVoice\":\"/v/amy.onnx\"}");
+        TtsToolProvider provider = providerFor(home, workspace, new WritingRunner());
+
+        assertTrue(provider.configGaps().isEmpty(), "a ready piper config means tts.speak is ready");
+    }
 }

@@ -7,7 +7,8 @@ import jakarta.inject.Inject;
 
 /**
  * Detects a <em>one-shot CLI command</em> ({@code --help}/{@code --version}/{@code init}/{@code doctor}/
- * {@code plugin}/{@code skill}/{@code mcp}/{@code copilot}/{@code pair}/{@code devices}/{@code provider})
+ * {@code plugin}/{@code skill}/{@code mcp}/{@code copilot}/{@code pair}/{@code devices}/{@code provider}/
+ * {@code tools})
  * from the process arguments (M20). Such an
  * invocation prints +
  * exits without running an agent turn, so the heavy {@code @Observes StartupEvent} work — Flyway
@@ -29,7 +30,8 @@ import jakarta.inject.Inject;
  *
  * <p>The recognized set is the app's own CLI surface: the picocli-universal {@code --help}/{@code -h}/
  * {@code --version}/{@code -V} plus the app-defined {@code init}, {@code doctor}, {@code plugin},
- * {@code skill}, {@code mcp}, {@code copilot}, {@code pair}, and {@code devices} subcommands ({@code pair}
+ * {@code skill}, {@code mcp}, {@code copilot}, {@code pair}, {@code devices}, and {@code tools}
+ * subcommands ({@code pair}
  * approves/rejects a paired device's requested scopes and {@code devices} lists them — both only read/write
  * {@code ~/.forvum/devices/}, so neither needs the DB or watcher). It must stay in sync with
  * {@code RootCommand} (which owns them); only canonical single-token
@@ -54,14 +56,15 @@ public class CommandMode {
         for (String arg : args) {
             switch (arg) {
                 // Canonical one-shot forms only — must match RootCommand's surface (mixinStandardHelpOptions
-                // + the 'init'/'doctor'/'plugin'/'skill'/'mcp'/'copilot'/'pair'/'devices'/'provider'
+                // + the 'init'/'doctor'/'plugin'/'skill'/'mcp'/'copilot'/'pair'/'devices'/'provider'/'tools'
                 // subcommands). Bare 'help'/'version' are NOT registered subcommands. 'plugin' (P2-6)
                 // resolves+writes a JAR, 'skill' (P2-7) downloads+writes a .md, 'mcp' (P2-13) reads/writes
                 // mcp-servers/, 'copilot' (#42) device-code logs in + writes a credential file, and
-                // 'provider add' (P2-10) stores a 0600 API key + runs a direct (DB-free) smoke chat — none
-                // needs the DB/watcher.
+                // 'provider add' (P2-10) stores a 0600 API key + runs a direct (DB-free) smoke chat, and
+                // 'tools' (#184) lists the registered tools from Instance<ToolProvider> without connecting —
+                // none needs the DB/watcher.
                 case "--help", "-h", "--version", "-V", "init", "doctor", "plugin", "skill", "mcp",
-                        "copilot", "pair", "devices", "provider" -> {
+                        "copilot", "pair", "devices", "provider", "tools" -> {
                     return true;
                 }
                 default -> {

@@ -3,6 +3,8 @@ package ai.forvum.engine.doctor;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.forvum.core.PermissionScope;
+import ai.forvum.core.ToolSpec;
 import ai.forvum.engine.config.ConfigLoader;
 import ai.forvum.engine.config.ForvumHome;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -39,6 +42,18 @@ class ConfigDoctorTest {
         ConfigLoader loader = new ConfigLoader(new ObjectMapper());
         return new ConfigDoctor(forvumHome, loader, KNOWN);
     }
+
+    private ConfigDoctor doctor(ToolInventory inventory) {
+        ForvumHome forvumHome = new ForvumHome(Optional.of(home.toString()));
+        ConfigLoader loader = new ConfigLoader(new ObjectMapper());
+        return new ConfigDoctor(forvumHome, loader, KNOWN, inventory);
+    }
+
+    private static final ToolSpec WEB_SEARCH_SPEC =
+            new ToolSpec("web.search", "search the web", PermissionScope.WEB_SEARCH, "{}");
+    private static final String WEB_SEARCH_HINT = "set a valid backend in tools/web.json";
+    private static final ToolInventory WEB_SEARCH_GAP =
+            new ToolInventory(List.of(WEB_SEARCH_SPEC), Map.of("web.search", WEB_SEARCH_HINT));
 
     private void write(String relative, String content) throws IOException {
         Path file = home.resolve(relative);
@@ -530,5 +545,126 @@ class ConfigDoctorTest {
         assertFalse(report.findings().stream().anyMatch(f ->
                         f.location().equals("channels/telegram.json")),
                 "a restricted (non-public) channel needs no channel-security finding (#170)");
+    }
+
+    // ---- #184 D6: belted-but-unconfigured tool WARNING ----
+
+    @Test
+    void aBeltedUnconfiguredToolIsExactlyOneWarningNamingTheToolAndHint() throws IOException {
+        // identityId set so the [B] anonymity warning does not also fire — this isolates the belt-gap check.
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\","
+                + "\"identityId\":\"default\",\"allowedTools\":[\"web.search\"]}");
+
+        DoctorReport report = doctor(WEB_SEARCH_GAP).check();
+
+        assertTrue(report.healthy(), () -> "a belt gap is advisory, not fatal; findings: " + report.findings());
+        List<Finding> gapWarnings = report.findings().stream()
+                .filter(f -> f.severity() == Severity.WARNING
+                        && f.location().equals("agents/main.json")
+                        && f.problem().contains("web.search")
+                        && f.problem().contains(WEB_SEARCH_HINT))
+                .toList();
+        assertTrue(gapWarnings.size() == 1,
+                () -> "exactly one belted-unconfigured warning naming the tool + hint; findings: "
+                        + report.findings());
+    }
+
+    @Test
+    void aBeltedButConfiguredToolProducesNoBeltGapWarning() throws IOException {
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\","
+                + "\"identityId\":\"default\",\"allowedTools\":[\"web.search\"]}");
+
+        // Inventory has the spec but NO gap → configured → no belt-gap warning.
+        ToolInventory noGap = new ToolInventory(List.of(WEB_SEARCH_SPEC), Map.of());
+        DoctorReport report = doctor(noGap).check();
+
+        assertFalse(report.findings().stream().anyMatch(f ->
+                        f.problem().contains("in the belt but not configured")),
+                () -> "a configured belted tool warns nothing; findings: " + report.findings());
+    }
+
+    @Test
+    void aGapForAToolNotInTheBeltProducesNoWarning() throws IOException {
+        write("agents/main.md", "You are the main agent.");
+        // web.search is NOT belted (only fs.read) → its gap must not warn.
+        write("agents/main.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\","
+                + "\"identityId\":\"default\",\"allowedTools\":[\"fs.read\"]}");
+
+        DoctorReport report = doctor(WEB_SEARCH_GAP).check();
+
+        assertFalse(report.findings().stream().anyMatch(f ->
+                        f.problem().contains("in the belt but not configured")),
+                () -> "a gap for a non-belted tool warns nothing; findings: " + report.findings());
+    }
+
+    @Test
+    void anEmptyToolInventoryProducesNoBeltGapDelta() throws IOException {
+        // The delete-the-guard direction ([M20]): with ToolInventory.empty() the belt-gap check is a no-op,
+        // so a home belting web.search yields NO belt-gap warning — the config-editor / 3-arg path is safe.
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\","
+                + "\"identityId\":\"default\",\"allowedTools\":[\"web.search\"]}");
+
+        DoctorReport report = doctor(ToolInventory.empty()).check();
+
+        assertFalse(report.findings().stream().anyMatch(f ->
+                        f.problem().contains("in the belt but not configured")),
+                () -> "empty inventory must add no belt-gap finding; findings: " + report.findings());
+    }
+
+    // ---- #184 [B]: belt dead-by-anonymity on an existing install ----
+
+    @Test
+    void anAgentWithToolsButNoIdentityAndNoChannelMappingIsWarned() throws IOException {
+        // A pre-#184 install: allowedTools set, but no identityId and no channelAccounts mapping anywhere →
+        // every turn resolves anonymous and the belt is invisible. Warn, naming the fix.
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json",
+                "{\"primaryModel\":\"ollama:qwen3:1.7b\",\"allowedTools\":[\"fs.read\",\"web.search\"]}");
+        write("identities/default.json", "{\"channelAccounts\":{}}");
+
+        DoctorReport report = doctor().check();
+
+        assertTrue(report.healthy(),
+                () -> "a dead-by-anonymity belt is advisory, not fatal; findings: " + report.findings());
+        assertTrue(report.findings().stream().anyMatch(f ->
+                        f.severity() == Severity.WARNING
+                        && f.location().equals("agents/main.json")
+                        && f.problem().contains("anonymous identity")
+                        && f.hint().contains("identityId")),
+                () -> "a belt dead-by-anonymity must warn naming the fix; findings: " + report.findings());
+    }
+
+    @Test
+    void aFreshScaffoldStyleAgentWithIdentityIdIsNotWarnedForAnonymity() throws IOException {
+        // The NEW-install shape: identityId set → never anonymous → no [B] warning.
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json", "{\"primaryModel\":\"ollama:qwen3:1.7b\","
+                + "\"identityId\":\"default\",\"allowedTools\":[\"fs.read\",\"web.search\"]}");
+        write("identities/default.json", "{\"channelAccounts\":{}}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.findings().stream().anyMatch(f ->
+                        f.problem().contains("anonymous identity")),
+                () -> "an agent with identityId is never anonymous; findings: " + report.findings());
+    }
+
+    @Test
+    void anAgentWithNoIdentityIdButAChannelAccountMappingIsNotWarnedForAnonymity() throws IOException {
+        // Some identity maps a channel account → a channel turn can resolve to a real identity, so the belt
+        // is not necessarily dead → no [B] warning (the conservative predicate).
+        write("agents/main.md", "You are the main agent.");
+        write("agents/main.json",
+                "{\"primaryModel\":\"ollama:qwen3:1.7b\",\"allowedTools\":[\"fs.read\",\"web.search\"]}");
+        write("identities/alice.json", "{\"channelAccounts\":{\"web\":[\"u-1\"]}}");
+
+        DoctorReport report = doctor().check();
+
+        assertFalse(report.findings().stream().anyMatch(f ->
+                        f.problem().contains("anonymous identity")),
+                () -> "a channelAccounts mapping suppresses the [B] warning; findings: " + report.findings());
     }
 }

@@ -101,6 +101,7 @@ ollama pull gemma4:31b-cloud  # the model agent `main` is pinned to by default
 ```bash
 forvum init                     # scaffold ~/.forvum (owner-only: 0700 dirs / 0600 files)
 forvum doctor                   # validate ~/.forvum config (exits non-zero on problems)
+forvum tools                    # list the built-in tools: scope, belt membership, and readiness
 forvum                          # interactive session: banner + `forvum> ` prompt; /exit or Ctrl+D quits
 forvum ask "who are you?"       # one non-interactive turn (stdout is just the reply)
 forvum --help                   # also --version
@@ -126,6 +127,10 @@ unknown providers, and pending device scope upgrades.
 - **Device pairing & role-based scopes** — unknown devices are paired explicitly
   (`forvum pair approve …`); an identity's role maps to a set of permission scopes, and a tool outside
   an agent's belt is refused and audited.
+- **Default tool belt (#184)** — the scaffolded `main` agent belts only tools that are safe with zero
+  setup (`fs.*`, `web.fetch`/`web.search`, `memory.*`). `shell.exec`, `sandbox.run`, `browser.*`, and
+  `tts.speak` are compiled in but **belt-excluded by default** (confirm-gated / fail-closed / needing an
+  operator-installed dependency); belt one explicitly to enable it.
 - **Approval gate** — tools marked `userConfirmRequired` (e.g. `shell.exec`) block the turn for an
   interactive yes/no, and are denied by default in non-interactive / cron contexts.
 - **Output guard** — a secret-redaction filter masks API keys and tokens on the way out of a turn
@@ -177,13 +182,27 @@ channel** file flips the binary from one-shot command mode into a long-lived ser
 ## Configuration
 
 Everything lives under `~/.forvum/` (override with the `FORVUM_HOME` env var). `forvum init` scaffolds
-a working `agents/main.json` + system-prompt `agents/main.md`; the only required agent field is the
-model:
+a working `agents/main.json` + system-prompt `agents/main.md`. The only required agent field is
+`primaryModel`, but the scaffold also wires a usable default **tool belt** and an `identityId` so the
+belt is actually offered to the model (without an identity the turn runs anonymous and every tool is
+filtered out):
 
 ```json
 // ~/.forvum/agents/main.json
-{ "primaryModel": "ollama:gemma4:31b-cloud" }
+{
+  "primaryModel": "ollama:gemma4:31b-cloud",
+  "identityId": "default",
+  "allowedTools": ["fs.read", "fs.write", "fs.list", "web.fetch", "web.search",
+                   "memory.save", "memory.recall"]
+}
 ```
+
+`web.search` works with no key (keyless DuckDuckGo default). `shell.exec`, `sandbox.run`, `browser.*`,
+`tts.speak`, and `mcp.*` are compiled in but **belt-excluded by default** — add an id to `allowedTools`
+to enable one, then configure it (`forvum tools` shows each tool's scope, belt membership, and whether it
+is configured). **Upgrading an existing install?** If your `agents/main.json` predates this, add
+`"identityId": "default"` (keep `identities/default.json`) and the `allowedTools` line above — `forvum
+doctor` warns when a belt is dead-by-anonymity.
 
 Cloud providers (Anthropic, OpenAI, Google) need an API key. The quickest path is
 `forvum provider add <provider>` (e.g. `forvum provider add anthropic`): it prompts for the key (no

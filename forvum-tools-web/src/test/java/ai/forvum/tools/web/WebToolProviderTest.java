@@ -160,4 +160,45 @@ class WebToolProviderTest {
                 () -> provider.invoke("web.fetch", Map.of()),
                 "a missing required argument is rejected");
     }
+
+    // ---- #184 configGaps(): the keyless default is ready; only brave-no-key / unknown backend is a gap ----
+
+    @Test
+    void configGapsIsEmptyForTheKeylessDefault() {
+        WebToolProvider provider = providerWith(
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of()));
+
+        assertTrue(provider.configGaps().isEmpty(),
+                "web.search is keyless-functional out of the box (#192) — no config gap");
+    }
+
+    @Test
+    void configGapsFlagsBraveSelectedWithoutAKey() {
+        WebToolProvider provider = providerWith(
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of(), Optional.of("brave")));
+
+        Map<String, String> gaps = provider.configGaps();
+        assertTrue(gaps.containsKey("web.search"), () -> "brave-no-key must be a web.search gap; got " + gaps);
+        assertTrue(gaps.get("web.search").contains("braveApiKey"), () -> "the hint names braveApiKey; got " + gaps);
+        assertTrue(gaps.get("web.search").contains("tools/web.json"),
+                () -> "the hint names the file; got " + gaps);
+    }
+
+    @Test
+    void configGapsFlagsAnUnknownBackend() {
+        WebToolProvider provider = providerWith(
+                new WebToolConfig.Spec(Optional.empty(), false, Set.of(), Optional.of("bing")));
+
+        Map<String, String> gaps = provider.configGaps();
+        assertTrue(gaps.containsKey("web.search"), () -> "an unknown backend is a gap; got " + gaps);
+        assertTrue(gaps.get("web.search").contains("bing"), () -> "the hint names the bad backend; got " + gaps);
+    }
+
+    @Test
+    void configGapsIsEmptyWhenBraveIsConfiguredWithAKey() {
+        WebToolProvider provider = providerWith(
+                new WebToolConfig.Spec(Optional.of("BSA-key"), false, Set.of(), Optional.of("brave")));
+
+        assertTrue(provider.configGaps().isEmpty(), "brave + key is ready — no gap");
+    }
 }

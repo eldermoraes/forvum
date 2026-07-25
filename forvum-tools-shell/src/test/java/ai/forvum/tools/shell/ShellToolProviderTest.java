@@ -155,4 +155,28 @@ class ShellToolProviderTest {
         assertEquals(sub.toRealPath().toString(), out.strip(),
                 "the model-supplied workingDir is honored, confined to the workspace");
     }
+
+    // ---- #184 configGaps(): fail-closed (no allowlist) is a gap; a populated allowlist is ready ----
+
+    @Test
+    void configGapsFlagsShellExecWhenNoCommandsAreAllowed(@TempDir Path home, @TempDir Path workspace) {
+        // No tools/shell.json → fail-closed → shell.exec is a config gap naming the file + field.
+        ShellToolProvider provider = providerFor(home, workspace);
+
+        Map<String, Object> gaps = Map.copyOf(provider.configGaps());
+        assertTrue(gaps.containsKey("shell.exec"), () -> "an empty allowlist is a gap; got " + gaps);
+        assertTrue(gaps.get("shell.exec").toString().contains("allowedCommands"),
+                () -> "the hint names allowedCommands; got " + gaps);
+        assertTrue(gaps.get("shell.exec").toString().contains("tools/shell.json"),
+                () -> "the hint names the file; got " + gaps);
+    }
+
+    @Test
+    void configGapsIsEmptyWhenCommandsAreAllowed(@TempDir Path home, @TempDir Path workspace)
+            throws IOException {
+        writeAllowlist(home, "{\"allowedCommands\":[\"/bin/echo\"]}");
+        ShellToolProvider provider = providerFor(home, workspace);
+
+        assertTrue(provider.configGaps().isEmpty(), "a populated allowlist means shell.exec is ready");
+    }
 }

@@ -50,6 +50,18 @@ public class SandboxToolProvider extends AbstractToolProvider {
         return List.of(SandboxRunTool.SPEC);
     }
 
+    /**
+     * {@code sandbox.run}'s config gap (#184): fail-closed with a blank {@code image}, so the discovery
+     * surfaces ({@code forvum tools}/{@code doctor}) name the exact file + field to enable it.
+     */
+    @Override
+    public Map<String, String> configGaps() {
+        if (config.read().image().isBlank()) {
+            return Map.of("sandbox.run", "set \"image\" in ~/.forvum/tools/sandbox.json");
+        }
+        return Map.of();
+    }
+
     @Override
     public String invoke(String toolName, Map<String, Object> arguments) {
         if (!"sandbox.run".equals(toolName)) {

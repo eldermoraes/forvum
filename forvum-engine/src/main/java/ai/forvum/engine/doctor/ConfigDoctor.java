@@ -2,6 +2,7 @@ package ai.forvum.engine.doctor;
 
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.Persona;
+import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
 import ai.forvum.engine.agent.AgentSpecReader;
 import ai.forvum.engine.agent.RoleRegistry;
@@ -19,6 +20,7 @@ import ai.forvum.engine.graph.OutputSchemaException;
 import ai.forvum.engine.graph.OutputSchemaValidator;
 import ai.forvum.engine.pairing.Device;
 import ai.forvum.engine.pairing.DeviceSpecReader;
+import ai.forvum.engine.tools.ToolFilter;
 import ai.forvum.sdk.ChannelAdmissionPolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,12 +61,24 @@ public final class ConfigDoctor {
     private final ForvumHome home;
     private final ConfigLoader loader;
     private final Set<String> knownProviders;
+    private final ToolInventory toolInventory;
     private final OutputSchemaValidator outputSchemaValidator = new OutputSchemaValidator(new ObjectMapper());
 
+    /**
+     * The pre-#184 constructor — delegates with an {@link ToolInventory#empty() empty} tool inventory, so
+     * the belt-gap check is a no-op. Kept for the config-editor / dev path (and existing unit tests) that
+     * have no assembled tool set to hand over.
+     */
     public ConfigDoctor(ForvumHome home, ConfigLoader loader, Set<String> knownProviders) {
+        this(home, loader, knownProviders, ToolInventory.empty());
+    }
+
+    public ConfigDoctor(ForvumHome home, ConfigLoader loader, Set<String> knownProviders,
+            ToolInventory toolInventory) {
         this.home = home;
         this.loader = loader;
         this.knownProviders = Set.copyOf(knownProviders);
+        this.toolInventory = toolInventory;
     }
 
     /** Validate the whole {@code $FORVUM_HOME} layout and return the findings in discovery order. */
@@ -99,6 +113,9 @@ public final class ConfigDoctor {
         List<String> ids = reader.ids();
         // #167: the file-defined roles — an agent role resolves iff it is a built-in OR one of these.
         Set<String> definedRoles = Set.copyOf(loader.listIds(home.roles(), ".json"));
+        // #184 [B]: does ANY identity map a channel account? If none does, an agent with no identityId
+        // resolves every turn to the anonymous identity (empty scopes) and its whole belt is invisible.
+        boolean anyChannelAccountMapping = anyIdentityMapsAChannelAccount();
 
         if (ids.isEmpty()) {
             findings.add(new Finding(Severity.WARNING, "agents",
@@ -127,6 +144,8 @@ public final class ConfigDoctor {
                         "primaryModel '" + p.primaryModel() + "'");
                 checkOutputSchema(findings, location, p.outputSchema());
                 checkRoles(findings, location, p.roles(), definedRoles);
+                checkBeltToolGaps(findings, location, p);
+                checkDeadByAnonymityBelt(findings, location, id, p, anyChannelAccountMapping);
             } catch (IllegalStateException e) {
                 findings.add(new Finding(Severity.ERROR, location, e.getMessage(),
                         "Fix " + location + " (or the agents/" + id + ".md persona it names)."));
@@ -144,6 +163,64 @@ public final class ConfigDoctor {
         }
 
         return ids;
+    }
+
+    /**
+     * WARN for each belted tool that is present but not configured (#184 D6): intersect the agent's
+     * {@code allowedTools} globs with the registered specs, then flag any whose name has a config-gap hint
+     * (from the owning module's {@code ToolProvider.configGaps()}). With {@link ToolInventory#empty()} the
+     * spec list is empty → the belt is empty → this is a no-op (the config-editor / dev path is unaffected).
+     * A belted {@code mcp.*} glob has no gathered spec, so it is silently unchecked (documented).
+     */
+    private void checkBeltToolGaps(List<Finding> findings, String location, Persona persona) {
+        for (ToolSpec tool : ToolFilter.filter(persona.allowedTools(), toolInventory.specs())) {
+            String gap = toolInventory.configGaps().get(tool.name());
+            if (gap != null) {
+                findings.add(new Finding(Severity.WARNING, location,
+                        "Tool '" + tool.name() + "' is in the belt but not configured: " + gap,
+                        "Configure it, or remove '" + tool.name() + "' from allowedTools in " + location + "."));
+            }
+        }
+    }
+
+    /**
+     * WARN when an agent's belt is dead-by-anonymity on an existing install (#184 [B]): a persona with tools
+     * in {@code allowedTools} but no {@code identityId}, in a home where no identity maps a channel account,
+     * resolves every turn to the anonymous identity (no scopes) — so the WHOLE belt is filtered and never
+     * offered to the model (the exact gap the scaffold's {@code identityId} closes for NEW installs). Names
+     * the fix. Reader-as-oracle: {@code checkAgents} already holds the persona, the identities dir is already
+     * read. A fresh scaffold has {@code identityId == "default"}, so this never fires on it.
+     */
+    private void checkDeadByAnonymityBelt(List<Finding> findings, String location, String id, Persona persona,
+            boolean anyChannelAccountMapping) {
+        if (persona.identityId() == null && !anyChannelAccountMapping && !persona.allowedTools().isEmpty()) {
+            findings.add(new Finding(Severity.WARNING, location,
+                    "Agent '" + id + "' has tools in allowedTools but no identityId, and no identity maps a "
+                  + "channel account — every turn resolves to the anonymous identity (no scopes), so the whole "
+                  + "tool belt is never offered to the model",
+                    "Add \"identityId\": \"default\" to " + location + " (and keep identities/default.json), "
+                  + "or map a channel identity via channelAccounts in an identities/<id>.json."));
+        }
+    }
+
+    /** Whether any {@code identities/<id>.json} declares a non-empty {@code channelAccounts} object (#184). */
+    private boolean anyIdentityMapsAChannelAccount() {
+        for (String id : loader.listIds(home.identities(), ".json")) {
+            JsonNode node;
+            try {
+                node = loader.readJson(home.identities().resolve(id + ".json")).orElse(null);
+            } catch (UncheckedIOException e) {
+                continue; // malformed JSON is reported elsewhere; it maps nothing here
+            }
+            if (node == null) {
+                continue;
+            }
+            JsonNode accounts = node.get("channelAccounts");
+            if (accounts != null && accounts.isObject() && !accounts.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void checkCrons(List<Finding> findings, List<String> agentIds) {

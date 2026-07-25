@@ -486,6 +486,8 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [#192] Pluggable web-search backend is module-internal; keyless DDG default flips search to network-on-invoke → docs/lessons/tools.md
 - [#171] Strict plugin checksums fail on missing/mismatch; fixtures encoded the vulnerability → docs/lessons/tools.md
 - [#186] Model-callable TTS reuses the voice subprocess pair (stdin-fed); static SecureRandom breaks native → docs/lessons/tools.md
+- [#184] A usable default belt is TWO fixes: widen the scaffold belt AND wire identityId, else anonymous filters it all → docs/lessons/tools.md
+- [#184] `forvum tools`/doctor gather from Instance<ToolProvider> (registry empty one-shot); skip the MCP bridge; configGaps owns the hint → docs/lessons/tools.md
 
 ### Engine, graph & scheduling — `docs/lessons/engine-graph.md`
 - [M7] Guard registry mutations; keep blocking IO off computeIfAbsent lock paths → docs/lessons/engine-graph.md

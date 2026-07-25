@@ -57,6 +57,19 @@ public class WebToolProvider extends AbstractToolProvider {
         return List.of(WebFetchTool.SPEC, WebSearchTool.SPEC);
     }
 
+    /**
+     * {@code web.search}'s config gap (#184), read from the live {@code tools/web.json}: none for the
+     * keyless DuckDuckGo default, a hint only when the resolved backend is Brave with no key or an unknown
+     * value ({@link WebSearchTool#configGap}). {@code web.fetch} is always ready (strict egress defaults),
+     * so it never appears here.
+     */
+    @Override
+    public Map<String, String> configGaps() {
+        return WebSearchTool.configGap(config.read())
+                .map(hint -> Map.of("web.search", hint))
+                .orElseGet(Map::of);
+    }
+
     @Override
     public String invoke(String toolName, Map<String, Object> arguments) {
         WebToolConfig.Spec spec = config.read();

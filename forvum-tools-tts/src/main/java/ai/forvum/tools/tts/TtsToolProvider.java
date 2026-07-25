@@ -55,6 +55,18 @@ public class TtsToolProvider extends AbstractToolProvider {
         return List.of(TtsSpeakTool.SPEC);
     }
 
+    /**
+     * {@code tts.speak}'s config gap (#184): inert until the operator points it at their piper binary +
+     * voice, so the discovery surfaces ({@code forvum tools}/{@code doctor}) name the exact file + fields.
+     */
+    @Override
+    public Map<String, String> configGaps() {
+        if (!config.read().isReady()) {
+            return Map.of("tts.speak", "set \"piperBin\" and \"piperVoice\" in ~/.forvum/tools/tts.json");
+        }
+        return Map.of();
+    }
+
     @Override
     public String invoke(String toolName, Map<String, Object> arguments) {
         if (!"tts.speak".equals(toolName)) {

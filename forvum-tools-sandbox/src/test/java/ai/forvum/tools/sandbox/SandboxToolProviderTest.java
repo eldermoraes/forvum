@@ -129,4 +129,28 @@ class SandboxToolProviderTest {
                 () -> provider.invoke("sandbox.run", args("code", "x", "workingDir", "../escape")),
                 "the workingDir is confined to the workspace root");
     }
+
+    // ---- #184 configGaps(): a blank image (fail-closed) is a gap; a configured image is ready ----
+
+    @Test
+    void configGapsFlagsSandboxRunWhenNoImageIsConfigured(@TempDir Path home, @TempDir Path workspace) {
+        // No tools/sandbox.json → blank image → sandbox.run is a config gap naming the file + field.
+        SandboxToolProvider provider = providerFor(home, workspace);
+
+        Map<String, Object> gaps = Map.copyOf(provider.configGaps());
+        assertTrue(gaps.containsKey("sandbox.run"), () -> "a blank image is a gap; got " + gaps);
+        assertTrue(gaps.get("sandbox.run").toString().contains("image"),
+                () -> "the hint names image; got " + gaps);
+        assertTrue(gaps.get("sandbox.run").toString().contains("tools/sandbox.json"),
+                () -> "the hint names the file; got " + gaps);
+    }
+
+    @Test
+    void configGapsIsEmptyWhenAnImageIsConfigured(@TempDir Path home, @TempDir Path workspace)
+            throws IOException {
+        writeConfig(home, "{\"image\":\"python:3.12-slim\"}");
+        SandboxToolProvider provider = providerFor(home, workspace);
+
+        assertTrue(provider.configGaps().isEmpty(), "a configured image means sandbox.run is ready");
+    }
 }

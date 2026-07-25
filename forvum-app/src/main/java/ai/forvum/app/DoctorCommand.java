@@ -6,6 +6,7 @@ import ai.forvum.engine.doctor.ConfigDoctor;
 import ai.forvum.engine.doctor.DoctorReport;
 import ai.forvum.engine.doctor.Finding;
 import ai.forvum.sdk.ModelProvider;
+import ai.forvum.sdk.ToolProvider;
 
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -22,10 +23,12 @@ import java.util.stream.Collectors;
  * 1 when any ERROR is found — so a script or CI step can gate on the configuration being loadable.
  *
  * <p>The validation lives in the engine's {@link ConfigDoctor} (reusing the M4 readers + the engine's own
- * typed binders as oracles). This command supplies the two things only the assembled app knows: the
- * resolved {@link ForvumHome} and the set of model-provider extension ids actually on the classpath
+ * typed binders as oracles). This command supplies the three things only the assembled app knows: the
+ * resolved {@link ForvumHome}, the set of model-provider extension ids actually on the classpath
  * (gathered from {@code Instance<ModelProvider>}, the same way the engine's {@code LlmSelector} discovers
- * providers), so doctor can flag a model ref that names a provider no installed plugin handles.
+ * providers — so doctor can flag a model ref that names a provider no installed plugin handles), and the
+ * tool inventory gathered from {@code Instance<ToolProvider>} (see {@link ToolInventoryCollector} — so
+ * doctor can flag a belted-but-unconfigured tool).
  *
  * <p>Like {@code --help}/{@code --version}/{@code init}, {@code doctor} is a {@code CommandMode} one-shot:
  * it only reads files, so its boot skips Flyway, the config {@code WatchService}, and cron scheduling. Keep
@@ -45,13 +48,17 @@ public class DoctorCommand implements Callable<Integer> {
     @Inject
     Instance<ModelProvider> providers;
 
+    @Inject
+    Instance<ToolProvider> toolProviders;
+
     @Override
     public Integer call() {
         Set<String> knownProviders = providers.stream()
                 .map(ModelProvider::extensionId)
                 .collect(Collectors.toUnmodifiableSet());
 
-        DoctorReport report = new ConfigDoctor(home, loader, knownProviders).check();
+        DoctorReport report = new ConfigDoctor(home, loader, knownProviders,
+                ToolInventoryCollector.collect(toolProviders).toInventory()).check();
 
         System.out.println("Forvum doctor: checking " + home.root());
         for (Finding finding : report.findings()) {
