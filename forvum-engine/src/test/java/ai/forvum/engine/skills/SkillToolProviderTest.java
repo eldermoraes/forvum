@@ -186,6 +186,56 @@ class SkillToolProviderTest {
     }
 
     @Test
+    void aPathTraversalNameIsDeniedWithoutReadingOutsideSkills() throws IOException {
+        // Plant a secret OUTSIDE skills/ that a traversal would target; the guard must refuse before any read,
+        // so the secret can never leak. (deriveId never produces a leading '.' / a '/', so this is not a
+        // reachable skill id — path confinement, the WorkspaceRoot/PathTraversalDeniedTest posture.)
+        String secret = "TOP-SECRET-AGENT-PROMPT";
+        Path agents = home.resolve("agents");
+        Files.createDirectories(agents);
+        Files.writeString(agents.resolve("main.md"), secret);
+        writeSkill("greeting", "Hello {{who}}"); // a real skill exists, so skills/ is non-empty
+        SkillToolProvider provider = provider();
+
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                () -> invoke(provider, "../agents/main", Map.of()));
+        assertFalse(thrown.getMessage().contains(secret),
+                "the refusal must not read or echo the traversal target's content");
+    }
+
+    @Test
+    void anAbsolutePathNameIsDenied() throws IOException {
+        writeSkill("greeting", "Hello {{who}}");
+        SkillToolProvider provider = provider();
+        assertThrows(IllegalArgumentException.class, () -> invoke(provider, "/etc/passwd", Map.of()));
+    }
+
+    @Test
+    void aNameContainingASeparatorIsDenied() throws IOException {
+        writeSkill("greeting", "Hello {{who}}");
+        SkillToolProvider provider = provider();
+        assertThrows(IllegalArgumentException.class, () -> invoke(provider, "sub/greeting", Map.of()));
+    }
+
+    @Test
+    void aDotDotNameIsDenied() throws IOException {
+        writeSkill("greeting", "Hello {{who}}");
+        SkillToolProvider provider = provider();
+        assertThrows(IllegalArgumentException.class, () -> invoke(provider, "..", Map.of()));
+    }
+
+    @Test
+    void expandIsSinglePassAndDoesNotReSubstituteInjectedArgValues() {
+        // An arg VALUE that itself contains a {{placeholder}} must NOT be expanded — single-pass over the
+        // template only. args {a:"{{b}}", b:"X"} on "{{a}} {{b}}" => the literal "{{b}} X", never "X X".
+        Map<String, Object> args = new java.util.LinkedHashMap<>();
+        args.put("a", "{{b}}");
+        args.put("b", "X");
+
+        assertEquals("{{b}} X", SkillToolProvider.expand("{{a}} {{b}}", args));
+    }
+
+    @Test
     void unknownToolNameIsAProgrammingError() {
         assertThrows(IllegalArgumentException.class, () -> provider().invoke("skill.frobnicate", Map.of()));
     }

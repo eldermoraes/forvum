@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The engine-resident skill-invocation surface (#191, ULTRAPLAN §4.1 / §9.3.3): contributes
@@ -55,6 +57,19 @@ public class SkillToolProvider extends AbstractToolProvider {
      * not apply); over-limit is a model-recoverable error.
      */
     static final int MAX_EXPANDED_CHARS = 32_000;
+
+    /**
+     * The exact skill-id shape {@code forvum skill install} produces (its {@code deriveId}: only
+     * {@code [A-Za-z0-9._-]}, leading {@code .}/{@code -} trimmed, so an installed id never starts with
+     * {@code .} or {@code -}). Enforced on the MODEL-supplied {@code name} BEFORE any filesystem touch, so a
+     * path-traversal attempt ({@code ../agents/main}, an absolute path, or any name with a separator) is
+     * refused before {@code SkillReader.readSpec} ever resolves {@code skills/<name>.md} — a {@code /} or
+     * {@code \}, a leading {@code .}, a NUL, or a blank name cannot match. The guard lives at this untrusted
+     * seam rather than inside {@code SkillReader} so the reader's other callers ({@code ConfigDoctor},
+     * {@code SkillInstaller}) — which pass ids sourced from real directory stems or the installer's own
+     * sanitizer — keep their graceful-skip contract for a hand-dropped odd filename.
+     */
+    private static final Pattern SKILL_ID = Pattern.compile("[A-Za-z0-9_][A-Za-z0-9._-]*");
 
     private static final ToolSpec SKILL_INVOKE_SPEC = new ToolSpec(
             "skill.invoke",
@@ -121,13 +136,23 @@ public class SkillToolProvider extends AbstractToolProvider {
         return expanded;
     }
 
-    /** The {@code name} argument as a non-blank skill id, else a clear model-recoverable error. */
+    /**
+     * The {@code name} argument as a validated skill id, else a clear model-recoverable error. Rejects a
+     * path-traversal / absolute / separator-bearing name via {@link #SKILL_ID} BEFORE any filesystem access,
+     * so a resolved path is never touched and never echoed.
+     */
     private static String requireSkillName(Object value) {
         if (!(value instanceof String s) || s.isBlank()) {
             throw new IllegalArgumentException(
                     "skill.invoke requires a non-blank string 'name' argument (the skill id).");
         }
-        return s.strip();
+        String id = s.strip();
+        if (!SKILL_ID.matcher(id).matches()) {
+            throw new IllegalArgumentException(
+                    "skill.invoke 'name' must be a skill id, not a path: it may contain only letters, digits, "
+                  + "'.', '_' and '-' and cannot start with '.' or '-'. Call skill.list to see installed skills.");
+        }
+        return id;
     }
 
     /**
@@ -180,18 +205,27 @@ public class SkillToolProvider extends AbstractToolProvider {
         }
     }
 
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{([^{}]+)}}");
+
     /**
-     * Literal single-pass expansion: replace every literal {@code {{key}}} with its arg value (a String as
-     * raw text, any other value as compact JSON, a null as the empty string). Unmatched placeholders stay
-     * verbatim (the skill enforces presence via {@code required} in its {@code inputSchema}); extra args are
-     * unused. No nesting, conditionals, or escape syntax. Pure + static so it is unit-testable in isolation.
+     * Literal single-pass expansion: scan the TEMPLATE once for {@code {{key}}} tokens, replacing each with
+     * its arg value (a String as raw text, any other value as compact JSON, a null as the empty string).
+     * Because the scan walks the template (not an accumulating buffer) and each replacement is inserted
+     * literally, a {@code {{...}}} sequence appearing INSIDE an arg VALUE is never re-substituted — the
+     * single-pass contract. An unmatched placeholder (a key not in {@code args}) stays verbatim (the skill
+     * enforces presence via {@code required} in its {@code inputSchema}); extra args are unused. No nesting,
+     * conditionals, or escape syntax. Pure + static so it is unit-testable in isolation.
      */
     static String expand(String template, Map<String, Object> args) {
-        String result = template;
-        for (Map.Entry<String, Object> entry : args.entrySet()) {
-            result = result.replace("{{" + entry.getKey() + "}}", render(entry.getValue()));
+        Matcher matcher = PLACEHOLDER.matcher(template);
+        StringBuilder out = new StringBuilder(template.length());
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            String replacement = args.containsKey(key) ? render(args.get(key)) : matcher.group();
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
         }
-        return result;
+        matcher.appendTail(out);
+        return out.toString();
     }
 
     private static String render(Object value) {

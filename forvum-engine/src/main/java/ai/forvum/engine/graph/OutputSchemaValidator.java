@@ -13,10 +13,22 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Validates a per-agent {@code outputSchema} (P2-12) against the supervisor's final assistant reply. When
- * an agent declares an {@code outputSchema}, the final text must parse as JSON and satisfy the schema; this
- * class decodes the text and validates it, NAMING the offending field(s) on failure (the message rides into
- * a terminal {@code ErrorEvent} — no retry).
+ * Validates a JSON instance against a declared JSON Schema — the engine's single schema-validation seam,
+ * shared by two consumers:
+ *
+ * <ul>
+ *   <li><strong>Per-agent {@code outputSchema} (P2-12):</strong> the supervisor's final assistant reply must
+ *   parse as JSON and satisfy the agent's declared schema; a failure names the offending field(s) and rides
+ *   into a terminal {@code ErrorEvent} (no retry) — a turn-aborting check.</li>
+ *   <li><strong>Skill-invocation arguments (#191):</strong> {@code skill.invoke} validates the call's
+ *   {@code args} against the skill's declared {@code inputSchema} BEFORE expansion; a failure is
+ *   model-recoverable (rendered back as a tool result, the turn completes), never a turn abort. One
+ *   validator, no parallel schema (the P2-9 reader-as-oracle rule), so a skill doctor pass compiles exactly
+ *   the schema the runtime enforces.</li>
+ * </ul>
+ *
+ * <p>Both paths call {@link #validate(String, String)}; {@link #validateSchema(String)} checks a DECLARED
+ * schema is itself usable at config-read time.</p>
  *
  * <p><strong>Engine (#124):</strong> validation is delegated to the native-clean
  * {@code com.networknt:json-schema-validator} (default dialect JSON Schema <strong>draft 2020-12</strong>),
