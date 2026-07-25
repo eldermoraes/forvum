@@ -44,4 +44,12 @@ class ToolRegistryDiscoveryInAppClasspathTest {
         assertTrue(names.contains("tts.speak"),
                 "the forvum-tools-tts module (#186) must be discovered + registered on the app classpath, found: " + names);
     }
+
+    @Test
+    void theMultimodalToolsAreDiscoveredOnTheAssembledClasspath() {
+        Set<String> names = registry.all().stream().map(ToolSpec::name).collect(Collectors.toSet());
+
+        assertTrue(names.containsAll(Set.of("image.analyze", "pdf.analyze")),
+                "the forvum-tools-multimodal module (#185) must be discovered + registered on the app classpath, found: " + names);
+    }
 }

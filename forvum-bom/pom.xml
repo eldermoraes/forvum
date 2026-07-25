@@ -33,6 +33,15 @@
              reflection, no META-INF/services); the optional GraalJS/Joni ECMA-262 regex engines are
              `optional=true` and deliberately NOT pulled in (the JDK regex path stays the default). -->
         <json-schema-validator.version>1.5.8</json-schema-validator.version>
+        <!-- Apache PDFBox (#185, pdf.analyze text-layer extraction fallback): 3.0.8 is the latest 3.0.x
+             patch (verified on repo1.maven.org 2026-07-25). Native verdict (the [#124] D2 jar inspection of
+             3.0.8): NO bundled native-image metadata, NO META-INF/services / ServiceLoader, NO sun.misc.Unsafe;
+             bcprov/bcpkix are optional=true so they are NOT pulled -> encrypted PDFs are rejected with an
+             actionable message. The only native work is a hand-authored resource-config.json embedding the
+             bundled standard-14 AFM metrics + glyphlist + fontbox cmap resources (under the tool module's
+             META-INF/native-image/ — Decision-tree A). Text extraction is via PDFTextStripper only, never the
+             rendering/ImageIO path. commons-logging is excluded and bridged to jboss-logging in the module. -->
+        <pdfbox.version>3.0.8</pdfbox.version>
     </properties>
 
     <dependencyManagement>
@@ -84,6 +93,15 @@
                 <groupId>com.networknt</groupId>
                 <artifactId>json-schema-validator</artifactId>
                 <version>${json-schema-validator.version}</version>
+            </dependency>
+            <!-- Apache PDFBox (#185): text-layer extraction for pdf.analyze on providers that lack a native
+                 PDF content mapper (ollama/copilot). See the pdfbox.version note for the native verdict.
+                 bcprov/bcpkix stay optional (unpulled) -> encrypted PDFs are rejected; the module excludes
+                 commons-logging in favor of the jboss-logging bridge for native-cleanliness. -->
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>${pdfbox.version}</version>
             </dependency>
             <!-- Apache Maven Resolver: the no-DI `maven-resolver-supplier` wires a RepositorySystem and
                  pulls maven-resolver-provider (MavenRepositorySystemUtils) + the basic connector and the
@@ -206,6 +224,11 @@
             <dependency>
                 <groupId>ai.forvum</groupId>
                 <artifactId>forvum-tools-tts</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-tools-multimodal</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

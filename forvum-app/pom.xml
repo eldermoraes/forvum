@@ -141,6 +141,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-tts</artifactId>
         </dependency>
+        <!-- Layer-3 Multimodal tools (#185): contributes image.analyze / pdf.analyze (MEDIA_ANALYZE) to the
+             ToolRegistry, routing workspace images/PDFs through a vision sub-generation via the engine-backed
+             MediaAnalysis seam. Bundles Apache PDFBox (text-layer extraction fallback); inert with no config. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-multimodal</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>

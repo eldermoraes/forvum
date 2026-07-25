@@ -12,8 +12,8 @@ class PermissionScopeTest {
     void onlyTheActiveScopesAreDeclared() {
         // FS_READ, FS_WRITE (M2) + MCP_REMOTE (P2-13) + SHELL_EXEC, WEB_BROWSE, WEB_FETCH, WEB_SEARCH
         // (PR-6 preamble for #27/#26/forvum-tools-web) + MEMORY_READ, MEMORY_WRITE (#193 memory tool)
-        // + MEDIA_SYNTHESIZE (#186 tts.speak tool).
-        assertEquals(10, PermissionScope.values().length);
+        // + MEDIA_SYNTHESIZE (#186 tts.speak tool) + MEDIA_ANALYZE (#185 image.analyze/pdf.analyze tools).
+        assertEquals(11, PermissionScope.values().length);
         assertEquals(PermissionScope.FS_READ, PermissionScope.valueOf("FS_READ"));
         assertEquals(PermissionScope.FS_WRITE, PermissionScope.valueOf("FS_WRITE"));
         assertEquals(PermissionScope.MCP_REMOTE, PermissionScope.valueOf("MCP_REMOTE"));
@@ -24,6 +24,7 @@ class PermissionScopeTest {
         assertEquals(PermissionScope.MEMORY_READ, PermissionScope.valueOf("MEMORY_READ"));
         assertEquals(PermissionScope.MEMORY_WRITE, PermissionScope.valueOf("MEMORY_WRITE"));
         assertEquals(PermissionScope.MEDIA_SYNTHESIZE, PermissionScope.valueOf("MEDIA_SYNTHESIZE"));
+        assertEquals(PermissionScope.MEDIA_ANALYZE, PermissionScope.valueOf("MEDIA_ANALYZE"));
     }
 
     @Test
@@ -42,6 +43,8 @@ class PermissionScopeTest {
                 "MEMORY_WRITE (#193) round-trips — memory.save carries it");
         assertEquals(PermissionScope.MEDIA_SYNTHESIZE, PermissionScope.fromName("MEDIA_SYNTHESIZE"),
                 "MEDIA_SYNTHESIZE (#186) round-trips — tts.speak carries it");
+        assertEquals(PermissionScope.MEDIA_ANALYZE, PermissionScope.fromName("MEDIA_ANALYZE"),
+                "MEDIA_ANALYZE (#185) round-trips — image.analyze/pdf.analyze carry it");
     }
 
     @Test

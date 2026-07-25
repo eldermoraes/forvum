@@ -1,0 +1,7 @@
+{
+  "extension_id": "multimodal",
+  "module_name": "forvum-tools-multimodal",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.multimodal.MultimodalToolProvider" }
+  ]
+}

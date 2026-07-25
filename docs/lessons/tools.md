@@ -326,3 +326,48 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   proxy's always-empty field — expose the capture through a METHOD so the call is dispatched to the contextual
   instance. [#184]
 
+- **A multimodal input tool carries NO AI-library dependency — a Resolution-B `MediaAnalysis` seam keeps the
+  langchain4j content types engine-side — and PDFBox's native adoption is resource-config only + a
+  jboss-logging bridge.** #185's `forvum-tools-multimodal` (`image.analyze` / `pdf.analyze`, the new
+  `MEDIA_ANALYZE` scope, appended as `PermissionScope` #11) adds media INPUT, which needs two things a
+  Layer-3 module cannot do alone: resolve a model "via the SDK `LlmSelector` seam" and "default to the
+  agent's primary model" — both engine-side. So the routing lives behind a plain (non-sealed) `forvum-sdk`
+  `MediaAnalysis` interface with the engine as sole implementor (`EngineMediaAnalysis`), the established
+  `ChannelTurnDriver`/`MemoryAccess` idiom: the tool hands over raw bytes in a `MediaPayload` (JDK types
+  only), and the ENGINE base64-encodes them and wraps them in `ImageContent`/`PdfFileContent`, so the tool
+  module declares **zero langchain4j deps**. The seam resolves the ref (an explicit `tools/multimodal.json`
+  `model` override, else the leased persona primary via `CURRENT_AGENT_SPEC`, #178) and drives it through the
+  budget-gated (#169), `provider_calls`-ledgered, OTel-spanned `LlmSelector.resolve(..., costBudget)` path —
+  never a raw `ModelProvider` (which would bypass the budget gate, the ledger, and the primary-model
+  default). `acceptsMedia(mime, override)` is the content-MAPPING check (image → every installed provider;
+  PDF → provider ∈ {anthropic, google, openai} — re-byte-scanned on the 1.16.2 jars; ollama maps
+  `ImageContent` only, copilot conservatively excluded), so `pdf.analyze` is dual-path: native
+  `PdfFileContent` where mapped, else local **text-layer** extraction (PDFBox `PDFTextStripper`, no OCR/no
+  rendering) injected into the prompt inside a closing-tag-neutralized data block (untrusted-text DR-6a
+  framing) — a text-only sub-generation with an EMPTY media list. The non-vision degrade (an ollama text
+  model that accepts an image and answers blind) is caught at the chat call (`UnsupportedFeatureException` /
+  `InvalidRequestException` → `IllegalStateException` naming the ref + the config knob); a narrow catch, so
+  `BudgetExhaustedException` (#169) still propagates. **PDFBox native ([#124] D2 verdict, 3.0.8):** no
+  bundled native metadata, no `META-INF/services`/ServiceLoader, no Unsafe; `bcprov`/`bcpkix` are
+  `optional=true` so they are NOT pulled → encrypted PDFs are rejected with an actionable message (the
+  `InvalidPasswordException` catch works WITHOUT BC because the standard security handler's password check
+  uses JDK crypto — BC is only the public-key handler). The ONLY native work is a hand-authored
+  `resource-config.json` (Decision-tree A) embedding the bundled standard-14 AFM metrics + glyphlist +
+  fontbox cmap resources under the module's `META-INF/native-image/`; PDFBox's compile-scope
+  `commons-logging` is EXCLUDED and replaced by `org.jboss.logging:commons-logging-jboss-logging` (the
+  platform-BOM-managed Quarkus bridge — provides the `org.apache.commons.logging.*` API with no reflective
+  `LogFactory` discovery). The workspace-media read path COPIES the filesystem module's hardened
+  `WorkspaceRoot` (lexical + `toRealPath` NOFOLLOW `resolveForRead`; a Layer-3 plugin can't depend on a
+  sibling). `userConfirmRequired=false` (read-only + a model spend — the `web.fetch` posture); NO
+  `configGaps` override (the tools are functional with no config — vision capability is a runtime/model
+  property, not a config-shaped gap, the #184 delta). Fixtures are generated hermetically WITH PDFBox
+  (standard-14 text pages exercise the AFM metrics; 128-bit `StandardProtectionPolicy` encrypts with JDK
+  crypto, no BC needed). The engine seam test drives the REAL `LlmSelector` (a capturing `ModelProvider`
+  records the `ChatRequest`) to prove the exact base64 + prompt reach the model and a `maxTokens:0` agent is
+  stopped pre-call (the budget-gated path); the app `MultimodalTurnIT` proves the full
+  orchestrator→ToolExecutor→provider→seam→sub-generation wiring on the assembled classpath. The live native
+  vision/PDF turn is proven by a local `-Pnative` build (the [M14]/[#186] Layer-3 discipline — a module only
+  native-COMPILEs once `forvum-app` depends on it), NOT a per-PR CI job (a tiny CI model won't reliably emit
+  a tool call, and a vision model is multi-GB); no `@Tag("live")` class is added, so `live-ownership.sh`
+  stays satisfied. [#185]
+
