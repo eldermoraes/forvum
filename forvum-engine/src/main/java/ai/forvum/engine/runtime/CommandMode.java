@@ -30,7 +30,8 @@ import jakarta.inject.Inject;
  *
  * <p>The recognized set is the app's own CLI surface: the picocli-universal {@code --help}/{@code -h}/
  * {@code --version}/{@code -V} plus the app-defined {@code init}, {@code doctor}, {@code plugin},
- * {@code skill}, {@code mcp}, {@code copilot}, {@code pair}, and {@code devices} subcommands ({@code pair}
+ * {@code skill}, {@code mcp}, {@code copilot}, {@code pair}, {@code devices}, and {@code tools}
+ * subcommands ({@code pair}
  * approves/rejects a paired device's requested scopes and {@code devices} lists them — both only read/write
  * {@code ~/.forvum/devices/}, so neither needs the DB or watcher). It must stay in sync with
  * {@code RootCommand} (which owns them); only canonical single-token
@@ -55,7 +56,7 @@ public class CommandMode {
         for (String arg : args) {
             switch (arg) {
                 // Canonical one-shot forms only — must match RootCommand's surface (mixinStandardHelpOptions
-                // + the 'init'/'doctor'/'plugin'/'skill'/'mcp'/'copilot'/'pair'/'devices'/'provider'
+                // + the 'init'/'doctor'/'plugin'/'skill'/'mcp'/'copilot'/'pair'/'devices'/'provider'/'tools'
                 // subcommands). Bare 'help'/'version' are NOT registered subcommands. 'plugin' (P2-6)
                 // resolves+writes a JAR, 'skill' (P2-7) downloads+writes a .md, 'mcp' (P2-13) reads/writes
                 // mcp-servers/, 'copilot' (#42) device-code logs in + writes a credential file, and
