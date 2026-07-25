@@ -23,6 +23,14 @@ public final class ImageAnalyzeTool {
     /** Default prompt when the model omits one. */
     static final String DEFAULT_PROMPT = "Describe the image(s) in detail.";
 
+    /**
+     * Maximum images per call, checked BEFORE any file is read so an oversized batch never loads N files ×
+     * {@code maxFileBytes} into memory ahead of the budget gate. A fixed sane bound rather than a new config
+     * knob (Simplicity §2): the per-file {@code maxFileBytes} cap already bounds each file; this bounds the
+     * aggregate count. Most vision requests are 1–3 images.
+     */
+    static final int MAX_IMAGES = 8;
+
     /** The tool this module contributes; executed by {@code MultimodalToolProvider}. */
     public static final ToolSpec SPEC = new ToolSpec(
             "image.analyze",
@@ -50,6 +58,10 @@ public final class ImageAnalyzeTool {
                                  MultimodalToolConfig.Spec config, List<String> paths, String prompt) {
         if (paths == null || paths.isEmpty()) {
             throw new IllegalArgumentException("image.analyze requires a non-empty 'paths' array.");
+        }
+        if (paths.size() > MAX_IMAGES) {
+            throw new MultimodalException("image.analyze accepts at most " + MAX_IMAGES + " images per call, "
+                    + "but " + paths.size() + " were requested. Split the request into smaller batches.");
         }
         List<MediaPayload> media = new ArrayList<>(paths.size());
         for (String path : paths) {

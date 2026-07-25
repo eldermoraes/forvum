@@ -20,10 +20,12 @@
         langchain4j dependency; configured by tools/multimodal.json, functional with no config.</description>
 
     <properties>
-        <!-- @Tag("live") tests (one real native vision/PDF turn — MultimodalNativeIT) are off by default.
-             Excluded via this Surefire user property (so a bare CLI -DexcludedGroups=none re-enables them,
-             which a plugin-XML value would NOT — the forvum-tools-tts/browser precedent). Run the live test
-             with: -DexcludedGroups=none -Dgroups=live -->
+        <!-- This module ships NO @Tag("live") test: a live multimodal turn needs a model that reliably
+             emits a tool call plus a multi-GB vision model, which a CI cell cannot host. Native proof is
+             the local -Pnative build (a Layer-3 module native-COMPILEs only once forvum-app depends on it —
+             [M14]) plus the assembled-binary app-level native ITs. The property mirrors the sibling tool
+             modules so a future live test is excluded-by-default via this overridable user property (never
+             a plugin-XML value); with none present today it is simply a no-op. -->
         <excludedGroups>live</excludedGroups>
     </properties>
 
@@ -116,9 +118,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <!-- forvum-tools-multimodal is a headless Quarkus library with no `build` goal; its
-                         *IT tests run via Surefire (CLAUDE.md section 4 exception). @Tag("live") tests
-                         (MultimodalNativeIT) are excluded by default via the ${excludedGroups} user property
-                         (above); opt in with -DexcludedGroups=none -Dgroups=live. -->
+                         *IT tests run via Surefire (CLAUDE.md section 4 exception). The module ships no
+                         @Tag("live") test (see the properties note); the ${excludedGroups} user property
+                         is inherited for parity so any future live test stays default-off + CLI-overridable. -->
                     <includes>
                         <include>**/*Test.java</include>
                         <include>**/*IT.java</include>

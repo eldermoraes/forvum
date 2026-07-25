@@ -114,6 +114,30 @@ class ImageAnalyzeToolTest {
     }
 
     @Test
+    void tooManyImagesAreRejectedBeforeAnyFileIsRead() {
+        List<String> tooMany = new java.util.ArrayList<>();
+        for (int i = 0; i <= ImageAnalyzeTool.MAX_IMAGES; i++) {
+            tooMany.add("img" + i + ".png"); // non-existent: the count guard must fire before any read
+        }
+        MultimodalException e = assertThrows(MultimodalException.class,
+                () -> ImageAnalyzeTool.analyze(fake, root, spec(1_000_000), tooMany, null));
+        assertEquals(true, e.getMessage().contains("at most " + ImageAnalyzeTool.MAX_IMAGES));
+        assertEquals(0, fake.analyzeCalls, "an oversized batch never reaches the model");
+    }
+
+    @Test
+    void exactlyTheMaxNumberOfImagesIsAllowed() throws IOException {
+        List<String> atCap = new java.util.ArrayList<>();
+        for (int i = 0; i < ImageAnalyzeTool.MAX_IMAGES; i++) {
+            String name = "img" + i + ".png";
+            Files.write(ws.resolve(name), PNG);
+            atCap.add(name);
+        }
+        ImageAnalyzeTool.analyze(fake, root, spec(1_000_000), atCap, null);
+        assertEquals(ImageAnalyzeTool.MAX_IMAGES, fake.lastMedia.size(), "a full batch at the cap is accepted");
+    }
+
+    @Test
     void aSeamFailurePropagates() throws IOException {
         Files.write(ws.resolve("a.png"), PNG);
         fake.throwOnAnalyze = true;
