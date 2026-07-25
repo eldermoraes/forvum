@@ -28,10 +28,6 @@ on:
   schedule:
     - cron: '0 3 * * *'   # 03:00 UTC daily — collision-free with eval (04:30), security (Mon 05:00), codeql (Mon 06:00)
   workflow_dispatch: {}
-  # TEMP-VALIDATION: on-branch trigger to prove the workflow green-by-skip before merge (workflow_dispatch
-  # only fires for a file already on the default branch). STRIP THIS BLOCK in the final pre-merge commit.
-  push:
-    branches: [test/181-nightly-live]
 
 permissions:
   contents: read
