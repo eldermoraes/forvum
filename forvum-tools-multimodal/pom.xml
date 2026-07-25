@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.forvum</groupId>
+        <artifactId>forvum-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forvum-tools-multimodal</artifactId>
+
+    <name>Forvum Tools — Multimodal (image + PDF analysis)</name>
+    <description>Layer-3 Forvum extension (#185): contributes the image.analyze / pdf.analyze ToolSpecs —
+        reading a workspace image or PDF and routing it through a vision-capable sub-generation (via the
+        engine-backed MediaAnalysis seam) for a text analysis. Provider-native PDF content where the
+        provider maps it, Apache PDFBox text-layer extraction otherwise (no OCR, no rendering). Carries no
+        langchain4j dependency; configured by tools/multimodal.json, functional with no config.</description>
+
+    <properties>
+        <!-- This module ships NO @Tag("live") test: a live multimodal turn needs a model that reliably
+             emits a tool call plus a multi-GB vision model, which a CI cell cannot host. Native proof is
+             the local -Pnative build (a Layer-3 module native-COMPILEs only once forvum-app depends on it —
+             [M14]) plus the assembled-binary app-level native ITs. The property mirrors the sibling tool
+             modules so a future live test is excluded-by-default via this overridable user property (never
+             a plugin-XML value); with none present today it is simply a no-op. -->
+        <excludedGroups>live</excludedGroups>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Layer-1 plugin SPI: the ONLY ai.forvum dependency for a Layer-3 extension (enforced below).
+             Version managed by forvum-bom. Carries the MediaAnalysis seam + MediaPayload — no langchain4j. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
+        <!-- CDI (ArC): @ApplicationScoped bean discovery. Version via Quarkus platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- Jackson (JsonNode/ObjectMapper) for the on-demand tools/multimodal.json tree-walk reader. Version
+             via Quarkus platform BOM; native-clean (the TtsConfig/ShellAllowlist tree-walk-into-plain-record
+             pattern, no reflective POJO binding). -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jackson</artifactId>
+        </dependency>
+        <!-- Apache PDFBox (#185): text-layer extraction fallback for pdf.analyze on providers that lack a
+             native PDF content mapper. Version managed by forvum-bom (native verdict there). commons-logging
+             is EXCLUDED and replaced by the jboss-logging bridge (native-clean: no LogFactory discovery).
+             bcprov/bcpkix stay optional (unpulled) -> encrypted PDFs are rejected with an actionable error. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- commons-logging API bridged onto jboss-logging (the Quarkus-native replacement for the excluded
+             commons-logging jar; provides org.apache.commons.logging.* with no reflective discovery). Version
+             managed by the Quarkus platform BOM. -->
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>commons-logging-jboss-logging</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Quarkus codegen + dev/test bootstrap. No `build` goal: forvum-tools-multimodal is a
+                 Layer-3 library, never a runnable artifact (that is forvum-app). -->
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- forvum-tools-multimodal is a headless Quarkus library with no `build` goal; its
+                         *IT tests run via Surefire (CLAUDE.md section 4 exception). The module ships no
+                         @Tag("live") test (see the properties note); the ${excludedGroups} user property
+                         is inherited for parity so any future live test stays default-off + CLI-overridable. -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-plugin-layering</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- Allowlist form (consistent with core/sdk/engine and the other tool/provider
+                                         modules): ban every ai.forvum module, re-allow forvum-sdk + forvum-core.
+                                         forvum-core is the Layer-0 contract layer the SDK SPI re-exposes
+                                         (ToolSpec / PermissionScope in ToolProvider.tools(); MediaPayload rides
+                                         forvum-sdk), so a tool plugin unavoidably and legitimately compiles against
+                                         it; what stays banned is forvum-engine, another extension, and the app. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                        <include>ai.forvum:forvum-core</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>A Forvum extension (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ToolSpec/PermissionScope in the ToolProvider SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

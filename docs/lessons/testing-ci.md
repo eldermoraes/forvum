@@ -111,3 +111,21 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   sum over the excluded `@RestClient`/`@WebSocketClient`/`Jdk*Http` classes false-alarms a FAIL on a module
   whose gated check passes (web/browser). [P2-2/#27]
 
+- **In `forvum-app`, an in-JVM `@QuarkusTest` turn test MUST be named `*Test` (Surefire), never `*IT` —
+  the Failsafe phase there is `@QuarkusIntegrationTest` NATIVE-BINARY tests, and a `@QuarkusTest` named
+  `*IT` runs in Failsafe INTERLEAVED with them, holding the test HTTP port when a native `ask`-binary IT
+  launches ~0 s later and also binds it.** #185's `MultimodalTurnIT`/`MultimodalBeltDeniedIT` were
+  `@QuarkusTest` (in-JVM app boot, binds `quarkus.http.test-port` 8081) but named `*IT`, so Failsafe ran
+  them in the integration-test phase right before `BudgetExhaustedAskNativeIT` (a `@QuarkusMainIntegrationTest`
+  that launches the native binary). The in-JVM Quarkus still owned 8081 when the native `ask` binary booted
+  → `"Port 8081 seems to be in use by another process"` → the native turn failed at startup, its stderr
+  lacked `code=budget_exhausted`, and the assertion failed. Timing-dependent: it passed on macOS/local and
+  failed 3/3 deterministically on the ubuntu CI cell. The general `*IT` = `@QuarkusTest` convention (§4/§11)
+  holds in the LIBRARY modules (`forvum-engine` has no native Failsafe ITs); in `forvum-app` every
+  `@QuarkusTest` turn test is `*Test` (Surefire) — the `PromptInjectionToolDeniedTest` /
+  `RoleRestrictedToolDeniedTest` / `DefaultBeltTurnTest` precedent — and only native-binary tests are
+  `*NativeIT` / `@QuarkusIntegrationTest`. The `forvum-app` Surefire de-facto exception ([Risk#5]) is why a
+  `@QuarkusTest` `*Test` still runs there. Fix = RENAME to `*Test` (Surefire runs before Failsafe, so the
+  in-JVM app shuts down and releases the port before any native IT boots) — deterministic, no sleeps, no
+  port-juggling, and it matches the module's own precedent. [#185]
+

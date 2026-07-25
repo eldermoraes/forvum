@@ -72,10 +72,21 @@ public enum PermissionScope {
      * operator-installed piper binary to write a synthesized WAV under the workspace. Distinct from
      * {@link #FS_WRITE} so a role can grant filesystem write without granting audio synthesis / a
      * subprocess launch. The permissive {@code default-user} role ({@code EnumSet.allOf}) includes it; a
-     * restricted role can withhold it. The read-side sibling {@code MEDIA_ANALYZE} (#185) is not yet
-     * declared.
+     * restricted role can withhold it. Its read-side sibling is {@link #MEDIA_ANALYZE} (#185).
      */
-    MEDIA_SYNTHESIZE;
+    MEDIA_SYNTHESIZE,
+    /**
+     * Authority to analyze media via {@code image.analyze} / {@code pdf.analyze} (#185,
+     * {@code forvum-tools-multimodal}) — reading a workspace image or PDF and routing it through a
+     * vision-capable sub-generation for a text analysis. ONE scope gates both tools: they are read-only over
+     * the workspace and their only external effect is a model spend, so belt membership + this RBAC scope
+     * (the {@code web.fetch} posture) suffice — no user-confirm gate. Distinct from {@link #FS_READ} so a
+     * role can grant filesystem read without granting a vision sub-generation, and the read-side sibling of
+     * {@link #MEDIA_SYNTHESIZE} (#186). The permissive {@code default-user} role ({@code EnumSet.allOf})
+     * includes it; the restricted {@code cron} role ({@code EnumSet.of(FS_READ)}) does not — an operator
+     * opts a cron in via {@code roles/cron.json}.
+     */
+    MEDIA_ANALYZE;
 
     /**
      * Parses a string into a {@code PermissionScope}, throwing a contextual

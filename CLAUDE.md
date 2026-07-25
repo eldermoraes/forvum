@@ -498,6 +498,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [#186] Model-callable TTS reuses the voice subprocess pair (stdin-fed); static SecureRandom breaks native → docs/lessons/tools.md
 - [#184] A usable default belt is TWO fixes: widen the scaffold belt AND wire identityId, else anonymous filters it all → docs/lessons/tools.md
 - [#184] `forvum tools`/doctor gather from Instance<ToolProvider> (registry empty one-shot); skip the MCP bridge; configGaps owns the hint → docs/lessons/tools.md
+- [#185] Multimodal tools carry NO langchain4j: a Resolution-B MediaAnalysis seam keeps content types engine-side; PDFBox native = resource-config only + jboss-logging bridge → docs/lessons/tools.md
 
 ### Engine, graph & scheduling — `docs/lessons/engine-graph.md`
 - [M7] Guard registry mutations; keep blocking IO off computeIfAbsent lock paths → docs/lessons/engine-graph.md
@@ -554,6 +555,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [P2-14] Wall-clock/poll-window assertions are flaky on loaded CI; assert semantics, warm persistence → docs/lessons/testing-ci.md
 - [P2-2/#27] A parallel build-agent workflow must not pass -Djacoco.skip; the integrator pays coverage → docs/lessons/testing-ci.md
 - [#181] Scheduling the live layer = property-form excludedGroups sweep + preflight-secret-outputs skip + a skip-guard, not just a cron → docs/lessons/testing-ci.md
+- [#185] In forvum-app a @QuarkusTest turn test must be `*Test` (Surefire), never `*IT` — a `*IT` runs in Failsafe and its port-8081 boot collides with the native-binary ITs → docs/lessons/testing-ci.md
 
 ### CLI app & commands — `docs/lessons/cli-app.md`
 - [M20] The cold-start lever skips DB/IO in every startup observer; test both directions → docs/lessons/cli-app.md
