@@ -79,8 +79,33 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
 - **Coverage gates (JaCoCo):** 80% line at the parent + 75% branch are **wired and enforced** in
   `./mvnw verify` per module (#69 / X3); a module below its threshold fails the build. Pitest mutation
   stays a signal, not a gate, until a baseline exists.
-- **Live-provider tests** are tagged `live` and are **default-off** (they hit real model providers);
-  they run in nightly CI only.
+- **Live tests** are tagged `@Tag("live")` and are **default-off** (they hit real providers, a headless
+  browser, a container runtime, or the network). Each owning module excludes them via the Surefire
+  `<excludedGroups>live</excludedGroups>` **user property**, so a CLI `-DexcludedGroups=none` re-enables them.
+  They run in [`.github/workflows/nightly-live.yml`](.github/workflows/nightly-live.yml) (cron 03:00 UTC +
+  `workflow_dispatch`), one job per integration, retry budget 1. Run a suite locally:
+
+  ```bash
+  # Ollama (needs a local ollama serving qwen3:1.7b) + the fallback E2E
+  ./mvnw -pl forvum-app test -Dtest='OllamaScriptedTurnE2E,AnthropicFallbackE2E' -DexcludedGroups=none
+  # A cloud provider (export the env var the test reads; note the Anthropic model pin claude-opus-5):
+  QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY=… ./mvnw -pl forvum-app test -Dtest=AnthropicScriptedTurnE2E -DexcludedGroups=none
+  # Headless-browser CDP (needs Chrome; the runner sets CHROME_BIN, dev-Mac uses the default path)
+  ./mvnw -pl forvum-tools-browser test -Dtest=BrowserLiveIT -DexcludedGroups=none
+  # Sandbox (needs podman or docker + busybox:latest)
+  ./mvnw -pl forvum-tools-sandbox test -Dtest=SandboxRunLiveTest -DexcludedGroups=none
+  # Keyless web search (network only)
+  ./mvnw -pl forvum-tools-web test -Dtest=DuckDuckGoSearchLiveTest -DexcludedGroups=none
+  # Real piper TTS (export FORVUM_TTS_PIPER_BIN + FORVUM_TTS_PIPER_VOICE)
+  ./mvnw -pl forvum-tools-tts test -Dtest=TtsSpeakPiperLiveTest -DexcludedGroups=none
+  ```
+
+  The three cloud-provider jobs are skip-if-absent: they run only when the matching repo secret is set
+  (`QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY`, `QUARKUS_LANGCHAIN4J_OPENAI_API_KEY`,
+  `QUARKUS_LANGCHAIN4J_AI_GEMINI_API_KEY`), and otherwise render **skipped** — the workflow is green-by-skip
+  until a maintainer provisions the secrets. GitHub Copilot has no live test (its device-code OAuth is
+  human-interactive), so it is documented-skipped. The native live trio (`OllamaNativeTurnIT` /
+  `MemorySearchNativeIT` / `EvalLlmJudgeIT`) runs per-PR in ci.yml's `native-turn` job, not nightly.
 - **CI security gates (#174):** every PR also runs a blocking dependency-diff (`dependency-review`),
   secret scan (`gitleaks` — deliberate fake-token fixtures under `**/src/test/**` are allowlisted in
   `.gitleaks.toml`), `CodeQL` (Java + the Actions workflows), and `actionlint`/`shellcheck`. Third-party

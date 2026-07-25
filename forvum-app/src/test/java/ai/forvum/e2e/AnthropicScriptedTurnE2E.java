@@ -28,7 +28,7 @@ import java.util.Map;
  * M10 Verify (ULTRAPLAN section 7.1): a scripted single turn through {@link AgentRegistry} against the
  * real Anthropic provider.
  *
- * <p>The {@code main} agent is seeded with {@code primaryModel = "anthropic:claude-opus-4-6"}. The test
+ * <p>The {@code main} agent is seeded with {@code primaryModel = "anthropic:claude-opus-5"}. The test
  * calls {@link Agent#respond} under the {@code CURRENT_AGENT} binding and asserts:
  * <ol>
  *   <li>the assistant reply is non-empty, and</li>
@@ -75,7 +75,7 @@ class AnthropicScriptedTurnE2E {
 
     /**
      * Points {@code $FORVUM_HOME} at a throwaway temp directory seeded with the {@code main} agent
-     * spec ({@code primaryModel = "anthropic:claude-opus-4-6"}) — the same seed format the M7 registry
+     * spec ({@code primaryModel = "anthropic:claude-opus-5"}) — the same seed format the M7 registry
      * tests use, so the real file-driven load path (M4 {@code AgentReader}) is exercised end-to-end.
      */
     public static class LiveHomeProfile implements QuarkusTestProfile {
@@ -88,7 +88,7 @@ class AnthropicScriptedTurnE2E {
                 Path agents = Files.createDirectories(home.resolve("agents"));
                 Files.writeString(agents.resolve("main.md"), "You are the main agent.");
                 Files.writeString(agents.resolve("main.json"),
-                        "{ \"primaryModel\": \"anthropic:claude-opus-4-6\","
+                        "{ \"primaryModel\": \"anthropic:claude-opus-5\","
                       + " \"allowedTools\": [] }");
                 return home;
             } catch (IOException e) {

@@ -1,0 +1,524 @@
+name: Nightly Live
+
+# Scheduled live-provider / browser / sandbox / web-search / TTS coverage (#181). CLAUDE.md §4/§11 and
+# CONTRIBUTING promised a nightly live layer that did not exist; this workflow is it. It runs the
+# @Tag("live") suites that per-PR ci.yml deliberately excludes to stay hermetic, in separated jobs so each
+# integration's pass / fail / skipped-not-configured status is distinct.
+#
+# Green-by-skip is the MANDATED merge state: no provider secrets are configured yet, so the three cloud
+# provider jobs render `skipped` (a job-level `if:` on a preflight-probed boolean output — a job `if:`
+# cannot read `secrets` directly). The maintainer provisions secrets LATER (repo secrets named EXACTLY
+# like the env vars the tests read, zero mapping):
+#   gh secret set QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY --repo eldermoraes/forvum
+#   gh secret set QUARKUS_LANGCHAIN4J_OPENAI_API_KEY    --repo eldermoraes/forvum
+#   gh secret set QUARKUS_LANGCHAIN4J_AI_GEMINI_API_KEY --repo eldermoraes/forvum
+# then a provider job flips from `skipped` to running on the next dispatch.
+#
+# NOT owned here (by design, no duplication): the native live trio OllamaNativeTurnIT / MemorySearchNativeIT
+# / EvalLlmJudgeIT runs per-PR in ci.yml's `native-turn` job — a strictly stronger cadence than nightly, so
+# a second ~15 min native build would burn runners for zero new signal. They are named here so the
+# .github/live-ownership.sh gate sees them owned. Copilot has no live test (device-code OAuth is
+# human-interactive) — documented-skipped in CONTRIBUTING.
+#
+# Possible follow-up (a maintainer-ratification item, NOT done here because "issues are never auto-created",
+# CLAUDE.md §10): a tracking-issue auto-comment on a red nightly. Today the signals are the step-summary
+# table, the per-job surefire artifacts, and GitHub's default scheduled-run failure notifications.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC daily — collision-free with eval (04:30), security (Mon 05:00), codeql (Mon 06:00)
+  workflow_dispatch: {}
+  # TEMP-VALIDATION: on-branch trigger to prove the workflow green-by-skip before merge (workflow_dispatch
+  # only fires for a file already on the default branch). STRIP THIS BLOCK in the final pre-merge commit.
+  push:
+    branches: [test/181-nightly-live]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-live
+  cancel-in-progress: false
+
+jobs:
+  # Secret-presence probe (job-level `if:` cannot read secrets → the boolean outputs are load-bearing) +
+  # the live-test ownership gate. Never echoes a secret value; presence only.
+  preflight:
+    name: Preflight (secret probe + ownership gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      anthropic: ${{ steps.probe.outputs.anthropic }}
+      openai: ${{ steps.probe.outputs.openai }}
+      google: ${{ steps.probe.outputs.google }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Live-test ownership gate
+        run: bash .github/live-ownership.sh
+      - name: Probe configured provider secrets (presence only, never values)
+        id: probe
+        env:
+          ANTHROPIC: ${{ secrets.QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY }}
+          OPENAI: ${{ secrets.QUARKUS_LANGCHAIN4J_OPENAI_API_KEY }}
+          GOOGLE: ${{ secrets.QUARKUS_LANGCHAIN4J_AI_GEMINI_API_KEY }}
+        run: |
+          emit() {
+            if [ -n "${2:-}" ]; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+              echo "$1: configured"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"
+              echo "$1: not configured (job will be skipped — green-by-skip)"
+            fi
+          }
+          emit anthropic "$ANTHROPIC"
+          emit openai "$OPENAI"
+          emit google "$GOOGLE"
+
+  # Ollama scripted turn (OllamaScriptedTurnE2E) + the fallback E2E (AnthropicFallbackE2E, which bakes a
+  # bad Anthropic key and falls back to Ollama — so it rides HERE, never near a real Anthropic key). Real
+  # local Ollama service; pull qwen3:1.7b (NOT the native job's qwen2.5:0.5b). Two-phase build (eval.yml).
+  provider-ollama:
+    name: Live turn — Ollama (+ fallback)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      ollama:
+        image: ollama/ollama
+        ports:
+          - 11434:11434
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      # Wait for the service, then pull qwen3:1.7b via the HTTP API (retried) — the ci.yml native-turn
+      # pull() pattern verbatim, one model.
+      - name: Pull the Ollama model (qwen3:1.7b)
+        run: |
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:11434/api/version >/dev/null && break
+            echo "waiting for the ollama service... ($i)"; sleep 3
+          done
+          pull() {
+            ok=
+            for i in 1 2 3; do
+              if curl -sf --max-time 600 http://localhost:11434/api/pull \
+                   -d "{\"name\":\"$1\",\"stream\":false}"; then ok=1; break; fi
+              echo "pull attempt $i for $1 failed; retrying"; sleep 5
+            done
+            [ "$ok" = 1 ] || { echo "::error::failed to pull $1"; exit 1; }
+            curl -sf http://localhost:11434/api/tags | grep -q "$1" \
+              || { echo "::error::$1 not present after pull"; exit 1; }
+          }
+          pull "qwen3:1.7b"
+      - name: Build the reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-app -am install -DskipTests
+      - name: Run the live Ollama turns (scripted + fallback)
+        run: |
+          ./mvnw -B -Dstyle.color=never -pl forvum-app test \
+            -Dtest='OllamaScriptedTurnE2E,AnthropicFallbackE2E' \
+            -DexcludedGroups=none -DfailIfNoTests=true \
+            -Dquarkus.langchain4j.ollama.devservices.enabled=false \
+            -Dsurefire.rerunFailingTestsCount=1
+      - name: Skip-guard (a skipped live test is breakage on this runner)
+        if: always()
+        run: |
+          fail=0
+          for report in \
+            forvum-app/target/surefire-reports/TEST-ai.forvum.e2e.OllamaScriptedTurnE2E.xml \
+            forvum-app/target/surefire-reports/TEST-ai.forvum.e2e.AnthropicFallbackE2E.xml; do
+            if [ ! -f "$report" ]; then
+              echo "::error::missing surefire report $report (the live test did not run)"; fail=1; continue
+            fi
+            skipped=$(grep -om1 'skipped="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+            tests=$(grep -om1 'tests="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+            echo "$report: tests=$tests skipped=$skipped"
+            if [ "$tests" = "0" ] || [ "$skipped" != "0" ]; then
+              echo "::error::$report — a live test was skipped/absent on the nightly runner (env guaranteed, so a skip means breakage)"; fail=1
+            fi
+          done
+          exit "$fail"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-provider-ollama
+          path: '**/surefire-reports/**'
+          retention-days: 14
+
+  # Cloud providers: each runs ONLY when its secret is configured (else the job is `skipped` in the UI —
+  # the issue's "explicit skipped/not-configured"). Env var = exactly the name the test reads. One tiny
+  # turn each. Green-by-skip is the mandated merge state.
+  provider-anthropic:
+    name: Live turn — Anthropic
+    needs: preflight
+    if: needs.preflight.outputs.anthropic == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build the reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-app -am install -DskipTests
+      - name: Run the live Anthropic turn
+        env:
+          QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY: ${{ secrets.QUARKUS_LANGCHAIN4J_ANTHROPIC_API_KEY }}
+        run: |
+          ./mvnw -B -Dstyle.color=never -pl forvum-app test \
+            -Dtest=AnthropicScriptedTurnE2E \
+            -DexcludedGroups=none -DfailIfNoTests=true \
+            -Dsurefire.rerunFailingTestsCount=1
+      - name: Skip-guard
+        if: always()
+        run: |
+          report=forvum-app/target/surefire-reports/TEST-ai.forvum.e2e.AnthropicScriptedTurnE2E.xml
+          if [ ! -f "$report" ]; then echo "::error::missing surefire report $report"; exit 1; fi
+          skipped=$(grep -om1 'skipped="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          tests=$(grep -om1 'tests="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          echo "$report: tests=$tests skipped=$skipped"
+          if [ "$tests" = "0" ] || [ "$skipped" != "0" ]; then
+            echo "::error::$report — a live test was skipped/absent on the nightly runner"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-provider-anthropic
+          path: '**/surefire-reports/**'
+          retention-days: 14
+
+  provider-openai:
+    name: Live turn — OpenAI
+    needs: preflight
+    if: needs.preflight.outputs.openai == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build the reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-app -am install -DskipTests
+      - name: Run the live OpenAI turn
+        env:
+          QUARKUS_LANGCHAIN4J_OPENAI_API_KEY: ${{ secrets.QUARKUS_LANGCHAIN4J_OPENAI_API_KEY }}
+        run: |
+          ./mvnw -B -Dstyle.color=never -pl forvum-app test \
+            -Dtest=OpenAiScriptedTurnE2E \
+            -DexcludedGroups=none -DfailIfNoTests=true \
+            -Dsurefire.rerunFailingTestsCount=1
+      - name: Skip-guard
+        if: always()
+        run: |
+          report=forvum-app/target/surefire-reports/TEST-ai.forvum.e2e.OpenAiScriptedTurnE2E.xml
+          if [ ! -f "$report" ]; then echo "::error::missing surefire report $report"; exit 1; fi
+          skipped=$(grep -om1 'skipped="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          tests=$(grep -om1 'tests="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          echo "$report: tests=$tests skipped=$skipped"
+          if [ "$tests" = "0" ] || [ "$skipped" != "0" ]; then
+            echo "::error::$report — a live test was skipped/absent on the nightly runner"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-provider-openai
+          path: '**/surefire-reports/**'
+          retention-days: 14
+
+  provider-google:
+    name: Live turn — Google (Gemini)
+    needs: preflight
+    if: needs.preflight.outputs.google == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build the reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-app -am install -DskipTests
+      - name: Run the live Google turn
+        env:
+          QUARKUS_LANGCHAIN4J_AI_GEMINI_API_KEY: ${{ secrets.QUARKUS_LANGCHAIN4J_AI_GEMINI_API_KEY }}
+        run: |
+          ./mvnw -B -Dstyle.color=never -pl forvum-app test \
+            -Dtest=GoogleScriptedTurnE2E \
+            -DexcludedGroups=none -DfailIfNoTests=true \
+            -Dsurefire.rerunFailingTestsCount=1
+      - name: Skip-guard
+        if: always()
+        run: |
+          report=forvum-app/target/surefire-reports/TEST-ai.forvum.e2e.GoogleScriptedTurnE2E.xml
+          if [ ! -f "$report" ]; then echo "::error::missing surefire report $report"; exit 1; fi
+          skipped=$(grep -om1 'skipped="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          tests=$(grep -om1 'tests="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          echo "$report: tests=$tests skipped=$skipped"
+          if [ "$tests" = "0" ] || [ "$skipped" != "0" ]; then
+            echo "::error::$report — a live test was skipped/absent on the nightly runner"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-provider-google
+          path: '**/surefire-reports/**'
+          retention-days: 14
+
+  # Headless-Chrome CDP end-to-end (BrowserLiveIT). ubuntu-24.04 restricts unprivileged user namespaces,
+  # which breaks headless Chrome — the sysctl lifts it. CHROME_BIN feeds the test's resolution order (D10b).
+  browser:
+    name: Live browser (headless Chrome CDP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Allow unprivileged user namespaces (ubuntu-24.04 AppArmor restriction breaks headless Chrome)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Locate the Chrome binary
+        run: |
+          bin=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser || true)
+          if [ -z "$bin" ]; then echo "::error::no Chrome/Chromium binary on the runner"; exit 1; fi
+          echo "Using Chrome at $bin"
+          echo "CHROME_BIN=$bin" >> "$GITHUB_ENV"
+      - name: Build the reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-tools-browser -am install -DskipTests
+      - name: Run the live browser test
+        run: |
+          ./mvnw -B -Dstyle.color=never -pl forvum-tools-browser test \
+            -Dtest=BrowserLiveIT \
+            -DexcludedGroups=none -DfailIfNoTests=true \
+            -Dsurefire.rerunFailingTestsCount=1
+      - name: Skip-guard
+        if: always()
+        run: |
+          report=forvum-tools-browser/target/surefire-reports/TEST-ai.forvum.tools.browser.BrowserLiveIT.xml
+          if [ ! -f "$report" ]; then echo "::error::missing surefire report $report"; exit 1; fi
+          skipped=$(grep -om1 'skipped="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          tests=$(grep -om1 'tests="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          echo "$report: tests=$tests skipped=$skipped"
+          if [ "$tests" = "0" ] || [ "$skipped" != "0" ]; then
+            echo "::error::$report — a live test was skipped/absent on the nightly runner"; exit 1
+          fi
+      - name: Orphan check (no surviving remote-debugging Chrome)
+        if: always()
+        run: |
+          if pgrep -f 'remote-debugging-port' >/dev/null; then
+            echo "::error::a headless Chrome with a remote-debugging port survived the run"; exit 1
+          fi
+          echo "no orphaned Chrome process"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-browser
+          path: '**/surefire-reports/**'
+          retention-days: 14
+
+  # Real-container sandbox end-to-end (SandboxRunLiveTest). ubuntu ships Docker; pre-pull busybox (retried)
+  # so the in-test probe never absorbs a slow pull.
+  sandbox:
+    name: Live sandbox (real container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Pre-pull busybox (retried)
+        run: |
+          ok=
+          for i in 1 2 3; do
+            if docker pull busybox:latest; then ok=1; break; fi
+            echo "docker pull attempt $i failed; retrying"; sleep 5
+          done
+          [ "$ok" = 1 ] || { echo "::error::failed to pull busybox:latest"; exit 1; }
+      - name: Build the reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-tools-sandbox -am install -DskipTests
+      - name: Run the live sandbox test
+        run: |
+          ./mvnw -B -Dstyle.color=never -pl forvum-tools-sandbox test \
+            -Dtest=SandboxRunLiveTest \
+            -DexcludedGroups=none -DfailIfNoTests=true \
+            -Dsurefire.rerunFailingTestsCount=1
+      - name: Skip-guard
+        if: always()
+        run: |
+          report=forvum-tools-sandbox/target/surefire-reports/TEST-ai.forvum.tools.sandbox.SandboxRunLiveTest.xml
+          if [ ! -f "$report" ]; then echo "::error::missing surefire report $report"; exit 1; fi
+          skipped=$(grep -om1 'skipped="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          tests=$(grep -om1 'tests="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          echo "$report: tests=$tests skipped=$skipped"
+          if [ "$tests" = "0" ] || [ "$skipped" != "0" ]; then
+            echo "::error::$report — a live test was skipped/absent on the nightly runner"; exit 1
+          fi
+      - name: Orphan check (no surviving container)
+        if: always()
+        run: |
+          survivors=$(docker ps -q)
+          if [ -n "$survivors" ]; then
+            echo "::error::a container survived the sandbox run: $survivors"; exit 1
+          fi
+          echo "no surviving containers"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-sandbox
+          path: '**/surefire-reports/**'
+          retention-days: 14
+
+  # Keyless live web search (DuckDuckGoSearchLiveTest) — no secret, no service. A datacenter IP may hit a
+  # bot challenge (the backend THROWS): nightly-only + retry 1 is the sanctioned placement (#192).
+  websearch:
+    name: Live web search (keyless DuckDuckGo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build the reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-tools-web -am install -DskipTests
+      - name: Run the live web-search test
+        run: |
+          ./mvnw -B -Dstyle.color=never -pl forvum-tools-web test \
+            -Dtest=DuckDuckGoSearchLiveTest \
+            -DexcludedGroups=none -DfailIfNoTests=true \
+            -Dsurefire.rerunFailingTestsCount=1
+      - name: Skip-guard
+        if: always()
+        run: |
+          report=forvum-tools-web/target/surefire-reports/TEST-ai.forvum.tools.web.DuckDuckGoSearchLiveTest.xml
+          if [ ! -f "$report" ]; then echo "::error::missing surefire report $report"; exit 1; fi
+          skipped=$(grep -om1 'skipped="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          tests=$(grep -om1 'tests="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          echo "$report: tests=$tests skipped=$skipped"
+          if [ "$tests" = "0" ] || [ "$skipped" != "0" ]; then
+            echo "::error::$report — a live test was skipped/absent on the nightly runner"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-websearch
+          path: '**/surefire-reports/**'
+          retention-days: 14
+
+  # Real piper synthesis (TtsSpeakPiperLiveTest) — no secret: download a pinned piper release + one pinned
+  # HuggingFace voice (retried curl). If the downloads prove chronically flaky, the D9 demotion path is a
+  # documented-skipped allowlist entry in live-ownership.sh + manual dispatch (a named follow-up, not silent).
+  tts:
+    name: Live TTS (real piper)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Download the pinned piper binary + voice (retried)
+        run: |
+          fetch() {
+            ok=
+            for i in 1 2 3; do
+              if curl -fsSL --max-time 300 -o "$2" "$1"; then ok=1; break; fi
+              echo "download attempt $i for $1 failed; retrying"; sleep 5
+            done
+            [ "$ok" = 1 ] || { echo "::error::failed to download $1"; exit 1; }
+          }
+          mkdir -p "$HOME/piper-dl/voices"
+          fetch "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz" \
+                "$HOME/piper-dl/piper.tar.gz"
+          tar -xzf "$HOME/piper-dl/piper.tar.gz" -C "$HOME/piper-dl"
+          fetch "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx" \
+                "$HOME/piper-dl/voices/en_US-amy-medium.onnx"
+          fetch "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json" \
+                "$HOME/piper-dl/voices/en_US-amy-medium.onnx.json"
+          chmod +x "$HOME/piper-dl/piper/piper"
+          echo "FORVUM_TTS_PIPER_BIN=$HOME/piper-dl/piper/piper" >> "$GITHUB_ENV"
+          echo "FORVUM_TTS_PIPER_VOICE=$HOME/piper-dl/voices/en_US-amy-medium.onnx" >> "$GITHUB_ENV"
+      - name: Build the reactor (skip upstream tests)
+        run: ./mvnw -B -Dstyle.color=never -pl forvum-tools-tts -am install -DskipTests
+      - name: Run the live TTS test
+        run: |
+          ./mvnw -B -Dstyle.color=never -pl forvum-tools-tts test \
+            -Dtest=TtsSpeakPiperLiveTest \
+            -DexcludedGroups=none -DfailIfNoTests=true \
+            -Dsurefire.rerunFailingTestsCount=1
+      - name: Skip-guard
+        if: always()
+        run: |
+          report=forvum-tools-tts/target/surefire-reports/TEST-ai.forvum.tools.tts.TtsSpeakPiperLiveTest.xml
+          if [ ! -f "$report" ]; then echo "::error::missing surefire report $report"; exit 1; fi
+          skipped=$(grep -om1 'skipped="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          tests=$(grep -om1 'tests="[0-9]*"' "$report" | grep -o '[0-9]*' || echo missing)
+          echo "$report: tests=$tests skipped=$skipped"
+          if [ "$tests" = "0" ] || [ "$skipped" != "0" ]; then
+            echo "::error::$report — a live test was skipped/absent on the nightly runner"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: surefire-tts
+          path: '**/surefire-reports/**'
+          retention-days: 14
+
+  # Render the per-integration pass / fail / skipped-not-configured table into the run summary. A cloud
+  # provider `skipped` = its secret is not configured (green-by-skip); every other suite should be success.
+  report:
+    name: Report (live-suite outcome table)
+    needs:
+      - preflight
+      - provider-ollama
+      - provider-anthropic
+      - provider-openai
+      - provider-google
+      - browser
+      - sandbox
+      - websearch
+      - tts
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Render the outcome table
+        run: |
+          {
+            echo "## Nightly live suite — per-integration outcomes"
+            echo ""
+            echo "| Suite | Outcome |"
+            echo "|---|---|"
+            echo "| preflight | ${{ needs.preflight.result }} |"
+            echo "| provider-ollama (+ fallback) | ${{ needs.provider-ollama.result }} |"
+            echo "| provider-anthropic | ${{ needs.provider-anthropic.result }} |"
+            echo "| provider-openai | ${{ needs.provider-openai.result }} |"
+            echo "| provider-google | ${{ needs.provider-google.result }} |"
+            echo "| browser | ${{ needs.browser.result }} |"
+            echo "| sandbox | ${{ needs.sandbox.result }} |"
+            echo "| websearch | ${{ needs.websearch.result }} |"
+            echo "| tts | ${{ needs.tts.result }} |"
+            echo ""
+            echo "A cloud-provider \`skipped\` means its secret is not configured (green-by-skip)."
+            echo "The native live trio (OllamaNativeTurnIT / MemorySearchNativeIT / EvalLlmJudgeIT) runs"
+            echo "per-PR in ci.yml's native-turn job, not here."
+          } >> "$GITHUB_STEP_SUMMARY"

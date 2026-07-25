@@ -78,7 +78,20 @@ v0.5.0 release) and **#179** (docs reconciliation); the first critical-path item
 
 16. **#174** ✅ `ci(security)`: supply-chain / secret / SAST / SBOM / provenance gates — follows #160; covers the build-side of #171. *Done:* new `security.yml` (per-PR `dependency-review` + `gitleaks` + `actionlint`/`shellcheck`; push-`main` Maven dependency-graph submission → Dependabot alerts; weekly Trivy image+SBOM deep scan) + `codeql.yml` (Java + Actions SAST); `.gitleaks.toml` (`**/src/test/**` fake-fixture allowlist), `.trivyignore.yaml` (expiry-bound suppressions), `.github/dependabot.yml`; `release.yml` gains CycloneDX Maven+image SBOMs as release assets, a blocking pre-push image scan, and OIDC build-provenance attestations for the 4 binaries + the GHCR image; third-party Actions SHA-pinned across ci/qa/helm/release; parent `pom.xml` CycloneDX plugin (no phase binding); `Dockerfile.native` base digest-pinned; GitHub-side secret-scanning/push-protection/Dependabot enabled; committed policy in `docs/SECURITY-GATES.md`.
 17. **#180** `test(coverage)`: remove substantive exclusions, restore declared gates — test memory/compression against #175/#176 contracts.
-18. **#181** `test(live)`: schedule provider / browser / sandbox live tests in CI.
+18. **#181** ✅ `test(live)`: schedule provider / browser / sandbox live tests in CI. *Done:* a new
+    `.github/workflows/nightly-live.yml` (cron 03:00 UTC + `workflow_dispatch`) runs the `@Tag("live")`
+    suites per-integration in separated jobs — Ollama scripted + fallback (real service, qwen3:1.7b), the
+    three cloud providers (skip-if-absent secrets → **green-by-skip** until a maintainer provisions them),
+    headless-Chrome CDP, real-container sandbox, keyless DuckDuckGo web search, and real-piper TTS (pinned
+    downloads) — each with retry budget 1, a skip-guard that fails a job if a live test self-skipped on the
+    guaranteed-env runner, and surefire artifacts. The native live trio (`OllamaNativeTurnIT` /
+    `MemorySearchNativeIT` / `EvalLlmJudgeIT`) stays per-PR in ci.yml's `native-turn` job (not duplicated).
+    The selection contract is unified onto the Surefire `${excludedGroups}` **user-property** form — added
+    to `forvum-tools-sandbox` (removing an accidental per-PR busybox run) and converted from plugin-XML in
+    `forvum-provider-memory-qdrant` (the [#192] sweep; telegram was already clean). `BrowserLiveIT` resolves
+    Chrome via `forvum.live.chrome` → `CHROME_BIN` → the macOS default. A new `.github/live-ownership.sh`
+    (nightly `preflight`) asserts every `@Tag("live")` class is scheduled by a workflow. Operator-directed:
+    the `AnthropicScriptedTurnE2E` model pin tracks latest (`claude-opus-4-6` → `claude-opus-5`).
 19. **#182** `test(mutation)`: bounded mutation-testing signal + ratchet — depends on #180.
 20. **#183** `[HIGH]` `test(security)`: behavioral regression coverage for the declared controls — **the capstone**: closes only when #165–#173, #175, #178 all land. Write incrementally as each control ships; closes last.
 

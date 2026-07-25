@@ -12,6 +12,15 @@
 
     <artifactId>forvum-provider-memory-qdrant</artifactId>
 
+    <properties>
+        <!-- @Tag("live") tests (a real Qdrant) are off by default. Excluded via this Surefire user
+             property (so a bare CLI -DexcludedGroups=none re-enables them, which the previous
+             plugin-XML <configuration> value could NOT — Maven ignores -D for an XML-set parameter,
+             the forvum-tools-browser/-web/-tts precedent). Run the live tests with:
+             -DexcludedGroups=none -Dgroups=live -->
+        <excludedGroups>live</excludedGroups>
+    </properties>
+
     <name>Forvum Memory Provider — Qdrant (reference)</name>
     <description>Layer-3 Forvum extension (P2-5): the REFERENCE external MemoryProvider, served by a Qdrant
         vector database over its REST API through a blocking REST client on a virtual thread (no AI
@@ -95,12 +104,12 @@
                 <configuration>
                     <!-- A @QuarkusTest *IT here boots Quarkus in-JVM (no HTTP server needed); it also runs
                          through the reactor build under Surefire (CI `verify`). @Tag("live") tests (a real
-                         Qdrant) are excluded by default; opt in with -DexcludedGroups= -Dgroups=live. -->
+                         Qdrant) are excluded by default via the ${excludedGroups} user property (above);
+                         opt in with -DexcludedGroups=none -Dgroups=live. -->
                     <includes>
                         <include>**/*Test.java</include>
                         <include>**/*IT.java</include>
                     </includes>
-                    <excludedGroups>live</excludedGroups>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>
