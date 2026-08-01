@@ -60,12 +60,12 @@
 
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
-        <quarkus.platform.version>3.33.2</quarkus.platform.version>
+        <quarkus.platform.version>3.37.4</quarkus.platform.version>
 
-        <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
-        <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
-        <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
-        <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
+        <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
+        <maven-surefire-plugin.version>3.5.6</maven-surefire-plugin.version>
+        <maven-failsafe-plugin.version>3.5.6</maven-failsafe-plugin.version>
+        <maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>
         <!-- JaCoCo 0.8.15 is the first line to read Java 25 (class file 69) bytecode. -->
         <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
         <!-- CycloneDX aggregate SBOM (#174) — invoked explicitly at release / weekly, never bound to a
