@@ -19,10 +19,10 @@
     <properties>
         <!-- Single bump point for extension/library versions (CLAUDE.md section 2, ULTRAPLAN section 3.9). -->
         <!-- quarkus-langchain4j 1.11.0 GA (targets Quarkus 3.33.2; brings LangChain4j core 1.16.2). -->
-        <quarkus-langchain4j.version>1.11.0</quarkus-langchain4j.version>
-        <langgraph4j.version>1.8.17</langgraph4j.version>
-        <tamboui.version>0.3.0</tamboui.version>
-        <sqlite-jdbc.version>3.53.1.0</sqlite-jdbc.version>
+        <quarkus-langchain4j.version>1.12.2</quarkus-langchain4j.version>
+        <langgraph4j.version>1.8.22</langgraph4j.version>
+        <tamboui.version>0.4.0</tamboui.version>
+        <sqlite-jdbc.version>3.53.2.1</sqlite-jdbc.version>
         <!-- Apache Maven Resolver (P2-6 `forvum plugin install`): the 1.9.x line's `maven-resolver-supplier`
              is the no-DI bootstrap (RepositorySystemSupplier + MavenRepositorySystemUtils from the transitive
              maven-resolver-provider). Used in the fast-jar drop-in path only — see §6.2/§6.3. -->
