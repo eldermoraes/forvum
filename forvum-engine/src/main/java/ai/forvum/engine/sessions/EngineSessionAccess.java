@@ -1,5 +1,6 @@
 package ai.forvum.engine.sessions;
 
+import ai.forvum.core.BlockType;
 import ai.forvum.core.ChannelMessage;
 import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.Done;
@@ -94,8 +95,11 @@ public class EngineSessionAccess implements SessionAccess {
     public List<SessionMessage> history(String sessionId, int limit) {
         SessionEntity target = visibleOrThrow(sessionId);
         int bounded = Math.max(1, limit);
+        // Transcript rows only: internal scratchpad blocks (plan / turn_reasoning / turn_artifact /
+        // tool_execution) never surface through sessions.history.
         List<MessageEntity> rows = MessageEntity
-                .<MessageEntity>find("sessionId = ?1 order by id desc", target.id)
+                .<MessageEntity>find("sessionId = ?1 and blockType = ?2 order by id desc",
+                        target.id, BlockType.TURN_MESSAGE.dbValue())
                 .page(0, bounded)
                 .list();
         List<SessionMessage> messages = new ArrayList<>(rows.size());

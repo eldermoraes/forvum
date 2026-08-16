@@ -130,6 +130,21 @@ class EngineSessionAccessIT {
     }
 
     @Test
+    void historyNeverSurfacesInternalScratchpadBlocks() {
+        seedSession("web:sess-a", "alice", "web", 10L);
+        seedMessage("web:sess-a", "user", "hello");
+        seedBlock("web:sess-a", "tool", "PLAN v1", "plan");
+        seedBlock("web:sess-a", "assistant", "thinking...", "turn_reasoning");
+        seedBlock("web:sess-a", "tool", "fs.read result", "tool_execution");
+        seedBlock("web:sess-a", "assistant", "draft artifact", "turn_artifact");
+        seedMessage("web:sess-a", "assistant", "pong");
+
+        List<SessionMessage> history = as("alice", () -> access.history("web:sess-a", 10));
+        assertEquals(List.of("hello", "pong"), history.stream().map(SessionMessage::content).toList(),
+                "only turn_message transcript rows surface; plan/reasoning/tool/artifact blocks do not");
+    }
+
+    @Test
     void historyOfAnotherIdentitysSessionFailsLikeANonexistentOne() {
         seedSession("web:sess-a", "alice", "web", 10L);
         seedMessage("web:sess-a", "user", "hello");
@@ -234,13 +249,17 @@ class EngineSessionAccessIT {
     }
 
     private void seedMessage(String sessionId, String role, String content) {
+        seedBlock(sessionId, role, content, "turn_message");
+    }
+
+    private void seedBlock(String sessionId, String role, String content, String blockType) {
         QuarkusTransaction.requiringNew().run(() -> {
             MessageEntity message = new MessageEntity();
             message.sessionId = sessionId;
             message.agentId = "main";
             message.role = role;
             message.content = content;
-            message.blockType = "turn_message";
+            message.blockType = blockType;
             message.createdAt = System.currentTimeMillis();
             message.persist();
         });
