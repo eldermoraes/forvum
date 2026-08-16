@@ -19,6 +19,11 @@ public class TaskRecorder implements TaskExecutor {
     @Override
     @Transactional
     public void record(TaskRecord task) {
+        toEntity(task).persist();
+    }
+
+    /** Pure row mapping (unit-tested directly, #180): {@link TaskRecord} -> {@code tasks} row. */
+    static TaskEntity toEntity(TaskRecord task) {
         TaskEntity entity = new TaskEntity();
         entity.id = task.id();
         entity.agentId = task.agentId().value();
@@ -34,6 +39,6 @@ public class TaskRecorder implements TaskExecutor {
         entity.error = task.error();
         entity.durationMs = task.durationMs();
         entity.createdAt = task.createdAt();
-        entity.persist();
+        return entity;
     }
 }

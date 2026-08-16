@@ -77,8 +77,12 @@ java -jar forvum-app/target/quarkus-app/quarkus-run.jar
   - **E2E** — scripts under `forvum-app/.../e2e/`.
 - Run everything with `./mvnw verify`.
 - **Coverage gates (JaCoCo):** 80% line at the parent + 75% branch are **wired and enforced** in
-  `./mvnw verify` per module (#69 / X3); a module below its threshold fails the build. Pitest mutation
-  stays a signal, not a gate, until a baseline exists.
+  `./mvnw verify` per module (#69 / X3); a module below its threshold fails the build. Exclusions and
+  per-module threshold exceptions must be ratified in `.github/coverage-allowlist.txt` — the
+  `.github/coverage-policy.sh` CI gate fails an unratified one (#180). The `forvum-core` Pitest mutation
+  ratchet is an **enforced gate** (#182): `-Pmutation` fails below 95% killed / 95% test strength
+  (measured baseline 97/97), run per-PR-on-core-change + weekly by
+  [`.github/workflows/mutation.yml`](.github/workflows/mutation.yml).
 - **Live tests** are tagged `@Tag("live")` and are **default-off** (they hit real providers, a headless
   browser, a container runtime, or the network). Each owning module excludes them via the Surefire
   `<excludedGroups>live</excludedGroups>` **user property**, so a CLI `-DexcludedGroups=none` re-enables them.

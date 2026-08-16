@@ -230,9 +230,10 @@ public class SessionCompactor {
      * instead of staying at {@code Long.MAX_VALUE} and being classified as dropped. The natural
      * user-then-assistant persist order means a retained pair still resolves the boundary to its USER
      * message, so the orphan-stripping rule is unchanged in the common case. Returns
-     * {@code Long.MAX_VALUE} only when no TURN_MESSAGE exists in the region.
+     * {@code Long.MAX_VALUE} only when no TURN_MESSAGE exists in the region. Package-private so the
+     * pure retain-budget walk is unit-tested directly (#180).
      */
-    private static long retainBoundary(List<MessageEntity> region, int retainTokens) {
+    static long retainBoundary(List<MessageEntity> region, int retainTokens) {
         long boundary = Long.MAX_VALUE;
         int acc = 0;
         for (int i = region.size() - 1; i >= 0; i--) {
