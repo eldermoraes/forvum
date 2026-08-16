@@ -291,7 +291,7 @@ class SupervisorGraphPlanTest {
         assertTrue(model.seen.get(1).stream()
                         .filter(ToolExecutionResultMessage.class::isInstance)
                         .map(ToolExecutionResultMessage.class::cast)
-                        .anyMatch(result -> !result.text().contains("Plan updated:")),
+                        .noneMatch(result -> result.text().contains("Plan updated:")),
                 "the replay-source result (a synthetic miss here) is served, not a fresh execution");
     }
 }
