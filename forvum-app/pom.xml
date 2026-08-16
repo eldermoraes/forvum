@@ -155,6 +155,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-messaging</artifactId>
         </dependency>
+        <!-- Layer-3 Sessions tool (#189): contributes agents.list/sessions.list/sessions.history
+             (SESSION_READ) + sessions.send (SESSION_WRITE) to the ToolRegistry — session and sub-agent
+             introspection over the engine-backed, identity-scoped SessionAccess seam. No AI library. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-sessions</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>

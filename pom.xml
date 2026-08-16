@@ -42,6 +42,7 @@
         <module>forvum-tools-tts</module>
         <module>forvum-tools-multimodal</module>
         <module>forvum-tools-messaging</module>
+        <module>forvum-tools-sessions</module>
         <module>forvum-channel-web</module>
         <module>forvum-channel-tui</module>
         <module>forvum-channel-telegram</module>

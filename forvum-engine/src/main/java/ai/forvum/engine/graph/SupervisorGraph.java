@@ -18,6 +18,7 @@ import ai.forvum.engine.compress.BoundedCompressor;
 import ai.forvum.engine.compress.CompressionBudget;
 import ai.forvum.engine.compress.CompressionOutcome;
 import ai.forvum.engine.compress.CompressionResult;
+import ai.forvum.engine.compress.MidTurnPruner;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.plan.PlanFormat;
 import ai.forvum.engine.plan.PlanStore;
@@ -492,6 +493,14 @@ public class SupervisorGraph {
         if (turn.round++ >= MAX_ROUNDS) {
             return Map.of(GraphState.NEXT, "done", GraphState.FINAL, turn.lastAssistantText());
         }
+        // #197 mid-turn pruning (the Compress pillar WITHIN the turn): before every model call, bound
+        // what this turn has accumulated — oversized tool results, stale images, superseded thinking —
+        // in the region AFTER the seeded prefix, so a long multi-round tool loop cannot blow the window
+        // before the between-turn compactor ever runs. In-place replacement only (never insert/remove),
+        // tail-region-only, so the cached prompt prefix stays byte-stable (the compactor's rule). A pure
+        // in-memory pass — no model call, no IO — governed by the SAME compressThresholdChars knob
+        // (0 disables it, which also keeps replay #57 deterministic via Turn's replay short-circuit).
+        MidTurnPruner.prune(turn.conversation, turn.seedSize, turn.compressThreshold);
         List<ToolSpecification> offered = new ArrayList<>(turn.toolSpecs);
         offered.add(SPAWN_SPEC);
         offered.add(PLAN_SPEC);
@@ -689,6 +698,8 @@ public class SupervisorGraph {
         private final List<ToolSpecification> toolSpecs;
         private final List<ChatMessage> conversation;
         private final int compressThreshold;
+        /** The seeded-prefix size at turn entry — the #197 pruner never touches indexes below it. */
+        private final int seedSize;
         private final List<SpawnRequest> spawns = new ArrayList<>();
         /** Every ephemeral worker id allocated this turn (accumulated across rounds; retired in run()'s finally). */
         private final List<AgentId> spawnedIds = new ArrayList<>();
@@ -704,6 +715,9 @@ public class SupervisorGraph {
             this.toolSpecs = toolSpecs;
             // Already a fresh mutable copy (built by retrieveAndFrame), mutated across rounds.
             this.conversation = conversation;
+            // Everything seeded before the first generate (system + history + retrieval/plan frames +
+            // the user question) is the cached prefix the #197 mid-turn pruner must never disturb.
+            this.seedSize = conversation.size();
             // The §5.5 reduce node compresses worker digests above this; 0 disables it (no memory policy,
             // or a replay #57 where compression must be off for determinism).
             this.compressThreshold = ReplayContext.CURRENT_REPLAY.isBound() ? 0
