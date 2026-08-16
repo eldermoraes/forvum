@@ -413,6 +413,12 @@ public class SupervisorGraph {
      * (best-effort degrade, the M18 lesson). v0.1 scope: generation-only — a declared cycle runs no tool
      * loop and no retrieval (those belong to the standard supervisor graph); {@code outputSchema} still
      * validates the cycle's FINAL answer, unchanged (after the graph returns).
+     *
+     * <p><em>Documented asymmetry (#197 audit):</em> the cycle path runs NO mid-turn pruning (and no
+     * plan re-injection) — {@code MidTurnPruner} guards the standard tool loop's {@code generate} only.
+     * A declared cycle executes no tools, so no oversized tool results can accumulate here; each pass's
+     * window is the seed plus the passes' own replies. Extend pruning into the cycle only if cycles ever
+     * grow a tool loop.
      */
     private String runCycle(GraphTurnRequest request) {
         CycleTurn turn = new CycleTurn(request);

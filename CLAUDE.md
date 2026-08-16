@@ -535,6 +535,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [#176] A compression-failure fallback must be bounded, reusing the existing threshold → docs/lessons/engine-graph.md
 - [#177] Retire ephemeral workers in run()'s finally; destroy the @AgentScoped context directly → docs/lessons/engine-graph.md
 - [#178] Atomic capability-safe hot-reload via an immutable per-turn lease, no refcount/drain → docs/lessons/engine-graph.md
+- [#197-audit] Never rewrite already-sent messages mid-turn; elision needs recency window + protected tools → docs/lessons/engine-graph.md
 - [#190] A scope-less built-in beside spawn_worker is a four-touch graph recipe; plan lives in messages, not graph channels → docs/lessons/engine-graph.md
 
 ### Security & authorization — `docs/lessons/security.md`

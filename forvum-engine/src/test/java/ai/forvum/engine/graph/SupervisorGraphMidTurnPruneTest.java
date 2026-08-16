@@ -38,8 +38,8 @@ import java.util.Set;
 
 /**
  * Graph-level test for #197 mid-turn context pruning: a long synthetic turn whose tool loop keeps
- * returning OVERSIZED results must stay under a target window on the {@link ChatRequest#messages()}
- * the model actually sees mid-turn (captured by a scripted model — the M18 pattern), the pruning must
+ * returning OVERSIZED results must have its AGED results (outside the D3.3 recency window) pruned on
+ * the {@link ChatRequest#messages()} the model actually sees mid-turn (captured by a scripted model — the M18 pattern), the pruning must
  * be tail-region-only (the seeded prefix reaches the model byte-identical on every round), and the
  * whole pass must run with no model call and no IO (the scripted model records every call it gets;
  * the count proves no extra call happened).
@@ -114,38 +114,52 @@ class SupervisorGraphMidTurnPruneTest {
     }
 
     @Test
-    void longToolLoopTurnStaysUnderTheTargetWindowMidTurn() {
-        // Three rounds of 20k-char tool results (60k raw) against a 500-char threshold: every tool
-        // result the model sees mid-turn must already be pruned, keeping the whole conversation under
-        // a target window instead of accumulating raw output.
+    void longToolLoopTurnPrunesAgedResultsAndStaysBoundedMidTurn() {
+        // Six rounds of 20k-char tool results (120k raw) against a 500-char threshold. Under the
+        // post-audit D3.3 recency window (KEEP_LAST_ASSISTANTS = 3), round j's result becomes prunable
+        // only once three newer assistant messages exist: at generate call k the model must see
+        // r1..r(k-3) pruned and the last three rounds' results WHOLE — the current work always reaches
+        // the model intact while aged output is elided, keeping the window bounded.
         ScriptedChatModel model = new ScriptedChatModel(
-                readCall(1), readCall(2), readCall(3), AiMessage.from("done"));
+                readCall(1), readCall(2), readCall(3), readCall(4), readCall(5), readCall(6),
+                AiMessage.from("done"));
         List<ChatMessage> seed = List.of(SystemMessage.from("you can read files"),
-                UserMessage.from("read the three files"));
+                UserMessage.from("read the six files"));
 
         String reply = graph().run(new GraphTurnRequest("s197", new AgentId("main"), model,
                 List.of(FS_READ), seed, null, COMPRESS_ONLY));
 
         assertEquals("done", reply);
-        assertEquals(4, model.seen.size(), "the pruner makes NO model calls of its own");
+        assertEquals(7, model.seen.size(), "the pruner makes NO model calls of its own");
 
         for (int call = 1; call < model.seen.size(); call++) {
-            for (ChatMessage message : model.seen.get(call)) {
-                if (message instanceof ToolExecutionResultMessage result) {
+            List<ToolExecutionResultMessage> results = model.seen.get(call).stream()
+                    .filter(ToolExecutionResultMessage.class::isInstance)
+                    .map(ToolExecutionResultMessage.class::cast)
+                    .toList();
+            assertEquals(call, results.size());
+            for (int j = 1; j <= results.size(); j++) {
+                ToolExecutionResultMessage result = results.get(j - 1);
+                if (j <= call - MidTurnPruner.KEEP_LAST_ASSISTANTS) {
                     assertTrue(result.text().length() <= THRESHOLD,
-                            "every tool result the model sees mid-turn is within the threshold (call "
-                                    + call + " carried " + result.text().length() + " chars)");
+                            "an aged result (round " + j + " at call " + call + ") is pruned, carried "
+                                    + result.text().length() + " chars");
                     assertTrue(result.text().startsWith(HEAD), "head kept");
                     assertTrue(result.text().endsWith(TAIL), "tail kept");
                     assertTrue(result.text().contains(MidTurnPruner.ELISION_MARKER), "middle elided");
+                } else {
+                    assertEquals(OVERSIZED_RESULT, result.text(),
+                            "a within-window result (round " + j + " at call " + call
+                                    + ") reaches the model whole (D3.3)");
                 }
             }
         }
 
-        // The target window: seed + per-round (assistant tool-call stub + pruned result). 60k of raw
-        // tool output must never reach the model — the final call stays under a few KB.
-        int finalWindowChars = model.seen.get(3).stream().mapToInt(m -> m.toString().length()).sum();
-        assertTrue(finalWindowChars < 5_000,
+        // The bounded window: aged results collapse to <=THRESHOLD each, so only the last
+        // KEEP_LAST_ASSISTANTS raw results ride the final call (~60k) — without pruning all six would
+        // (~120k). The bound sits between the two.
+        int finalWindowChars = model.seen.get(6).stream().mapToInt(m -> m.toString().length()).sum();
+        assertTrue(finalWindowChars < 70_000,
                 "the final mid-turn window must stay bounded, was " + finalWindowChars + " chars");
     }
 

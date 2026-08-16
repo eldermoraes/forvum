@@ -427,3 +427,22 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   by max id, orphan-strip the rest) is mandatory or superseded plans accumulate forever. Validation is
   engine-side reject-with-model-visible-error (nothing written on violation, over-cap never truncates):
   the error string names the violated rule, which scripted-model tests can assert verbatim.
+
+## [#197-audit] Mid-turn pruning must never rewrite already-sent messages; guard elision with a recency window + protected tools
+
+The originally shipped `MidTurnPruner` had a thinking()-strip arm that rebuilt every assistant message
+except the newest. Within a multi-round tool loop those assistant messages were ALREADY TRANSMITTED to
+the provider in a prior round: rewriting them invalidates every prompt-cache prefix from the first
+assistant message onward (the exact cost the frozen-prefix rule exists to protect), and a provider that
+requires thinking blocks paired with their `tool_use` (Anthropic extended thinking) rejects the request
+outright. The remediation removed the arm entirely (D7: thinking-stripping is out of v1) and hardened
+the tool-result arm with two bounds: a `KEEP_LAST_ASSISTANTS = 3` recency cutoff (a result is elidable
+only strictly before the index of the 3rd-newest `AiMessage` counted across the WHOLE list — the
+current round's results always reach the model whole, and fewer assistants than the window means
+nothing is prunable) and `PROTECTED_TOOL_NAMES = {"update_plan"}` (the rendered checklist IS the
+same-turn plan surface; eliding it derails the plan-following turn). The generalizable rules: (1) any
+in-place mid-turn mutation must satisfy trim-once monotonicity — a message is mutated at most once, at
+the moment it exits the window, then byte-stable forever; (2) size-based elision needs both a recency
+bound (WHEN) and a semantic protection set (WHAT) — the threshold alone prunes the very output the
+model is about to act on; (3) assert cache stability in tests with `assertSame` on already-sent
+instances across two consecutive prune passes, not just equality.
