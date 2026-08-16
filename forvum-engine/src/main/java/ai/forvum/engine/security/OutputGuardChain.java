@@ -27,6 +27,18 @@ public class OutputGuardChain {
     @Inject
     Instance<OutputGuard> guards;
 
+    /** Explicit guard list for direct instantiation (tests outside this package); null → CDI discovery. */
+    private final List<OutputGuard> explicitGuards;
+
+    public OutputGuardChain() {
+        this.explicitGuards = null;
+    }
+
+    /** Construct with an explicit guard list — the test seam for units that cannot boot CDI. */
+    public OutputGuardChain(List<OutputGuard> explicitGuards) {
+        this.explicitGuards = List.copyOf(explicitGuards);
+    }
+
     /**
      * Run the configured guards over {@code candidate}; return the egress text to emit. A {@code Blocked}
      * disposition (a guard suppressed the egress) throws {@link OutputFilteredException}, which the turn
@@ -47,6 +59,9 @@ public class OutputGuardChain {
     }
 
     private List<OutputGuard> resolve() {
+        if (explicitGuards != null) {
+            return explicitGuards;
+        }
         List<OutputGuard> resolved = new ArrayList<>();
         for (OutputGuard guard : guards) {
             resolved.add(guard);

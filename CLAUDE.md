@@ -98,6 +98,7 @@ Layer-3 extension modules land milestone by milestone.
 | `AgentEvent permits TokenDelta, ToolInvoked, ToolResult, FallbackTriggered, Done, ErrorEvent` | `forvum-core` | sealed event hierarchy |
 | `FallbackChain, CostBudget, MemoryPolicy, PermissionScope` | `forvum-core` | sealed policy/budget/scope contracts |
 | `ChannelProvider, ModelProvider, ToolProvider, MemoryProvider` (+ `non-sealed AbstractXProvider`) | `forvum-sdk` | the contracts plugins implement |
+| `ChannelSender` (outbound send SPI), `MessageAccess` (the engine-owned message.send envelope seam) | `forvum-sdk` | operator-authorized outbound messaging (#188) |
 | `@ForvumExtension`, re-exported `@RegisterForReflection` | `forvum-sdk` | plugin marker + native hint |
 | `AgentRegistry`, `@AgentScoped` context (ArC `InjectableContext`), `SupervisorGraph` (LangGraph4j), `ConfigLoader` (WatchService), `LlmSelector` + `FallbackChatModel`, MCP bridge | `forvum-engine` | the runtime heart |
 
@@ -556,6 +557,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [#172] Sanitize a channel-visible failure at its one construction seam; genericize untrusted text → docs/lessons/security.md
 - [#174] CI security gates: placement, canary PRs both directions, four pin-the-pin traps → docs/lessons/security.md
 - [#189-audit] A relayed dispatch re-binds caller authority as an inherited cap; gate god-views on the toggle, not the name → docs/lessons/security.md
+- [#188-audit] A model-callable outbound send is an engine-side envelope: fail-closed allowlist + confirm + guard; cron LAST membership + no raw-payload fallback → docs/lessons/security.md
 
 ### Testing & CI — `docs/lessons/testing-ci.md`
 - [M4] Make fixtures exercise the absent/created-later state, not the happy pre-populated one → docs/lessons/testing-ci.md

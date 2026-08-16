@@ -5,6 +5,7 @@ import ai.forvum.engine.config.ForvumHome;
 import ai.forvum.engine.doctor.ConfigDoctor;
 import ai.forvum.engine.doctor.DoctorReport;
 import ai.forvum.engine.doctor.Finding;
+import ai.forvum.sdk.ChannelSender;
 import ai.forvum.sdk.ModelProvider;
 import ai.forvum.sdk.ToolProvider;
 
@@ -28,7 +29,9 @@ import java.util.stream.Collectors;
  * (gathered from {@code Instance<ModelProvider>}, the same way the engine's {@code LlmSelector} discovers
  * providers — so doctor can flag a model ref that names a provider no installed plugin handles), and the
  * tool inventory gathered from {@code Instance<ToolProvider>} (see {@link ToolInventoryCollector} — so
- * doctor can flag a belted-but-unconfigured tool).
+ * doctor can flag a belted-but-unconfigured tool). Since #188 it also passes the installed outbound
+ * {@code ChannelSender} extension ids, so doctor can flag a message.send allowlist channel this build
+ * cannot actually send to.
  *
  * <p>Like {@code --help}/{@code --version}/{@code init}, {@code doctor} is a {@code CommandMode} one-shot:
  * it only reads files, so its boot skips Flyway, the config {@code WatchService}, and cron scheduling. Keep
@@ -51,14 +54,21 @@ public class DoctorCommand implements Callable<Integer> {
     @Inject
     Instance<ToolProvider> toolProviders;
 
+    @Inject
+    Instance<ChannelSender> senders;
+
     @Override
     public Integer call() {
         Set<String> knownProviders = providers.stream()
                 .map(ModelProvider::extensionId)
                 .collect(Collectors.toUnmodifiableSet());
 
+        Set<String> knownSenders = senders.stream()
+                .map(ChannelSender::extensionId)
+                .collect(Collectors.toUnmodifiableSet());
+
         DoctorReport report = new ConfigDoctor(home, loader, knownProviders,
-                ToolInventoryCollector.collect(toolProviders).toInventory()).check();
+                ToolInventoryCollector.collect(toolProviders).toInventory(), knownSenders).check();
 
         System.out.println("Forvum doctor: checking " + home.root());
         for (Finding finding : report.findings()) {

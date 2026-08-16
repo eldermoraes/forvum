@@ -1,171 +1,99 @@
 package ai.forvum.tools.messaging;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.core.PermissionScope;
 import ai.forvum.core.ToolSpec;
-import ai.forvum.sdk.ChannelSender;
+import ai.forvum.sdk.MessageAccess;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
- * {@link MessagingToolProvider} contract (#188): it contributes {@code message.send} (CHANNEL_SEND),
- * validates the channel id against the {@link ConfiguredChannels} oracle (unknown channel rejected),
- * resolves the installed {@link ChannelSender} by extension id, delivers through it, and reports an
- * unconfigured sender to the model. Pure unit test with a recording {@code ChannelSender} fixture and a
- * {@code @TempDir}-backed {@code channels/} directory — no engine, no CDI container.
+ * {@link MessagingToolProvider} contract (#188, post-audit): it contributes {@code message.send} —
+ * CHANNEL_SEND scope AND {@code userConfirmRequired} (the owner approves each send) — validates only
+ * argument shape, and delegates every call to the engine's {@link MessageAccess} seam, which owns the
+ * whole security envelope (destination allowlist, sender resolution, output guards). Pure unit test with
+ * a recording {@code MessageAccess} double — no engine, no CDI container.
  */
 class MessagingToolProviderTest {
 
-    @TempDir
-    Path home;
-
-    /** A recording {@link ChannelSender} double. */
-    static final class RecordingSender implements ChannelSender {
-        final String id;
-        final List<String[]> sent = new ArrayList<>();
-        boolean configured = true;
-
-        RecordingSender(String id) {
-            this.id = id;
-        }
+    /** A recording {@link MessageAccess} double. */
+    static final class RecordingAccess implements MessageAccess {
+        final List<String[]> calls = new ArrayList<>();
+        String reply = "Message sent to channel 'telegram' (target 42).";
 
         @Override
-        public String extensionId() {
-            return id;
+        public String send(String channelId, String target, String text) {
+            calls.add(new String[] {channelId, target, text});
+            return reply;
         }
-
-        @Override
-        public boolean send(String target, String text) {
-            if (!configured) {
-                return false;
-            }
-            sent.add(new String[] {target, text});
-            return true;
-        }
-    }
-
-    private ConfiguredChannels channelsWith(String... ids) throws IOException {
-        Path dir = home.resolve("channels");
-        Files.createDirectories(dir);
-        for (String id : ids) {
-            Files.writeString(dir.resolve(id + ".json"), "{\"enabled\": true}");
-        }
-        return new ConfiguredChannels(dir);
     }
 
     @Test
-    void reportsTheMessagingExtensionId() throws IOException {
-        assertEquals("messaging",
-                new MessagingToolProvider(channelsWith(), List.<ChannelSender>of()).extensionId());
-    }
+    void contributesMessageSendWithChannelSendScopeAndUserConfirm() {
+        MessagingToolProvider provider = new MessagingToolProvider(new RecordingAccess());
 
-    @Test
-    void contributesMessageSendGatedByChannelSend() throws IOException {
-        List<ToolSpec> tools =
-                new MessagingToolProvider(channelsWith(), List.<ChannelSender>of()).tools();
+        assertEquals("messaging", provider.extensionId());
+        List<ToolSpec> tools = provider.tools();
         assertEquals(1, tools.size());
-
         ToolSpec spec = tools.getFirst();
         assertEquals("message.send", spec.name());
         assertEquals(PermissionScope.CHANNEL_SEND, spec.requiredScope());
-        assertFalse(spec.userConfirmRequired(),
-                "message.send is RBAC/belt-gated but not approval-gated (issue #188)");
+        assertTrue(spec.userConfirmRequired(),
+                "message.send must be userConfirmRequired — the P2-14 approval gate is part of the "
+                        + "#188 security envelope");
+        assertTrue(spec.parametersJsonSchema().contains("channelId"));
     }
 
     @Test
-    void sendDeliversThroughTheMatchingSender() throws IOException {
-        RecordingSender telegram = new RecordingSender("telegram");
-        RecordingSender other = new RecordingSender("discord");
-        MessagingToolProvider provider = new MessagingToolProvider(
-                channelsWith("telegram", "discord"), List.of(other, telegram));
+    void delegatesTheCallToTheMessageAccessSeam() {
+        RecordingAccess access = new RecordingAccess();
+        MessagingToolProvider provider = new MessagingToolProvider(access);
 
-        String result = provider.invoke("message.send",
+        String reply = provider.invoke("message.send",
                 Map.of("channelId", "telegram", "target", "42", "text", "hello"));
 
-        assertEquals(1, telegram.sent.size(), "the send reaches the matching sender");
-        assertEquals("42", telegram.sent.getFirst()[0]);
-        assertEquals("hello", telegram.sent.getFirst()[1]);
-        assertTrue(other.sent.isEmpty(), "a non-matching sender is never touched");
-        assertTrue(result.toLowerCase().contains("sent"), "the model gets a delivery confirmation");
+        assertEquals(access.reply, reply);
+        assertEquals(1, access.calls.size());
+        assertEquals("telegram", access.calls.getFirst()[0]);
+        assertEquals("42", access.calls.getFirst()[1]);
+        assertEquals("hello", access.calls.getFirst()[2]);
     }
 
     @Test
-    void sendWithoutTargetUsesTheChannelDefaultDestination() throws IOException {
-        RecordingSender telegram = new RecordingSender("telegram");
-        MessagingToolProvider provider =
-                new MessagingToolProvider(channelsWith("telegram"), List.of(telegram));
+    void omittedTargetIsPassedAsEmptyForSoleRecipientResolution() {
+        RecordingAccess access = new RecordingAccess();
+        MessagingToolProvider provider = new MessagingToolProvider(access);
 
-        String result = provider.invoke("message.send",
-                Map.of("channelId", "telegram", "text", "ping"));
+        provider.invoke("message.send", Map.of("channelId", "telegram", "text", "hi"));
 
-        assertEquals("", telegram.sent.getFirst()[0], "an absent target is passed as blank (channel default)");
-        assertTrue(result.contains("default destination"));
+        assertEquals("", access.calls.getFirst()[1]);
     }
 
     @Test
-    void unknownChannelIsRejectedWithoutTouchingAnySender() throws IOException {
-        RecordingSender telegram = new RecordingSender("telegram");
-        MessagingToolProvider provider =
-                new MessagingToolProvider(channelsWith("telegram"), List.of(telegram));
+    void rejectsAnUnknownToolName() {
+        MessagingToolProvider provider = new MessagingToolProvider(new RecordingAccess());
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> provider.invoke("message.send",
-                        Map.of("channelId", "matrix", "text", "x")));
-
-        assertTrue(e.getMessage().contains("Unknown channel 'matrix'"));
-        assertTrue(telegram.sent.isEmpty(), "an unknown channel never reaches a sender");
+                () -> provider.invoke("message.broadcast", Map.of()));
+        assertTrue(e.getMessage().contains("message.send"));
     }
 
     @Test
-    void configuredChannelWithNoInstalledSenderIsRejected() throws IOException {
-        MessagingToolProvider provider =
-                new MessagingToolProvider(channelsWith("tui"), List.<ChannelSender>of());
+    void rejectsMissingOrBlankRequiredArguments() {
+        RecordingAccess access = new RecordingAccess();
+        MessagingToolProvider provider = new MessagingToolProvider(access);
 
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> provider.invoke("message.send", Map.of("channelId", "tui", "text", "x")));
-        assertTrue(e.getMessage().contains("no installed outbound sender"));
-    }
-
-    @Test
-    void unconfiguredSenderYieldsAnActionableNotSentReport() throws IOException {
-        RecordingSender telegram = new RecordingSender("telegram");
-        telegram.configured = false;
-        MessagingToolProvider provider =
-                new MessagingToolProvider(channelsWith("telegram"), List.of(telegram));
-
-        String result = provider.invoke("message.send",
-                Map.of("channelId", "telegram", "text", "x"));
-
-        assertTrue(result.contains("NOT sent"), "the model must not be told an undelivered message was sent");
-        assertTrue(result.contains("channels/telegram.json"), "the report names the config file to fix");
-    }
-
-    @Test
-    void invokeRejectsAnUnknownToolName() throws IOException {
         assertThrows(IllegalArgumentException.class,
-                () -> new MessagingToolProvider(channelsWith(), List.<ChannelSender>of())
-                        .invoke("message.broadcast", Map.of()));
-    }
-
-    @Test
-    void invokeRejectsAMissingRequiredArgument() throws IOException {
-        MessagingToolProvider provider =
-                new MessagingToolProvider(channelsWith("telegram"), List.<ChannelSender>of());
+                () -> provider.invoke("message.send", Map.of("text", "hi")));
         assertThrows(IllegalArgumentException.class,
-                () -> provider.invoke("message.send", Map.of("channelId", "telegram")));
-        assertThrows(IllegalArgumentException.class,
-                () -> provider.invoke("message.send", Map.of("text", "x")));
+                () -> provider.invoke("message.send", Map.of("channelId", "telegram", "text", " ")));
+        assertTrue(access.calls.isEmpty(), "shape rejection must never reach the seam");
     }
 }

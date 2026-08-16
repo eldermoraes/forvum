@@ -2,41 +2,34 @@ package ai.forvum.tools.messaging;
 
 import ai.forvum.core.ToolSpec;
 import ai.forvum.sdk.AbstractToolProvider;
-import ai.forvum.sdk.ChannelSender;
 import ai.forvum.sdk.ForvumExtension;
+import ai.forvum.sdk.MessageAccess;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
 import java.util.List;
 import java.util.Map;
 
 /**
- * The #188 messaging tool provider: contributes the model-callable {@code message.send} to the engine's
- * global ToolRegistry (which discovers this {@code @ApplicationScoped} bean via CDI) and self-dispatches
- * it by name (M18 Option A, no reflection) to the installed {@link ChannelSender} matching the requested
- * channel id. The engine's ToolExecutor gates permission ({@code CHANNEL_SEND}) and audits every call;
- * this provider validates the channel id against the {@link ConfiguredChannels} oracle and dispatches an
- * already-permitted call.
+ * The #188 messaging tool provider (post-audit shape): contributes the model-callable
+ * {@code message.send} to the engine's global ToolRegistry (which discovers this
+ * {@code @ApplicationScoped} bean via CDI) and self-dispatches it by name (M18 Option A, no reflection)
+ * to the engine's {@link MessageAccess} seam. The provider validates only argument SHAPE; the entire
+ * security envelope — destination allowlist, sender resolution, output guards — is the engine's seam
+ * implementation (Resolution B: a Layer-3 plugin cannot ship a variant that skips it). The engine's
+ * ToolExecutor gates permission ({@code CHANNEL_SEND}) + the userConfirmRequired approval and audits
+ * every call.
  */
 @ForvumExtension
 @ApplicationScoped
 public class MessagingToolProvider extends AbstractToolProvider {
 
-    private final ConfiguredChannels channels;
-    private final Iterable<ChannelSender> senders;
+    private final MessageAccess messages;
 
     @Inject
-    public MessagingToolProvider(ConfiguredChannels channels, Instance<ChannelSender> senders) {
-        this.channels = channels;
-        this.senders = senders;
-    }
-
-    /** Package-private constructor wiring explicit collaborators — for tests. */
-    MessagingToolProvider(ConfiguredChannels channels, Iterable<ChannelSender> senders) {
-        this.channels = channels;
-        this.senders = senders;
+    public MessagingToolProvider(MessageAccess messages) {
+        this.messages = messages;
     }
 
     @Override
@@ -59,7 +52,7 @@ public class MessagingToolProvider extends AbstractToolProvider {
         String channelId = stringArg(arguments, "channelId");
         String text = stringArg(arguments, "text");
         Object target = arguments.get("target");
-        return MessageSendTool.send(channels.ids(), senders, channelId,
+        return MessageSendTool.send(messages, channelId,
                 target == null ? "" : target.toString(), text);
     }
 

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.forvum.engine.persistence.SessionEntity;
+import ai.forvum.engine.security.OutputFilteredException;
 import ai.forvum.sdk.ChannelSender;
 
 import org.junit.jupiter.api.Test;
@@ -79,6 +80,16 @@ class ChannelSendCronDeliverySinkTest {
             Optional<SessionEntity> latestSessionOn(Set<String> channelIds) {
                 return Optional.ofNullable(latestSession)
                         .filter(s -> channelIds.contains(s.channelId));
+            }
+
+            @Override
+            Set<String> allowedUserIdsOf(String channelId) {
+                // The routing tests treat the latest session's native user as an allowlisted member;
+                // the #188 membership rule itself is exercised by the dedicated deny test below.
+                if (latestSession != null && latestSession.channelId.equals(channelId)) {
+                    return Set.of(latestSession.id.substring(channelId.length() + 1));
+                }
+                return Set.of();
             }
         };
     }
@@ -171,5 +182,84 @@ class ChannelSendCronDeliverySinkTest {
 
         sink.deliver(last());
         assertEquals(1, fallback.delivered.size());
+    }
+
+    @Test
+    void lastDestinationNotInTheChannelAllowedUserIdsFallsBackToTheLoggedSink() {
+        RecordingSender telegram = new RecordingSender("telegram");
+        RecordingFallback fallback = new RecordingFallback();
+        SessionEntity stale = session("telegram", "999");
+        ChannelSendCronDeliverySink sink = new ChannelSendCronDeliverySink(List.of(telegram), fallback) {
+            @Override
+            Optional<SessionEntity> latestSessionOn(Set<String> channelIds) {
+                return Optional.of(stale);
+            }
+
+            @Override
+            Set<String> allowedUserIdsOf(String channelId) {
+                return Set.of("42"); // the ledger's destination is NOT a configured member
+            }
+        };
+
+        sink.deliver(last());
+
+        assertTrue(telegram.sent.isEmpty(),
+                "#188: a last-session destination outside allowedUserIds must never be sent to");
+        assertEquals(1, fallback.delivered.size(), "membership denial falls back to the logged sink");
+    }
+
+    @Test
+    void lastWithAnUnconfiguredChannelMembershipIsFailClosed() {
+        RecordingSender telegram = new RecordingSender("telegram");
+        RecordingFallback fallback = new RecordingFallback();
+        SessionEntity latest = session("telegram", "42");
+        // No allowedUserIdsOf override on top of the default null-reader seam: EMPTY set → nothing is
+        // a member → the send is refused even though the ledger names a plausible destination.
+        ChannelSendCronDeliverySink sink = new ChannelSendCronDeliverySink(List.of(telegram), fallback) {
+            @Override
+            Optional<SessionEntity> latestSessionOn(Set<String> channelIds) {
+                return Optional.of(latest);
+            }
+        };
+
+        sink.deliver(last());
+
+        assertTrue(telegram.sent.isEmpty(), "no configured allowlist means no member — fail-closed");
+        assertEquals(1, fallback.delivered.size());
+    }
+
+    @Test
+    void aGuardBlockedReplyIsSuppressedEntirelyNeitherSentNorLoggedRaw() {
+        RecordingSender telegram = new RecordingSender("telegram");
+        RecordingFallback fallback = new RecordingFallback();
+        ChannelSendCronDeliverySink sink = new ChannelSendCronDeliverySink(List.of(telegram), fallback) {
+            @Override
+            String guardEgress(CronDelivery delivery) {
+                throw new OutputFilteredException("policy: secrets", null);
+            }
+        };
+
+        sink.deliver(explicitTo("telegram"));
+
+        assertTrue(telegram.sent.isEmpty(), "a Blocked disposition must never reach a sender");
+        assertTrue(fallback.delivered.isEmpty(),
+                "#188: a guard-blocked payload is suppressed by design — no raw-payload fallback");
+    }
+
+    @Test
+    void theSenderReceivesTheGuardedTextNotTheRawReply() {
+        RecordingSender telegram = new RecordingSender("telegram");
+        RecordingFallback fallback = new RecordingFallback();
+        ChannelSendCronDeliverySink sink = new ChannelSendCronDeliverySink(List.of(telegram), fallback) {
+            @Override
+            String guardEgress(CronDelivery delivery) {
+                return "[redacted] " + delivery.reply();
+            }
+        };
+
+        sink.deliver(explicitTo("telegram"));
+
+        assertEquals("[redacted] the reply", telegram.sent.getFirst()[1],
+                "egress goes through the output-guard chain BEFORE the sender sees it");
     }
 }

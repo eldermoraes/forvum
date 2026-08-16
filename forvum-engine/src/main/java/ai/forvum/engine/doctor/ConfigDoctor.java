@@ -19,6 +19,7 @@ import ai.forvum.engine.config.SkillSpecException;
 import ai.forvum.engine.cron.CronSpec;
 import ai.forvum.engine.cron.CronSpecReader;
 import ai.forvum.engine.graph.OutputSchemaException;
+import ai.forvum.engine.messaging.MessageSendPolicy;
 import ai.forvum.engine.graph.OutputSchemaValidator;
 import ai.forvum.engine.pairing.Device;
 import ai.forvum.engine.pairing.DeviceSpecReader;
@@ -32,6 +33,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -64,6 +67,7 @@ public final class ConfigDoctor {
     private final ConfigLoader loader;
     private final Set<String> knownProviders;
     private final ToolInventory toolInventory;
+    private final Set<String> knownSenders;
     private final OutputSchemaValidator outputSchemaValidator = new OutputSchemaValidator(new ObjectMapper());
 
     /**
@@ -75,12 +79,19 @@ public final class ConfigDoctor {
         this(home, loader, knownProviders, ToolInventory.empty());
     }
 
+    /** The pre-#188 constructor — delegates with no known outbound senders (that check degrades). */
     public ConfigDoctor(ForvumHome home, ConfigLoader loader, Set<String> knownProviders,
             ToolInventory toolInventory) {
+        this(home, loader, knownProviders, toolInventory, Set.of());
+    }
+
+    public ConfigDoctor(ForvumHome home, ConfigLoader loader, Set<String> knownProviders,
+            ToolInventory toolInventory, Set<String> knownSenders) {
         this.home = home;
         this.loader = loader;
         this.knownProviders = Set.copyOf(knownProviders);
         this.toolInventory = toolInventory;
+        this.knownSenders = Set.copyOf(knownSenders);
     }
 
     /** Validate the whole {@code $FORVUM_HOME} layout and return the findings in discovery order. */
@@ -104,6 +115,7 @@ public final class ConfigDoctor {
         checkRawJsonDirectory(findings, home.mcpServers(), "mcp-servers");
         checkDevices(findings);
         checkSkills(findings);
+        checkMessageSend(findings);
         checkRootConfig(findings);
 
         return new DoctorReport(findings);
@@ -393,6 +405,60 @@ public final class ConfigDoctor {
                 reader.readSpec(id);
             } catch (SkillSpecException e) {
                 findings.add(new Finding(Severity.ERROR, location, e.getMessage(), "Fix " + location + "."));
+            }
+        }
+    }
+
+    /**
+     * Validate {@code tools/message-send.json} — the #188 fail-closed destination allowlist. Absent is
+     * healthy (message.send simply refuses every send); present-but-malformed is an ERROR (the runtime
+     * would refuse with a parse failure); a channel key that names no {@code channels/<id>.json} is an
+     * ERROR (the allowlist can never match); a configured channel with no installed outbound sender is a
+     * WARNING (this build cannot send there). Reuses {@link MessageSendPolicy#parse} as the oracle so the
+     * doctor and the runtime can never drift.
+     */
+    private void checkMessageSend(List<Finding> findings) {
+        String location = "tools/" + MessageSendPolicy.FILE_NAME;
+        Path file = home.tools().resolve(MessageSendPolicy.FILE_NAME);
+        Optional<JsonNode> root;
+        try {
+            root = loader.readJson(file);
+        } catch (UncheckedIOException e) {
+            findings.add(malformed(location, e));
+            return;
+        }
+        if (root.isEmpty()) {
+            return; // absent: message.send is simply disabled (fail-closed) — nothing to diagnose
+        }
+        Map<String, Set<String>> byChannel;
+        try {
+            byChannel = MessageSendPolicy.parse(root.get());
+        } catch (IllegalStateException e) {
+            findings.add(new Finding(Severity.ERROR, location,
+                    "Malformed message.send allowlist: " + e.getMessage(),
+                    "Use a JSON object keyed by channel id, each value an array of recipient strings."));
+            return;
+        }
+        Set<String> channelIds = Set.copyOf(new ChannelReader(loader, home).ids());
+        for (Map.Entry<String, Set<String>> entry : byChannel.entrySet()) {
+            String channelId = entry.getKey();
+            if (!channelIds.contains(channelId)) {
+                findings.add(new Finding(Severity.ERROR, location,
+                        "Allowlist key '" + channelId + "' names no configured channel",
+                        "Add channels/" + channelId + ".json, or remove the key — an unknown channel "
+                      + "can never match a send."));
+            } else if (!knownSenders.isEmpty() && !knownSenders.contains(channelId)) {
+                findings.add(new Finding(Severity.WARNING, location,
+                        "Channel '" + channelId + "' is allowlisted but this build has no outbound "
+                      + "sender for it",
+                        "message.send to '" + channelId + "' will be refused; installed senders: "
+                      + String.join(", ", knownSenders) + "."));
+            }
+            if (entry.getValue().isEmpty()) {
+                findings.add(new Finding(Severity.WARNING, location,
+                        "Channel '" + channelId + "' has an EMPTY recipient allowlist",
+                        "An empty array refuses every send (fail-closed); add recipients or remove "
+                      + "the key."));
             }
         }
     }

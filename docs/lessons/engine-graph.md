@@ -78,9 +78,12 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   used the persona model passes green. Give the cron a DISTINCT model id and assert `provider_calls.model`
   reflects the CRON's model (the 6-dim review caught this as green-for-wrong-reason). [M19]
 
-- **There is NO outbound channel-send API — channels are self-driving consumers, not sinks.** The channel SPI
-  (`ChannelProvider`) is a pure build-time discovery marker (M16 Resolution B); a channel pulls turns via
-  `ChannelTurnDriver.dispatch`, the engine never pushes to one. So "deliver a cron's output to a channel"
+- **Historically the engine could not push to a channel — channels were self-driving consumers, not
+  sinks** (superseded by #188: the `forvum-sdk` `ChannelSender` SPI now carries operator-authorized
+  outbound sends — cron delivery and the allowlist-gated `message.send` envelope — while turn intake is
+  still pull-only). The channel SPI (`ChannelProvider`) is a pure build-time discovery marker (M16
+  Resolution B); a channel pulls turns via `ChannelTurnDriver.dispatch`, the engine never pushes a TURN
+  to one. So "deliver a cron's output to a channel"
   cannot target a live session — route it to an isolated-agent result sink (`CronDeliverySink`, default logs)
   keyed by the resolved target, and document the limitation. Validate an `explicit-to` target against the
   CONFIGURED channels (`channels/<id>.json` stems via `ChannelReader.ids()`), not a live registry. Reject the
