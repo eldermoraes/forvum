@@ -403,3 +403,27 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   carve-out — the deterministic event-fire is the tested path on both JVM and native; the reload machinery is
   pure map/`ScopedValue` (no reflection), native-identical. [#178]
 
+
+- **[#190] A scope-less built-in beside `spawn_worker` is a four-touch graph recipe; the plan lives in
+  the messages tier, never in graph channels.** Adding a second engine-built-in tool (`update_plan`)
+  confirmed the `spawn_worker` wiring generalizes to a fixed recipe: (1) a hand-built
+  `ToolSpecification` constant next to `SPAWN_SPEC` (langchain4j `JsonObjectSchema` builders —
+  `addEnumProperty(name, List, desc)` and `JsonArraySchema.builder().items(...)` both exist in 1.16.2);
+  (2) `offered.add(SPEC)` in `generate()` right after `SPAWN_SPEC` — built-ins ride NEXT TO the belt, so
+  an EMPTY belt still offers them (test that case explicitly); (3) interception at the TOP of `runTool`,
+  AFTER the replay short-circuit but BEFORE `toolCallBridge.dispatch` — this single seam covers both the
+  `tool_loop` path and the mixed-reply path, and keeps replay write-free for free (a replayed turn never
+  reaches the handler); (4) a null-tolerant package-private injected collaborator (`PlanStore`, the
+  `memorySelector` seam pattern) so `new SupervisorGraph()` unit fixtures keep working with one line in
+  `graphWith(...)`. Load-bearing choices: the persisted artifact is the RENDERED checklist TEXT, not
+  JSON — zero new reflection surface, human-readable in the ledger, and the model-facing echo
+  ("Plan updated:\n…") IS the same-turn visibility mechanism, so nothing touches `GraphState` (R6
+  serialization-clean by construction). Cross-turn visibility is ONE injection at turn entry (after
+  `retrieveAndFrame`, at `lastUserIndex`, so the frame sits directly before the question) of a
+  closing-tag-neutralized `<current_plan>` data block — the #185/[TOOLS-WEB] untrusted-text framing
+  reused for self-produced-but-model-authored content. Compaction: `BlockType.PLAN` is code-only (V3 has
+  no CHECK constraint — verify before assuming a migration), but the `SessionCompactor` classification
+  switch RETAINS unknown block types silently, so an explicit `case PLAN` (keep the region's newest row
+  by max id, orphan-strip the rest) is mandatory or superseded plans accumulate forever. Validation is
+  engine-side reject-with-model-visible-error (nothing written on violation, over-cap never truncates):
+  the error string names the violated rule, which scripted-model tests can assert verbatim.

@@ -20,17 +20,23 @@ package ai.forvum.core;
  *       still belongs to a retained turn (created at or after the oldest retained user message), since
  *       a tool result can carry load-bearing context; stripped only once it is older than that
  *       boundary.</li>
+ *   <li>{@link #PLAN} — a structured work plan the model recorded via the {@code update_plan} built-in
+ *       (#190, the Write-pillar scratchpad). Append-only newest-wins: the session's NEWEST plan row is
+ *       the live plan and is retained by compaction <em>regardless of age</em>; superseded (older) plan
+ *       rows are stripped like orphans.</li>
  * </ul>
  *
  * <p>Each constant carries its DB-literal string ({@link #dbValue()} / {@link #fromDbValue(String)}),
- * mirroring the {@code messages.block_type} value the V2 compaction migration adds. Changing the set
- * requires a coordinated update here plus a forward-only Flyway migration.
+ * mirroring the {@code messages.block_type} value the V2 compaction migration adds. The column carries
+ * no CHECK constraint, so an additive constant is code-only (no Flyway migration) — but every new
+ * constant needs an explicit {@code SessionCompactor} classification case.
  */
 public enum BlockType {
     TURN_MESSAGE("turn_message"),
     TURN_REASONING("turn_reasoning"),
     TURN_ARTIFACT("turn_artifact"),
-    TOOL_EXECUTION("tool_execution");
+    TOOL_EXECUTION("tool_execution"),
+    PLAN("plan");
 
     private final String dbValue;
 

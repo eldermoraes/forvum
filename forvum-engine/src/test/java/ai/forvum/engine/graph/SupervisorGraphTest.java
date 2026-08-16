@@ -21,6 +21,7 @@ import ai.forvum.engine.approval.ApprovalGate;
 import ai.forvum.engine.compress.BoundedCompressor;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.model.InMemoryToolInvocationRecorder;
+import ai.forvum.engine.plan.InMemoryPlanStore;
 import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.session.compaction.Summarizer;
 import ai.forvum.engine.tools.ToolCallBridge;
@@ -180,6 +181,7 @@ class SupervisorGraphTest {
         graph.toolCallBridge = ToolTestFixtures.bridge(recorder, provider);
         graph.workerRunner = workerRunner;
         graph.mapper = new ObjectMapper();
+        graph.planStore = new InMemoryPlanStore();
         return graph;
     }
 
@@ -189,6 +191,7 @@ class SupervisorGraphTest {
         graph.toolCallBridge = ToolTestFixtures.bridge(recorder, gate, provider);
         graph.workerRunner = workerRunner;
         graph.mapper = new ObjectMapper();
+        graph.planStore = new InMemoryPlanStore();
         return graph;
     }
 

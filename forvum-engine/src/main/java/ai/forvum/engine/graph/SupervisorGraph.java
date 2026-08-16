@@ -19,6 +19,8 @@ import ai.forvum.engine.compress.CompressionBudget;
 import ai.forvum.engine.compress.CompressionOutcome;
 import ai.forvum.engine.compress.CompressionResult;
 import ai.forvum.engine.context.CurrentIdentity;
+import ai.forvum.engine.plan.PlanFormat;
+import ai.forvum.engine.plan.PlanStore;
 import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.routing.RetrievedMemory;
 import ai.forvum.engine.session.compaction.Summarizer;
@@ -38,6 +40,7 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 
 import io.opentelemetry.api.trace.Span;
@@ -120,6 +123,31 @@ public class SupervisorGraph {
 
     private static final TypeReference<Map<String, Object>> ARGS = new TypeReference<Map<String, Object>>() {};
 
+    /** The engine-handled built-in the model calls to record/replace its structured work plan (#190). */
+    static final String PLAN_TOOL = "update_plan";
+
+    private static final ToolSpecification PLAN_SPEC = ToolSpecification.builder()
+            .name(PLAN_TOOL)
+            .description("Record or fully replace your structured work plan for this task. Pass the "
+                    + "COMPLETE plan every call (every step with its current status); call it when the "
+                    + "plan changes, not on every step. The current plan is shown back to you on later "
+                    + "steps of this session.")
+            .parameters(JsonObjectSchema.builder()
+                    .addStringProperty("explanation", "an optional short note on what changed and why")
+                    .addProperty("plan", JsonArraySchema.builder()
+                            .description("the full ordered list of plan steps")
+                            .items(JsonObjectSchema.builder()
+                                    .addStringProperty("step", "the step description")
+                                    .addEnumProperty("status",
+                                            List.of("pending", "in_progress", "completed"),
+                                            "the step's current status (at most one in_progress)")
+                                    .required("step", "status")
+                                    .build())
+                            .build())
+                    .required("plan")
+                    .build())
+            .build();
+
     @Inject
     ToolCallBridge toolCallBridge;
 
@@ -128,6 +156,9 @@ public class SupervisorGraph {
 
     @Inject
     MemorySelector memorySelector;
+
+    @Inject
+    PlanStore planStore;
 
     @Inject
     Summarizer summarizer;
@@ -146,7 +177,7 @@ public class SupervisorGraph {
         if (request.cycle() != null) {
             return runCycle(request); // #51: a declared reflection cycle compiles a different graph
         }
-        Turn turn = new Turn(request, retrieveAndFrame(request),
+        Turn turn = new Turn(request, injectPlan(request, retrieveAndFrame(request)),
                 toolCallBridge.specificationsFor(scopeVisibleBelt(request.belt())));
         String finalText;
         try {
@@ -291,6 +322,36 @@ public class SupervisorGraph {
         return out;
     }
 
+    /**
+     * The Write-pillar plan re-injection (#190): when the session holds a live plan, frame it as a
+     * {@code <current_plan>} DATA block (data-framed + close-tag-neutralized — the DR-6a
+     * {@code RetrievedMemory} posture) and insert it just before the user's question, AFTER
+     * {@link #retrieveAndFrame} has inserted its block, so the plan — the more directive, fresher
+     * context — sits nearest the question. Skips under replay (#57, deterministic), when no store is
+     * available (the {@code memorySelector} null-tolerance seam), when there is no user message, or
+     * when no plan is stored (no empty frame). Runs ONCE at turn entry; same-turn visibility comes from
+     * the {@code update_plan} tool RESULT echoing the rendered plan into the conversation.
+     */
+    private List<ChatMessage> injectPlan(GraphTurnRequest request, List<ChatMessage> messages) {
+        if (ReplayContext.CURRENT_REPLAY.isBound() || planStore == null) {
+            return messages;
+        }
+        String sessionId = request.sessionId();
+        if (sessionId == null || sessionId.isBlank()) {
+            return messages;
+        }
+        int lastUser = lastUserIndex(messages);
+        if (lastUser < 0) {
+            return messages;
+        }
+        String block = planStore.latest(sessionId, request.agentId().value())
+                .map(PlanFormat::frame).orElse(null);
+        if (block != null) {
+            messages.add(lastUser, UserMessage.from(block));
+        }
+        return messages;
+    }
+
     /** Index of the last {@link UserMessage} in {@code messages}, or {@code -1} if there is none. */
     private static int lastUserIndex(List<ChatMessage> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -433,6 +494,7 @@ public class SupervisorGraph {
         }
         List<ToolSpecification> offered = new ArrayList<>(turn.toolSpecs);
         offered.add(SPAWN_SPEC);
+        offered.add(PLAN_SPEC);
         AiMessage reply = turn.model.chat(ChatRequest.builder()
                 .messages(turn.conversation)
                 .toolSpecifications(offered)
@@ -463,6 +525,12 @@ public class SupervisorGraph {
             // so a substituted-model rerun sees the SAME outputs (deterministic). A miss → synthetic marker.
             return ReplayContext.CURRENT_REPLAY.get().next(request.name());
         }
+        if (PLAN_TOOL.equals(request.name())) {
+            // #190 built-in: handled by the engine like spawn_worker — no belt/RBAC/approval gate, no
+            // tool_invocations audit row (the plan row IS the record), no tool-budget consumption. This
+            // single intercept covers BOTH the tool_loop and the mixed-reply spawnWorker path.
+            return updatePlan(turn, request);
+        }
         try {
             return toolCallBridge.dispatch(turn.sessionId, turn.agentId, turn.belt,
                     request.name(), request.arguments());
@@ -480,6 +548,28 @@ public class SupervisorGraph {
         } catch (RuntimeException failure) {
             return "Tool '" + request.name() + "' failed: " + failure.getMessage();
         }
+    }
+
+    /**
+     * Execute one {@code update_plan} call (#190): parse + validate the model's arguments engine-side
+     * (a violation returns a model-visible error and writes nothing — the {@code prepareSpawn} error
+     * contract), append the rendered plan as the session's new live plan row, and echo the rendered plan
+     * back as the tool result so every later generate round of THIS turn sees the updated plan (the
+     * every-request-answered [M18] guarantee). Null-tolerates an absent store (the unit-test seam).
+     */
+    private String updatePlan(Turn turn, ToolExecutionRequest request) {
+        PlanFormat.Result result = PlanFormat.parse(mapper, request.arguments());
+        if (result.error() != null) {
+            return result.error();
+        }
+        if (planStore != null) {
+            try {
+                planStore.save(turn.sessionId, turn.agentId.value(), result.rendered());
+            } catch (RuntimeException failure) {
+                return "update_plan failed: " + failure.getMessage();
+            }
+        }
+        return "Plan updated:\n" + result.rendered();
     }
 
     private Map<String, Object> spawnWorker(GraphState state, Turn turn) {
