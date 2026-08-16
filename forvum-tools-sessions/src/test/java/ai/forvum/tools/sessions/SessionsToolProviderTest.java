@@ -83,6 +83,26 @@ class SessionsToolProviderTest {
     }
 
     @Test
+    void sessionsListIsCappedAtMaxSessionsWithAnOmissionMarker() {
+        // D5 (#189 audit): the rendered list re-enters the caller's context window — bound it.
+        FakeSessionAccess sessions = new FakeSessionAccess();
+        List<SessionSummary> many = new java.util.ArrayList<>();
+        for (int i = 0; i < SessionsListTool.MAX_SESSIONS + 7; i++) {
+            many.add(new SessionSummary("web:s" + i, "main", "web", 1L, 2L));
+        }
+        sessions.sessions = List.copyOf(many);
+
+        String result = providerWith(sessions).invoke("sessions.list", Map.of());
+
+        assertTrue(result.contains("web:s" + (SessionsListTool.MAX_SESSIONS - 1)),
+                "the newest MAX_SESSIONS entries are rendered");
+        assertFalse(result.contains("web:s" + SessionsListTool.MAX_SESSIONS + " "),
+                "entries past the cap are omitted");
+        assertTrue(result.contains("7 older sessions omitted"),
+                "the cut is marked so the model knows the list is bounded");
+    }
+
+    @Test
     void sessionsListReportsWhenNothingIsVisible() {
         String result = providerWith(new FakeSessionAccess()).invoke("sessions.list", Map.of());
         assertTrue(result.toLowerCase().contains("no sessions"),
@@ -123,6 +143,21 @@ class SessionsToolProviderTest {
     }
 
     @Test
+    void historyTruncatesAnOversizedMessageSegmentWithTheMarker() {
+        // D5 (#189 audit): one oversized transcript message must not blow the caller's window.
+        FakeSessionAccess sessions = new FakeSessionAccess();
+        sessions.history = List.of(
+                new SessionMessage("assistant", "y".repeat(SessionsHistoryTool.MAX_CONTENT_CHARS + 100), 1L));
+
+        String result = providerWith(sessions).invoke("sessions.history", Map.of("sessionId", "s"));
+
+        assertTrue(result.contains(SessionsHistoryTool.TRUNCATION_MARKER),
+                "the cut segment is marked");
+        assertFalse(result.contains("y".repeat(SessionsHistoryTool.MAX_CONTENT_CHARS + 1)),
+                "no segment exceeds the per-message bound");
+    }
+
+    @Test
     void historyReportsAnEmptyTranscript() {
         String result = providerWith(new FakeSessionAccess()).invoke("sessions.history",
                 Map.of("sessionId", "web:sess-a"));
@@ -141,6 +176,20 @@ class SessionsToolProviderTest {
         assertEquals("web:sess-a", sessions.lastSendSessionId, "the target session reaches the seam");
         assertEquals("ping", sessions.lastSendMessage, "the message reaches the seam");
         assertTrue(result.contains("pong"), "the target agent's reply is rendered for the model");
+    }
+
+    @Test
+    void sendTruncatesAnOversizedRelayedReplyWithTheMarker() {
+        // D5 (#189 audit): the target agent's reply re-enters the CALLER's window — bound it.
+        FakeSessionAccess sessions = new FakeSessionAccess();
+        sessions.sendReply = "z".repeat(SessionsSendTool.MAX_REPLY_CHARS + 500);
+
+        String result = providerWith(sessions).invoke("sessions.send",
+                Map.of("sessionId", "s", "message", "hi"));
+
+        assertTrue(result.contains(SessionsSendTool.TRUNCATION_MARKER), "the cut reply is marked");
+        assertFalse(result.contains("z".repeat(SessionsSendTool.MAX_REPLY_CHARS + 1)),
+                "the relayed reply never exceeds the bound");
     }
 
     @Test

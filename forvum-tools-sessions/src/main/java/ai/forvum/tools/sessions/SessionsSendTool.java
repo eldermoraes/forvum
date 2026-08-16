@@ -23,11 +23,20 @@ public final class SessionsSendTool {
           + "\"message\":{\"type\":\"string\",\"description\":\"the message to deliver into the target session\"}},"
           + "\"required\":[\"sessionId\",\"message\"]}");
 
+    /** D5 output bound (#189 audit): the relayed reply re-entering the caller's window stays bounded. */
+    static final int MAX_REPLY_CHARS = 2000;
+
+    /** Fixed marker appended to a truncated relayed reply (D5 — a literal, never config). */
+    static final String TRUNCATION_MARKER = " [reply truncated by sessions.send]";
+
     private SessionsSendTool() {
     }
 
     static String send(SessionAccess sessions, String sessionId, String message) {
         String reply = sessions.send(sessionId, message);
+        if (reply != null && reply.length() > MAX_REPLY_CHARS) {
+            reply = reply.substring(0, MAX_REPLY_CHARS) + TRUNCATION_MARKER;
+        }
         return "Delivered into session '" + sessionId + "'. Reply: " + reply;
     }
 }

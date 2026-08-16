@@ -18,8 +18,14 @@ public final class SessionsHistoryTool {
     /** Default transcript window when the model supplies no {@code limit}. */
     static final int DEFAULT_LIMIT = 20;
 
-    /** Upper bound on {@code limit} — a transcript re-entering the context window must stay bounded. */
-    static final int MAX_LIMIT = 200;
+    /** Upper bound on {@code limit} — a transcript re-entering the context window must stay bounded (D5). */
+    static final int MAX_LIMIT = 50;
+
+    /** D5 per-message bound: a single oversized transcript message must not blow the caller's window. */
+    static final int MAX_CONTENT_CHARS = 500;
+
+    /** Fixed marker appended to a truncated message segment (D5 — a literal, never config). */
+    static final String TRUNCATION_MARKER = " [truncated by sessions.history]";
 
     public static final ToolSpec SPEC = new ToolSpec(
             "sessions.history",
@@ -28,7 +34,7 @@ public final class SessionsHistoryTool {
             PermissionScope.SESSION_READ,
             "{\"type\":\"object\",\"properties\":{"
           + "\"sessionId\":{\"type\":\"string\",\"description\":\"the session id, from sessions.list\"},"
-          + "\"limit\":{\"type\":\"integer\",\"description\":\"max messages to return (default 20, max 200)\"}},"
+          + "\"limit\":{\"type\":\"integer\",\"description\":\"max messages to return (default 20, max 50)\"}},"
           + "\"required\":[\"sessionId\"]}");
 
     private SessionsHistoryTool() {
@@ -42,8 +48,16 @@ public final class SessionsHistoryTool {
         }
         StringBuilder out = new StringBuilder("History of session '").append(sessionId).append("':");
         for (SessionMessage message : messages) {
-            out.append('\n').append(message.role()).append(": ").append(message.content());
+            out.append('\n').append(message.role()).append(": ").append(bounded(message.content()));
         }
         return out.toString();
+    }
+
+    /** Truncate one transcript segment to {@link #MAX_CONTENT_CHARS}, marking the cut (D5). */
+    static String bounded(String content) {
+        if (content == null || content.length() <= MAX_CONTENT_CHARS) {
+            return content;
+        }
+        return content.substring(0, MAX_CONTENT_CHARS) + TRUNCATION_MARKER;
     }
 }

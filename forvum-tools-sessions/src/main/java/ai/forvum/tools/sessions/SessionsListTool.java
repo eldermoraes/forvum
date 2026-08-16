@@ -16,6 +16,9 @@ import java.util.List;
  */
 public final class SessionsListTool {
 
+    /** D5 output bound (#189 audit): at most this many sessions re-enter the context window. */
+    static final int MAX_SESSIONS = 50;
+
     public static final ToolSpec SPEC = new ToolSpec(
             "sessions.list",
             "List the conversation sessions visible to the current user, most recently active first. "
@@ -32,12 +35,17 @@ public final class SessionsListTool {
             return "No sessions are visible to you.";
         }
         StringBuilder out = new StringBuilder("Visible sessions:");
-        for (SessionSummary session : visible) {
+        int shown = Math.min(visible.size(), MAX_SESSIONS);
+        for (SessionSummary session : visible.subList(0, shown)) {
             out.append("\n- ").append(session.id())
                .append(" (agent=").append(session.agentId())
                .append(", channel=").append(session.channelId())
                .append(", lastSeen=").append(Instant.ofEpochMilli(session.lastSeenAt()))
                .append(')');
+        }
+        if (visible.size() > shown) {
+            out.append("\n[").append(visible.size() - shown)
+               .append(" older sessions omitted — the list is capped at ").append(MAX_SESSIONS).append(']');
         }
         return out.toString();
     }

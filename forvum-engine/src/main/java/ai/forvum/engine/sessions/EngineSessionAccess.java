@@ -2,21 +2,27 @@ package ai.forvum.engine.sessions;
 
 import ai.forvum.core.BlockType;
 import ai.forvum.core.ChannelMessage;
+import ai.forvum.core.PermissionScope;
 import ai.forvum.core.event.AgentEvent;
 import ai.forvum.core.event.Done;
 import ai.forvum.core.event.ErrorEvent;
 import ai.forvum.engine.agent.IdentityResolver;
 import ai.forvum.engine.config.AgentReader;
+import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.persistence.MessageEntity;
 import ai.forvum.engine.persistence.SessionEntity;
+import ai.forvum.sdk.ApprovalContext;
 import ai.forvum.sdk.ChannelTurnDriver;
 import ai.forvum.sdk.SessionAccess;
 import ai.forvum.sdk.SessionMessage;
 import ai.forvum.sdk.SessionSummary;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
+
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import org.jboss.logging.Logger;
 
@@ -24,6 +30,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The engine implementation of the #189 {@link SessionAccess} seam — the backend for the model-callable
@@ -45,15 +52,28 @@ import java.util.Optional;
  * <p><b>Fail-closed identity scoping</b> (#170/#167): the caller's identity is the #53
  * {@code CURRENT_IDENTITY_ID} tenant binding — bound at every production turn entry. Unbound (a
  * non-turn caller) or the restricted {@link IdentityResolver#ANONYMOUS_IDENTITY} sees NOTHING. The
- * single-user {@link CurrentIdentity#DEFAULT_IDENTITY} tenant (what every turn binds while
- * {@code forvum.multi-user.enabled=false} — the documented namespace collapse) sees every session: one
- * operator, one namespace, identical to the {@code AgentMemory} posture. Any other bound identity (the
- * multi-user path) sees only sessions whose {@code sessions.identity_id} matches. An invisible session
- * and a nonexistent one produce the SAME diagnostic, so the seam is not a cross-tenant existence oracle.
+ * single-user namespace collapse sees every session — but ONLY while {@code forvum.multi-user.enabled}
+ * is off (#189 audit: the god-view is gated on the TOGGLE, not on the {@code "default"} identity NAME,
+ * so in a multi-user deployment a caller who resolves to the literal {@code default} identity is an
+ * ordinary tenant, not an omniscient one). With multi-user on, EVERY identity — {@code default}
+ * included — sees only sessions whose {@code sessions.identity_id} matches. An invisible session and a
+ * nonexistent one produce the SAME diagnostic, so the seam is not a cross-tenant existence oracle.
  *
  * <p><b>Delivery-loop guard:</b> {@code send} dispatches synchronously on the calling virtual thread, so
  * a target turn that itself calls {@code sessions.send} would recurse unboundedly (two sessions
- * ping-ponging). A {@link ScopedValue} latch bound around the nested dispatch refuses a re-entrant send.
+ * ping-ponging). A {@link ScopedValue} latch bound around the nested dispatch refuses a re-entrant send,
+ * and a send targeting the CALLING turn's own session ({@link CurrentAgent#CURRENT_SESSION_ID}) is
+ * refused outright (#189 audit).
+ *
+ * <p><b>Relay hardening (#189 audit):</b> the nested dispatch (a) re-binds the calling turn's
+ * {@code CURRENT_EFFECTIVE_SCOPES} as {@link CurrentIdentity#INHERITED_SCOPE_CAP} so the target turn
+ * runs under {@code its scopes ∩ the relayer's} — the #166 device cap survives the relay; (b) binds
+ * {@link ApprovalContext#NON_INTERACTIVE} — a relayed turn has no approval surface, so a
+ * confirm-required tool denies at once instead of parking forever (D6.5); and (c) prefixes the
+ * delivered content with a provenance marker so the target transcript records the message as relayed,
+ * not as the target user speaking (D6.6). Every seam method activates its own request context
+ * ({@code @ActivateRequestContext}) so a cron/one-shot caller with no ambient request scope does not
+ * die with {@code ContextNotActiveException} (the PanachePlanStore pattern).
  */
 @ApplicationScoped
 public class EngineSessionAccess implements SessionAccess {
@@ -69,7 +89,13 @@ public class EngineSessionAccess implements SessionAccess {
     @Inject
     ChannelTurnDriver turns;
 
+    /** #53/#189: the god-view collapse applies only while multi-user is OFF (gated on the toggle). */
+    @Inject
+    @ConfigProperty(name = "forvum.multi-user.enabled", defaultValue = "false")
+    boolean multiUserEnabled;
+
     @Override
+    @ActivateRequestContext
     public List<String> agentIds() {
         if (callerIdentity().isEmpty()) {
             return List.of();
@@ -78,6 +104,7 @@ public class EngineSessionAccess implements SessionAccess {
     }
 
     @Override
+    @ActivateRequestContext
     public List<SessionSummary> sessions() {
         Optional<String> caller = callerIdentity();
         if (caller.isEmpty()) {
@@ -92,6 +119,7 @@ public class EngineSessionAccess implements SessionAccess {
     }
 
     @Override
+    @ActivateRequestContext
     public List<SessionMessage> history(String sessionId, int limit) {
         SessionEntity target = visibleOrThrow(sessionId);
         int bounded = Math.max(1, limit);
@@ -111,12 +139,19 @@ public class EngineSessionAccess implements SessionAccess {
     }
 
     @Override
+    @ActivateRequestContext
     public String send(String sessionId, String message) {
         SessionEntity target = visibleOrThrow(sessionId);
         if (IN_SEND.isBound()) {
             throw new IllegalStateException(
                     "sessions.send cannot be called from a turn that is itself a sessions.send delivery — "
                   + "refusing a delivery loop between sessions.");
+        }
+        if (CurrentAgent.CURRENT_SESSION_ID.isBound()
+                && CurrentAgent.CURRENT_SESSION_ID.get().equals(target.id)) {
+            throw new IllegalStateException(
+                    "sessions.send cannot target the calling turn's own session '" + sessionId
+                  + "' — refusing a self-delivery loop.");
         }
         // The engine keys channel sessions 'channelId:nativeUserId' (TurnService.dispatch); a session
         // whose id does not embed its own channel (an internal-path row) has no dispatchable address.
@@ -126,11 +161,7 @@ public class EngineSessionAccess implements SessionAccess {
                     "Session '" + sessionId + "' is not addressable for delivery: only channel sessions "
                   + "(keyed channelId:nativeUserId) accept sessions.send.");
         }
-        String nativeUserId = target.id.substring(prefix.length());
-        ChannelMessage delivery = new ChannelMessage(target.channelId, nativeUserId, message, Instant.now());
-
-        List<AgentEvent> events = new ArrayList<>();
-        ScopedValue.where(IN_SEND, Boolean.TRUE).run(() -> turns.dispatch(delivery, events::add));
+        List<AgentEvent> events = dispatchRelayed(target, message);
 
         for (AgentEvent event : events) {
             if (event instanceof Done done) {
@@ -145,6 +176,38 @@ public class EngineSessionAccess implements SessionAccess {
         }
         throw new IllegalStateException(
                 "Delivery into session '" + sessionId + "' produced no terminal event.");
+    }
+
+    /**
+     * Dispatch the relayed turn into {@code target} with the #189 audit bindings: the loop latch, the
+     * caller's effective scopes as the {@link CurrentIdentity#INHERITED_SCOPE_CAP} (when the calling turn
+     * bound any — a non-turn caller inherits no cap), {@link ApprovalContext#NON_INTERACTIVE} (a relayed
+     * turn has no approval surface), and the provenance-prefixed content. Package-private seam so the
+     * binding contract is unit-testable with a stub {@link ChannelTurnDriver} and a hand-built
+     * {@link SessionEntity} — no container, no DB.
+     */
+    List<AgentEvent> dispatchRelayed(SessionEntity target, String message) {
+        String nativeUserId = target.id.substring(target.channelId.length() + 1);
+        ChannelMessage delivery = new ChannelMessage(
+                target.channelId, nativeUserId, provenancePrefixed(message), Instant.now());
+
+        var carrier = ScopedValue.where(IN_SEND, Boolean.TRUE)
+                .where(ApprovalContext.NON_INTERACTIVE, Boolean.TRUE);
+        if (CurrentIdentity.CURRENT_EFFECTIVE_SCOPES.isBound()) {
+            Set<PermissionScope> callerScopes = CurrentIdentity.CURRENT_EFFECTIVE_SCOPES.get();
+            carrier = carrier.where(CurrentIdentity.INHERITED_SCOPE_CAP, callerScopes);
+        }
+        List<AgentEvent> events = new ArrayList<>();
+        carrier.run(() -> turns.dispatch(delivery, events::add));
+        return events;
+    }
+
+    /** The D6.6 provenance marker: the target transcript must record a relayed message as relayed. */
+    private static String provenancePrefixed(String message) {
+        String origin = CurrentAgent.CURRENT_SESSION_ID.isBound()
+                ? " from session '" + CurrentAgent.CURRENT_SESSION_ID.get() + "'"
+                : "";
+        return "[relayed via sessions.send" + origin + "] " + message;
     }
 
     /**
@@ -163,7 +226,7 @@ public class EngineSessionAccess implements SessionAccess {
     }
 
     private List<SessionEntity> visibleRows(String caller) {
-        if (CurrentIdentity.DEFAULT_IDENTITY.equals(caller)) {
+        if (!multiUserEnabled && CurrentIdentity.DEFAULT_IDENTITY.equals(caller)) {
             return SessionEntity.list("order by lastSeenAt desc, id");
         }
         return SessionEntity.list("identityId = ?1 order by lastSeenAt desc, id", caller);
@@ -173,9 +236,8 @@ public class EngineSessionAccess implements SessionAccess {
     private SessionEntity visibleOrThrow(String sessionId) {
         Optional<String> caller = callerIdentity();
         SessionEntity target = caller.isEmpty() ? null : SessionEntity.findById(sessionId);
-        if (target == null
-                || (!CurrentIdentity.DEFAULT_IDENTITY.equals(caller.get())
-                        && !caller.get().equals(target.identityId))) {
+        boolean godView = !multiUserEnabled && CurrentIdentity.DEFAULT_IDENTITY.equals(caller.orElse(null));
+        if (target == null || (!godView && !caller.get().equals(target.identityId))) {
             throw new IllegalArgumentException(
                     "No session '" + sessionId + "' is visible to the caller. Use sessions.list to see "
                   + "the sessions you can access.");

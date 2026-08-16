@@ -325,3 +325,25 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   accurately. GitHub-side settings (secret scanning, push protection, Dependabot alerts/updates) are `gh api`
   PATCHes — half the acceptance criteria live in repo settings, not YAML. [#174]
 
+
+## [#189-audit] A nested/relayed dispatch must re-bind the caller's authority as an inherited cap, never re-derive it fresh
+
+`sessions.send` dispatches a brand-new turn into the target session through the same
+`ChannelTurnDriver` every channel drives. That "same path" property is exactly the vulnerability: the
+nested turn RE-RESOLVES its scopes from the target session's identity, silently dropping every cap the
+CALLING turn ran under — most concretely the #166 device `approvedScopes` intersection (a paired device
+approved only for `SESSION_WRITE` could relay into another session whose turn then re-derives the full
+caller/agent scope set). The remediation pattern: the relaying seam re-binds the caller's
+`CURRENT_EFFECTIVE_SCOPES` as a dedicated `INHERITED_SCOPE_CAP` ScopedValue around the nested dispatch,
+and `TurnService` INTERSECTS it after its own resolution — the cap can only restrict (#167), unbound is
+a no-op, and an empty caller set relays an empty set (never fail-open). Companion hardening the same
+audit surfaced: (1) gate a single-user god-view on the TOGGLE (`!multi-user.enabled`), never on the
+identity NAME `"default"` — in a multi-user deployment the literal name must be an ordinary tenant;
+(2) a seam whose methods Panache-query must carry `@ActivateRequestContext` per method (the
+PanachePlanStore pattern) or any cron/one-shot virtual-thread caller dies with
+`ContextNotActiveException`; (3) bind `NON_INTERACTIVE` around a relayed turn (no approval surface —
+a confirm-required tool must deny, not park forever) and prefix relayed content with a provenance
+marker so the target transcript never records the relay as the target user speaking; (4) refuse a
+self-send via a `CURRENT_SESSION_ID` binding at turn entry — the loop latch alone does not catch a turn
+relaying into its own session. Test the binding contract with a recording stub driver that captures
+what is bound INSIDE the nested dispatch (`assertSame`/equality on the cap), not by booting two turns.

@@ -555,6 +555,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [#166] A prior seam often names its successor; read the javadoc before inventing → docs/lessons/security.md
 - [#172] Sanitize a channel-visible failure at its one construction seam; genericize untrusted text → docs/lessons/security.md
 - [#174] CI security gates: placement, canary PRs both directions, four pin-the-pin traps → docs/lessons/security.md
+- [#189-audit] A relayed dispatch re-binds caller authority as an inherited cap; gate god-views on the toggle, not the name → docs/lessons/security.md
 
 ### Testing & CI — `docs/lessons/testing-ci.md`
 - [M4] Make fixtures exercise the absent/created-later state, not the happy pre-populated one → docs/lessons/testing-ci.md

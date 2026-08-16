@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.persistence.MessageEntity;
 import ai.forvum.engine.persistence.SessionEntity;
@@ -27,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -182,6 +184,9 @@ class EngineSessionAccessIT {
         assertTrue(rows.stream().anyMatch(m -> "user".equals(m.role)
                         && m.content.contains("ping from another session")),
                 "the delivered message is appended to the target transcript as a user message");
+        assertTrue(rows.stream().anyMatch(m -> "user".equals(m.role)
+                        && m.content.startsWith("[relayed via sessions.send")),
+                "the persisted message carries the D6.6 provenance prefix — recorded as relayed");
         assertTrue(rows.stream().anyMatch(m -> "assistant".equals(m.role) && "pong".equals(m.content)),
                 "the target agent's reply is appended to the target transcript");
     }
@@ -206,6 +211,52 @@ class EngineSessionAccessIT {
         assertThrows(IllegalArgumentException.class,
                 () -> as("anonymous", () -> access.send("web:sess-a", "hi")),
                 "the unresolved anonymous identity cannot deliver anywhere (fail closed)");
+    }
+
+    @Test
+    void sendIntoTheCallingTurnsOwnSessionIsRefused() {
+        // #189 audit: a turn relaying into ITS OWN session would recurse through the very transcript it
+        // is appending to. CURRENT_SESSION_ID (bound by TurnService at every channel turn entry) is the
+        // self-address; the seam refuses it before any turn runs.
+        seedSession("web:sess-a", "alice", "web", 10L);
+
+        IllegalStateException refused = assertThrows(IllegalStateException.class,
+                () -> ScopedValue.where(CurrentIdentity.CURRENT_IDENTITY_ID, "alice")
+                        .where(CurrentAgent.CURRENT_SESSION_ID, "web:sess-a")
+                        .call(() -> access.send("web:sess-a", "echo to myself")));
+        assertTrue(refused.getMessage().contains("own session"), "the diagnostic names the self-send rule");
+        assertEquals(0L, MessageEntity.count("sessionId = ?1", "web:sess-a"),
+                "the refused self-send ran no turn");
+    }
+
+    @Test
+    void seamMethodsActivateTheirOwnRequestContextOnANonRequestThread() throws Exception {
+        // #189 audit: a cron/one-shot caller runs on a virtual thread with NO ambient request context.
+        // Every seam method must @ActivateRequestContext itself or Panache dies with
+        // ContextNotActiveException. ScopedValue does not inherit across threads, so the identity is
+        // bound INSIDE the fresh thread — exactly the cron shape.
+        seedSession("web:sess-a", "alice", "web", 10L);
+        seedMessage("web:sess-a", "user", "hello");
+
+        AtomicReference<Object> outcome = new AtomicReference<>();
+        Thread cronLike = Thread.startVirtualThread(() -> {
+            try {
+                List<SessionSummary> sessions = as("alice", access::sessions);
+                List<SessionMessage> history = as("alice", () -> access.history("web:sess-a", 10));
+                outcome.set(List.of(sessions, history));
+            } catch (RuntimeException e) {
+                outcome.set(e);
+            }
+        });
+        cronLike.join();
+
+        if (outcome.get() instanceof RuntimeException failure) {
+            throw failure;
+        }
+        @SuppressWarnings("unchecked")
+        List<List<?>> results = (List<List<?>>) outcome.get();
+        assertEquals(1, results.get(0).size(), "sessions.list works without an ambient request context");
+        assertEquals(1, results.get(1).size(), "sessions.history works without an ambient request context");
     }
 
     @Test
