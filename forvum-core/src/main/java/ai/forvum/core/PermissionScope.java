@@ -128,7 +128,18 @@ public enum PermissionScope {
      * channel push. The permissive {@code default-user} role ({@code EnumSet.allOf}) includes it;
      * {@code anonymous} ({@code EnumSet.noneOf}) does not.
      */
-    SESSION_WRITE;
+    SESSION_WRITE,
+    /**
+     * Authority to generate media via {@code image.generate} / {@code video.generate} /
+     * {@code music.generate} (#187, {@code forvum-tools-media-gen}) — turning a prompt into a media
+     * asset written under the workspace through the {@code GenerationProvider} SPI. ONE scope gates all
+     * three tools: they share the prompt-to-asset shape and their only external effect is a generation
+     * backend spend plus a workspace write. Distinct from {@link #MEDIA_SYNTHESIZE} (local speech
+     * synthesis via an operator-installed subprocess) and {@link #FS_WRITE} so a role can grant
+     * filesystem write without granting a generation-backend call. The permissive {@code default-user}
+     * role ({@code EnumSet.allOf}) includes it; {@code anonymous} ({@code EnumSet.noneOf}) does not.
+     */
+    MEDIA_GENERATE;
 
     /**
      * Parses a string into a {@code PermissionScope}, throwing a contextual

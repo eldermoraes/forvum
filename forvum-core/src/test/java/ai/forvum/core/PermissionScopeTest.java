@@ -14,8 +14,9 @@ class PermissionScopeTest {
         // (PR-6 preamble for #27/#26/forvum-tools-web) + MEMORY_READ, MEMORY_WRITE (#193 memory tool)
         // + MEDIA_SYNTHESIZE (#186 tts.speak tool) + MEDIA_ANALYZE (#185 image.analyze/pdf.analyze tools)
         // + SKILL_INVOKE (#191 skill.invoke/skill.list tools) + CHANNEL_SEND (#188 message.send tool)
-        // + SESSION_READ, SESSION_WRITE (#189 sessions/agents introspection tools).
-        assertEquals(15, PermissionScope.values().length);
+        // + SESSION_READ, SESSION_WRITE (#189 sessions/agents introspection tools)
+        // + MEDIA_GENERATE (#187 image.generate/video.generate/music.generate tools).
+        assertEquals(16, PermissionScope.values().length);
         assertEquals(PermissionScope.FS_READ, PermissionScope.valueOf("FS_READ"));
         assertEquals(PermissionScope.FS_WRITE, PermissionScope.valueOf("FS_WRITE"));
         assertEquals(PermissionScope.MCP_REMOTE, PermissionScope.valueOf("MCP_REMOTE"));
@@ -31,6 +32,7 @@ class PermissionScopeTest {
         assertEquals(PermissionScope.CHANNEL_SEND, PermissionScope.valueOf("CHANNEL_SEND"));
         assertEquals(PermissionScope.SESSION_READ, PermissionScope.valueOf("SESSION_READ"));
         assertEquals(PermissionScope.SESSION_WRITE, PermissionScope.valueOf("SESSION_WRITE"));
+        assertEquals(PermissionScope.MEDIA_GENERATE, PermissionScope.valueOf("MEDIA_GENERATE"));
     }
 
     @Test
@@ -59,6 +61,8 @@ class PermissionScopeTest {
                 "SESSION_READ (#189) round-trips — agents.list/sessions.list/sessions.history carry it");
         assertEquals(PermissionScope.SESSION_WRITE, PermissionScope.fromName("SESSION_WRITE"),
                 "SESSION_WRITE (#189) round-trips — sessions.send carries it");
+        assertEquals(PermissionScope.MEDIA_GENERATE, PermissionScope.fromName("MEDIA_GENERATE"),
+                "MEDIA_GENERATE (#187) round-trips — image.generate/video.generate/music.generate carry it");
     }
 
     @Test

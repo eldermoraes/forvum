@@ -137,6 +137,14 @@ class MemoryPolicyPropertyTest {
         assertTrue(p.tiers().isEmpty());
     }
 
+    /** ITERATIVE (#196) is a valid OPT-IN strategy; the default stays single-shot HYBRID. */
+    @Test
+    void iterativeIsAValidOptInStrategyAndTheDefaultStaysSingleShot() {
+        MemoryPolicy p = new MemoryPolicy(RetrievalStrategy.ITERATIVE, all(), 8, 0.0, 8000);
+        assertSame(RetrievalStrategy.ITERATIVE, p.strategy());
+        assertSame(RetrievalStrategy.HYBRID, MemoryPolicy.defaults().strategy());
+    }
+
     private static Set<MemoryTier> all() {
         return EnumSet.allOf(MemoryTier.class);
     }

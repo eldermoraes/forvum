@@ -266,7 +266,9 @@ public class SupervisorGraph {
      * The Context-Engineering Select pillar's read step (DR-5): retrieve memory relevant to the turn's
      * user message ONCE at turn entry (not per generate round) and frame it as a {@code <retrieved_memory>}
      * DATA block inserted just before the user's question (DR-6a §9 — never spliced into the
-     * system/instruction region). Returns the seeded messages unchanged — retrieval disabled — when the
+     * system/instruction region). Under {@link RetrievalStrategy#ITERATIVE} (#196) the single-shot
+     * retrieve is replaced by the bounded {@link IterativeRetrieval} loop — same entry point, same
+     * compression + DATA framing on what crosses back. Returns the seeded messages unchanged — retrieval disabled — when the
      * policy is null / {@code NONE}, no selector/provider is available, the session or query text is blank,
      * or retrieval yields nothing. The returned list is always a fresh mutable copy ({@link Turn} mutates
      * it across rounds).
@@ -289,8 +291,14 @@ public class SupervisorGraph {
         if (queryText == null || queryText.isBlank() || sessionId == null || sessionId.isBlank()) {
             return messages;
         }
-        List<MemoryHit> hits = memorySelector.retrieve(
-                new MemoryQuery(request.agentId().value(), sessionId, queryText), policy);
+        List<MemoryHit> hits = policy.strategy() == RetrievalStrategy.ITERATIVE
+                // #196 agentic RAG (OPT-IN): a bounded retrieve → evaluate → re-query loop run as an
+                // isolated memory sub-agent on the turn's model; only the accumulated hits cross back
+                // (then compressed + DATA-framed below, exactly like the single-shot path).
+                ? IterativeRetrieval.retrieve(request.model(), memorySelector,
+                        new MemoryQuery(request.agentId().value(), sessionId, queryText), policy)
+                : memorySelector.retrieve(
+                        new MemoryQuery(request.agentId().value(), sessionId, queryText), policy);
         String block = RetrievedMemory.frame(compressHits(hits, policy.compressThresholdChars()));
         if (block != null) {
             // Insert as a user-role DATA message immediately before the user's question (context → question).
