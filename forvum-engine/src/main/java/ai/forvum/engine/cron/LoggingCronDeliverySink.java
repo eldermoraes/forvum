@@ -1,17 +1,22 @@
 package ai.forvum.engine.cron;
 
+import io.quarkus.arc.DefaultBean;
+
 import jakarta.enterprise.context.ApplicationScoped;
 
 import org.jboss.logging.Logger;
 
 /**
- * The default {@link CronDeliverySink}: it logs the delivered reply and its resolved target (P2-CRON-
- * DELIVERY). Because the channel SPI carries no outbound send surface (see {@link CronDeliverySink}),
- * v0.5 surfaces a cron's {@code last}/{@code explicit-to} output through the ledger + this log line
- * rather than pushing it into a live channel session. A later outbound channel-send capability replaces
- * this default without touching the cron contract.
+ * The fallback {@link CronDeliverySink}: it logs the delivered reply and its resolved target (P2-CRON-
+ * DELIVERY). Since #188 the primary sink is {@link ChannelSendCronDeliverySink}, which pushes the reply
+ * into a live channel through the SDK {@code ChannelSender} SPI and delegates here when no sender is
+ * installed/configured for the resolved channel — so a cron's {@code last}/{@code explicit-to} output is
+ * always at least surfaced through the ledger + this log line. {@code @DefaultBean} keeps this bean
+ * injectable by its concrete type (the fallback seam) while the channel-backed sink wins the
+ * {@code CronDeliverySink} injection point.
  */
 @ApplicationScoped
+@DefaultBean
 public class LoggingCronDeliverySink implements CronDeliverySink {
 
     private static final Logger LOG = Logger.getLogger(LoggingCronDeliverySink.class);

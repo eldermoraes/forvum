@@ -108,7 +108,12 @@ public class TelegramChannelConfig {
                 allowed.add(id.asLong());
             }
         }
-        return new Spec(enabled, token, Set.copyOf(allowed), allowAllUsers);
+
+        JsonNode defaultChatNode = root.get("defaultChatId");
+        Optional<Long> defaultChatId = defaultChatNode == null || !defaultChatNode.canConvertToLong()
+                ? Optional.empty()
+                : Optional.of(defaultChatNode.asLong());
+        return new Spec(enabled, token, Set.copyOf(allowed), allowAllUsers, defaultChatId);
     }
 
     /**
@@ -122,12 +127,23 @@ public class TelegramChannelConfig {
      *                       RESTRICTS to exactly those ids.
      * @param allowAllUsers  the explicit public-mode opt-in: when {@code allowedUserIds} is empty, admit
      *                       ANY user (restores the pre-#170 wide-open behavior, conspicuously).
+     * @param defaultChatId  the chat id an engine-originated outbound send targets when the caller names
+     *                       no explicit target (#188 {@code ChannelSender}); absent when unset.
      */
     public record Spec(boolean enabled, Optional<String> botToken, Set<Long> allowedUserIds,
-                       boolean allowAllUsers) {
+                       boolean allowAllUsers, Optional<Long> defaultChatId) {
+
+        /**
+         * Backward-compatible constructor for a spec with no {@code defaultChatId} (every pre-#188 call
+         * site), delegating to the canonical constructor with {@link Optional#empty()}.
+         */
+        public Spec(boolean enabled, Optional<String> botToken, Set<Long> allowedUserIds,
+                    boolean allowAllUsers) {
+            this(enabled, botToken, allowedUserIds, allowAllUsers, Optional.empty());
+        }
 
         static Spec empty() {
-            return new Spec(false, Optional.empty(), Set.of(), false);
+            return new Spec(false, Optional.empty(), Set.of(), false, Optional.empty());
         }
 
         /**

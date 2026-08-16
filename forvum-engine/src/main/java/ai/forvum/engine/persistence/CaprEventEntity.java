@@ -37,6 +37,18 @@ public class CaprEventEntity extends PanacheEntityBase {
     @Column(name = "judge_model", nullable = false)
     public String judgeModel;
 
+    /**
+     * The model that answered the turn, in the {@code ModelRef} canonical {@code provider:model} form
+     * (#195). NULL on rows written with the judge disabled or unavailable — only a genuinely judged
+     * verdict is attributed to a model, so {@code ModelHealthReader} never tallies a placeholder row.
+     */
+    @Column(name = "model")
+    public String model;
+
+    /** The normalized {@code [0,1]} verdict score (#195). NULL when the judge was disabled/unavailable. */
+    @Column(name = "score")
+    public Double score;
+
     @Column(name = "rationale")
     public String rationale;
 

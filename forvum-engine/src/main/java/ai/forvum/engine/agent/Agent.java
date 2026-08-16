@@ -5,13 +5,13 @@ import ai.forvum.core.Persona;
 import ai.forvum.core.RetrievalStrategy;
 import ai.forvum.core.ToolSpec;
 import ai.forvum.core.id.AgentId;
+import ai.forvum.engine.capr.TurnJudge;
 import ai.forvum.engine.context.CurrentAgent;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.graph.GraphTurnRequest;
 import ai.forvum.engine.graph.ReplayContext;
 import ai.forvum.engine.graph.SupervisorGraph;
 import ai.forvum.engine.memory.MemoryWriter;
-import ai.forvum.engine.persistence.CaprRecorder;
 import ai.forvum.engine.routing.LlmSelector;
 import ai.forvum.engine.tools.TurnToolBudget;
 
@@ -57,7 +57,7 @@ public class Agent {
     SupervisorGraph supervisorGraph;
 
     @Inject
-    CaprRecorder caprRecorder;
+    TurnJudge turnJudge;
 
     @Inject
     MemoryWriter memoryWriter;
@@ -131,7 +131,9 @@ public class Agent {
                         .call(() -> supervisorGraph.run(request));
 
         long turnId = memory.recordTurn(sessionId, userText, reply);
-        caprRecorder.recordPassed(sessionId, id.value(), turnId);
+        // #195: the per-turn CAPR verdict — the neutral synchronous recordPassed row when the judge is
+        // disabled (the default, behavior unchanged), or a real judged verdict written off-turn on a VT.
+        turnJudge.onTurnCompleted(sessionId, id.value(), turnId, userText, reply);
         // #175 Write phase: extract, filter, embed, and persist durable facts off-turn — ONLY for a real
         // interactive turn. Skip when memory is off for this agent (strategy NONE — retrieval already
         // honors it, so the write must too, a consent symmetry), when the turn is a REPLAY (re-run content

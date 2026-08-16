@@ -148,6 +148,13 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-multimodal</artifactId>
         </dependency>
+        <!-- Layer-3 Messaging tool (#188): contributes message.send (CHANNEL_SEND) to the ToolRegistry,
+             pushing an outbound text to a configured channel through the SDK ChannelSender SPI (Telegram
+             implements it); also backs cron last/explicit-to delivery. No AI library, no reflection. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-messaging</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>

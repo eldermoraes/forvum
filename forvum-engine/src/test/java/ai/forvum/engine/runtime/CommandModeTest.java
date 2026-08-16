@@ -37,6 +37,8 @@ class CommandModeTest {
                 "'provider add' stores a 0600 key + runs a DB-free smoke chat — it must skip the DB/watcher/cron boot (P2-10)");
         assertTrue(CommandMode.isOneShotCommand(new String[] {"tools"}),
                 "'tools' lists registered tools without connecting — it must skip the DB/watcher/cron boot (#184)");
+        assertTrue(CommandMode.isOneShotCommand(new String[] {"onboard"}),
+                "'onboard' writes config files + runs a DB-free key smoke — it must skip the DB/watcher/cron boot (#194)");
     }
 
     @Test

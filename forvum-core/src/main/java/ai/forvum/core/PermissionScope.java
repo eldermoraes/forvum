@@ -99,7 +99,16 @@ public enum PermissionScope {
      * ({@code EnumSet.of(FS_READ)}) and {@code anonymous} ({@code EnumSet.noneOf}) do not — an operator
      * grants it to a restricted role via {@code roles/<name>.json}.
      */
-    SKILL_INVOKE;
+    SKILL_INVOKE,
+    /**
+     * Authority to push an outbound message to a configured channel via {@code message.send} (#188,
+     * {@code forvum-tools-messaging}) — the first engine-to-channel push capability, backed by the
+     * {@code ChannelSender} SPI a channel plugin implements. Distinct from every other scope because its
+     * external effect is a message delivered to a human surface (a Telegram chat, ...), so a restricted
+     * role can withhold it while keeping read/compute tools. The permissive {@code default-user} role
+     * ({@code EnumSet.allOf}) includes it; {@code anonymous} ({@code EnumSet.noneOf}) does not.
+     */
+    CHANNEL_SEND;
 
     /**
      * Parses a string into a {@code PermissionScope}, throwing a contextual

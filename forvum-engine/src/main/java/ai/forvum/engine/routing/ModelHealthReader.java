@@ -21,13 +21,12 @@ import java.util.Map;
  * {@code window} rows for each {@code (provider, model)} pair (scoped to {@code agentId}), it tallies
  * attempts and failures into a {@link ModelHealth} the {@link CaprRouter} blends into a routing order.
  *
- * <p><b>Why {@code provider_calls} and not {@code capr_events}.</b> The {@code capr_events} table records
- * a per-turn verdict keyed to {@code agent_id} + {@code turn_id} (the assistant {@code messages.id}) but
- * carries NO model column, and in v0.1 every row is a placeholder {@code passed=1} / {@code judge_model
- * ="none"} — it cannot attribute a pass/fail to a specific model. {@code provider_calls} is per-model,
- * already populated by the live fallback path, and recency-orderable, so it is the operative "pass rate
- * per model" signal until a real judge model lands and a model column is added to {@code capr_events}
- * (a documented fast-follow — see ULTRAPLAN §7.3 item 4).
+ * <p><b>Both ledgers feed the tally (#195).</b> {@code provider_calls} is the call-health signal (did the
+ * model answer at all); {@code capr_events} rows carrying a non-null {@code model} column are genuine
+ * per-turn judge verdicts written by {@code TurnJudge} — the answer-quality signal ({@code passed=0} is a
+ * failed verdict). Each model's snapshot merges the most recent {@code window} rows of each, so routing
+ * demotes a model whose replies FAIL the judge even when its calls succeed. Placeholder rows (judge
+ * disabled/unavailable — {@code model IS NULL}) and archived rows are never tallied.
  */
 @ApplicationScoped
 public class ModelHealthReader {
@@ -59,8 +58,10 @@ public class ModelHealthReader {
     }
 
     /**
-     * Tally the most recent {@link #window} {@code provider_calls} rows for one {@code (provider, model)}
-     * under {@code agentId}, newest first. Returns {@code null} when the model has no recorded call.
+     * Tally the most recent {@link #window} {@code provider_calls} rows (call health) plus the most
+     * recent {@link #window} judged {@code capr_events} verdicts (#195, answer quality) for one
+     * {@code (provider, model)} under {@code agentId}, newest first. Returns {@code null} when the model
+     * has no recorded call and no judged verdict.
      */
     private ModelHealth healthFor(String agentId, ModelRef ref) {
         @SuppressWarnings("unchecked")
@@ -73,13 +74,28 @@ public class ModelHealthReader {
                 .setParameter("model", ref.model())
                 .setParameter("window", window)
                 .getResultList();
-        if (errors.isEmpty()) {
+        // Only genuinely judged verdicts carry a non-null model column; placeholder rows never tally.
+        @SuppressWarnings("unchecked")
+        List<Object> verdicts = em.createNativeQuery(
+                "select passed from capr_events "
+              + "where agent_id = :agentId and model = :model and is_archived = 0 "
+              + "order by id desc limit :window")
+                .setParameter("agentId", agentId)
+                .setParameter("model", ref.toString())
+                .setParameter("window", window)
+                .getResultList();
+        if (errors.isEmpty() && verdicts.isEmpty()) {
             return null;
         }
-        int attempts = errors.size();
+        int attempts = errors.size() + verdicts.size();
         int failures = 0;
         for (Object error : errors) {
             if (error != null) {
+                failures++;
+            }
+        }
+        for (Object passed : verdicts) {
+            if (((Number) passed).intValue() == 0) {
                 failures++;
             }
         }
