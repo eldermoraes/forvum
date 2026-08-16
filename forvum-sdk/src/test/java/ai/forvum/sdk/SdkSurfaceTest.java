@@ -23,7 +23,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * Surface contract for the plugin SPI (ULTRAPLAN section 7.1, the M3 Verify). Asserts, via
  * reflection, that each provider interface is sealed and permits ONLY its {@code Abstract*} base —
  * so external code cannot implement the interface directly, it must extend the non-sealed base —
- * and that the base is genuinely extendable (public, non-private no-arg constructor). The four
+ * and that the base is genuinely extendable (public, non-private no-arg constructor). The five
  * pairs run as a parameterized test; the annotation markers are checked directly.
  */
 class SdkSurfaceTest {
@@ -33,7 +33,8 @@ class SdkSurfaceTest {
         ChannelProvider.class, AbstractChannelProvider.class,
         ModelProvider.class, AbstractModelProvider.class,
         ToolProvider.class, AbstractToolProvider.class,
-        MemoryProvider.class, AbstractMemoryProvider.class);
+        MemoryProvider.class, AbstractMemoryProvider.class,
+        GenerationProvider.class, AbstractGenerationProvider.class);
 
     static Stream<Class<?>> providerSpis() {
         return SPI_TO_BASE.keySet().stream();

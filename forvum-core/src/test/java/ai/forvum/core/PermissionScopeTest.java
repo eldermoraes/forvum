@@ -13,8 +13,10 @@ class PermissionScopeTest {
         // FS_READ, FS_WRITE (M2) + MCP_REMOTE (P2-13) + SHELL_EXEC, WEB_BROWSE, WEB_FETCH, WEB_SEARCH
         // (PR-6 preamble for #27/#26/forvum-tools-web) + MEMORY_READ, MEMORY_WRITE (#193 memory tool)
         // + MEDIA_SYNTHESIZE (#186 tts.speak tool) + MEDIA_ANALYZE (#185 image.analyze/pdf.analyze tools)
-        // + SKILL_INVOKE (#191 skill.invoke/skill.list tools).
-        assertEquals(12, PermissionScope.values().length);
+        // + SKILL_INVOKE (#191 skill.invoke/skill.list tools) + CHANNEL_SEND (#188 message.send tool)
+        // + SESSION_READ, SESSION_WRITE (#189 sessions/agents introspection tools)
+        // + MEDIA_GENERATE (#187 image.generate/video.generate/music.generate tools).
+        assertEquals(16, PermissionScope.values().length);
         assertEquals(PermissionScope.FS_READ, PermissionScope.valueOf("FS_READ"));
         assertEquals(PermissionScope.FS_WRITE, PermissionScope.valueOf("FS_WRITE"));
         assertEquals(PermissionScope.MCP_REMOTE, PermissionScope.valueOf("MCP_REMOTE"));
@@ -27,6 +29,10 @@ class PermissionScopeTest {
         assertEquals(PermissionScope.MEDIA_SYNTHESIZE, PermissionScope.valueOf("MEDIA_SYNTHESIZE"));
         assertEquals(PermissionScope.MEDIA_ANALYZE, PermissionScope.valueOf("MEDIA_ANALYZE"));
         assertEquals(PermissionScope.SKILL_INVOKE, PermissionScope.valueOf("SKILL_INVOKE"));
+        assertEquals(PermissionScope.CHANNEL_SEND, PermissionScope.valueOf("CHANNEL_SEND"));
+        assertEquals(PermissionScope.SESSION_READ, PermissionScope.valueOf("SESSION_READ"));
+        assertEquals(PermissionScope.SESSION_WRITE, PermissionScope.valueOf("SESSION_WRITE"));
+        assertEquals(PermissionScope.MEDIA_GENERATE, PermissionScope.valueOf("MEDIA_GENERATE"));
     }
 
     @Test
@@ -49,6 +55,14 @@ class PermissionScopeTest {
                 "MEDIA_ANALYZE (#185) round-trips — image.analyze/pdf.analyze carry it");
         assertEquals(PermissionScope.SKILL_INVOKE, PermissionScope.fromName("SKILL_INVOKE"),
                 "SKILL_INVOKE (#191) round-trips — skill.invoke/skill.list carry it");
+        assertEquals(PermissionScope.CHANNEL_SEND, PermissionScope.fromName("CHANNEL_SEND"),
+                "CHANNEL_SEND (#188) round-trips — message.send carries it");
+        assertEquals(PermissionScope.SESSION_READ, PermissionScope.fromName("SESSION_READ"),
+                "SESSION_READ (#189) round-trips — agents.list/sessions.list/sessions.history carry it");
+        assertEquals(PermissionScope.SESSION_WRITE, PermissionScope.fromName("SESSION_WRITE"),
+                "SESSION_WRITE (#189) round-trips — sessions.send carries it");
+        assertEquals(PermissionScope.MEDIA_GENERATE, PermissionScope.fromName("MEDIA_GENERATE"),
+                "MEDIA_GENERATE (#187) round-trips — image.generate/video.generate/music.generate carry it");
     }
 
     @Test

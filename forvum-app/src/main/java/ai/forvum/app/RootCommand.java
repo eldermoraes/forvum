@@ -33,7 +33,8 @@ import java.util.concurrent.Callable;
  * missing/failed scenario; {@code eval} runs a CAPR-gated evaluation suite and exits non-zero on a
  * regression below its floor; {@code memory query}/{@code memory search}/{@code memory reindex} query
  * the semantic-memory store (read-only SQL + vector nearest-neighbor over the SQLite store, P3-2);
- * {@code tools} lists every built-in tool with its scope, belt membership, and readiness (#184).
+ * {@code tools} lists every built-in tool with its scope, belt membership, and readiness (#184);
+ * {@code onboard} runs the interactive first-run onboarding wizard (#194).
  */
 @CommandLine.Command(
         name = "forvum",
@@ -43,7 +44,7 @@ import java.util.concurrent.Callable;
         subcommands = { InitCommand.class, AskCommand.class, DoctorCommand.class, SessionReplayCommand.class,
                 PluginCommand.class, SkillCommand.class, McpCommand.class, CopilotCommand.class,
                 PairCommand.class, DevicesCommand.class, ProviderCommand.class, QaCommand.class,
-                EvalCommand.class, MemoryCommand.class, ToolsCommand.class })
+                EvalCommand.class, MemoryCommand.class, ToolsCommand.class, OnboardCommand.class })
 public class RootCommand implements Callable<Integer> {
 
     static final String BANNER = "Forvum - local-first AI on the JVM";
@@ -60,14 +61,20 @@ public class RootCommand implements Callable<Integer> {
 
     /** Printed when no channel is configured, so a fresh install never exits silently. */
     static final String NO_CHANNEL_HINT =
-            "No channels are configured. Run `forvum init` to scaffold ~/.forvum with a starter"
-                    + " agent and TUI channel, then run `forvum` again.";
+            "No channels are configured. Run `forvum onboard` for a guided setup, or `forvum init`"
+                    + " to scaffold ~/.forvum with a starter agent and TUI channel, then run `forvum` again.";
+
+    /** The first-run offer shown on a real terminal before falling back to {@link #NO_CHANNEL_HINT}. */
+    static final String ONBOARD_OFFER = "No configuration found. Run the onboarding wizard now? [Y/n] ";
 
     @Inject
     ChannelLauncher channels;
 
     @Inject
     TuiChannel tui;
+
+    @Inject
+    OnboardCommand onboard;
 
     @Override
     public Integer call() {
@@ -87,6 +94,14 @@ public class RootCommand implements Callable<Integer> {
                 yield 0;
             }
             case NONE -> {
+                // First-run hook (#194): on a real terminal with nothing configured, OFFER the wizard.
+                // Piped / non-interactive runs keep today's hint and never block on stdin.
+                if (interactive) {
+                    java.io.Console console = System.console();
+                    if (acceptsOnboarding(console.readLine("%s", ONBOARD_OFFER))) {
+                        yield onboard.call();
+                    }
+                }
                 System.out.println(NO_CHANNEL_HINT);
                 yield 0;
             }
@@ -95,6 +110,19 @@ public class RootCommand implements Callable<Integer> {
 
     /** How a no-subcommand run launches. */
     enum LaunchMode { INTERACTIVE, SERVER, NONE }
+
+    /**
+     * Parse the first-run onboarding offer's answer (#194): Enter (empty) or {@code y}/{@code yes}
+     * accepts; EOF ({@code null}) or anything else declines, falling back to the {@code init} hint.
+     * Pure + side-effect-free so the hook's decision is unit-testable without a TTY.
+     */
+    static boolean acceptsOnboarding(String answer) {
+        if (answer == null) {
+            return false;
+        }
+        String normalized = answer.strip().toLowerCase(java.util.Locale.ROOT);
+        return normalized.isEmpty() || normalized.equals("y") || normalized.equals("yes");
+    }
 
     /**
      * Decide how a default (no-subcommand) run launches. A foreground TUI takes over only on a real

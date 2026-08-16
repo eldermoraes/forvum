@@ -34,7 +34,7 @@ class SchemaSmokeIT {
             "idx_sessions_identity", "idx_sessions_lastseen", "idx_messages_session", "idx_messages_agent",
             "idx_episodic_agent_session", "idx_semantic_agent", "idx_semantic_identity", "idx_tool_session",
             "idx_tool_agent", "idx_provider_session", "idx_provider_agent", "idx_provider_fallback",
-            "idx_capr_agent", "idx_tasks_agent", "idx_tasks_status", "idx_approvals_status",
+            "idx_capr_agent", "idx_capr_model", "idx_tasks_agent", "idx_tasks_status", "idx_approvals_status",
             "idx_approvals_session");
 
     @Inject
@@ -44,11 +44,12 @@ class SchemaSmokeIT {
     void flywayMigratedToHeadAndAllTablesExist() {
         // V1 baseline + V2__tasks.sql (P2-TASKLEDGER, the 'tasks' table) + V3__compaction.sql (P2-COMPACT,
         // the compaction columns) + V4__approvals.sql (P2-14 #39, the 'tool_approvals' queue) +
-        // V5__multi_user_isolation.sql (#53, semantic_memory identity_id), so the head version is now 5.
+        // V5__multi_user_isolation.sql (#53, semantic_memory identity_id) + V6__capr_judge.sql (#195,
+        // capr_events model/score columns), so the head version is now 6.
         Object version = em.createNativeQuery(
                 "select version from flyway_schema_history where success = 1 "
               + "order by installed_rank desc limit 1").getSingleResult();
-        assertEquals("5", String.valueOf(version), "Flyway must have migrated to the head version (V5)");
+        assertEquals("6", String.valueOf(version), "Flyway must have migrated to the head version (V6)");
 
         @SuppressWarnings("unchecked")
         List<String> tables = em.createNativeQuery(
@@ -139,6 +140,8 @@ class SchemaSmokeIT {
         capr.turnId = 1L;
         capr.passed = 1;
         capr.judgeModel = "judge";
+        capr.model = "ollama:qwen3:1.7b";
+        capr.score = 1.0;
         capr.createdAt = now;
         capr.persist();
 

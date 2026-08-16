@@ -146,7 +146,8 @@ re-sync via `gh issue list --state all`. `✓` = closed.)
   backlog now lives in the GitHub tracker, sequenced in **`docs/IMPLEMENTATION-ORDER.md`**. Newly-filed
   v1.0+ **context-engineering differentiators** (`docs/ULTRAPLAN.md` §7.3 addendum items 11–13, not part of
   P3-1…P3-10): real CAPR judge #195 · iterative/agentic RAG #196 (blocked on #175) · mid-turn context
-  pruning #197.
+  pruning #197 — all three have since shipped (see their §7.3 *Realized* notes and
+  `docs/IMPLEMENTATION-ORDER.md`).
 
 ---
 

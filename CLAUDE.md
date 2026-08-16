@@ -328,9 +328,19 @@ The default branch is `main` (not `master`); use `main` in commit/PR guidance.
 - **Test pyramid:** unit `*Test` → integration `*IT` (`@QuarkusTest`, real SQLite via `@TempDir`) → E2E
   under `forvum-app/.../e2e/` (ten scripts).
 - **Coverage gates (ENFORCED):** JaCoCo 80% line (parent) + 75% branch are wired into the build and gate
-  `./mvnw verify` per module (X3 / #69 — see the [X3] lesson below and `pom.xml`). The Pitest mutation
-  ramp in `forvum-core` (50% killed greenfield → 70% Phase 2) stays a signal, not a gate, until a baseline
-  exists. So: coverage is a hard gate; mutation thresholds remain signals.
+  `./mvnw verify` per module (X3 / #69 — see the [X3] lesson below and `pom.xml`). Substantive exclusions
+  were removed by #180: only structural entries remain (SDK `Abstract*` bridges; engine native-metadata
+  holders + Panache `*Entity` data classes), and every exclusion or lowered threshold must be a ratified
+  entry in `.github/coverage-allowlist.txt` — the `.github/coverage-policy.sh` CI gate fails an
+  unratified one (threshold exceptions are owner-tagged + expiry-bound). **Mutation testing is now a
+  GATE in `forvum-core`** (#182): the `-Pmutation` Pitest profile carries a measured-baseline ratchet
+  (baseline 97% killed / 97% test strength → enforced floor 95/95, direction-guarded by
+  coverage-policy.sh so it can only go up), run per-PR-on-core-change + weekly by
+  `.github/workflows/mutation.yml`. Other modules join in later phases.
+- **Security suite (#183):** the behavioral security regression tests under
+  `forvum-app/src/test/java/ai/forvum/security/` run as a NAMED, BLOCKING `security-suite` job in ci.yml
+  (with published surefire reports) in addition to the full `verify`; the native representative path is
+  the per-PR native ITs (e.g. `StatePermissionsNativeIT`).
 - **Property-style tests (JUnit 5) MANDATORY for parsers/records:** `ModelRef.parse` roundtrip,
   `AgentEvent` Jackson roundtrip, `CostBudget` invariants, `PermissionScope.fromName` failure modes.
   Expressed with `@ParameterizedTest` + `@EnumSource`/`@MethodSource` over curated edge cases plus
@@ -525,6 +535,7 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [#176] A compression-failure fallback must be bounded, reusing the existing threshold → docs/lessons/engine-graph.md
 - [#177] Retire ephemeral workers in run()'s finally; destroy the @AgentScoped context directly → docs/lessons/engine-graph.md
 - [#178] Atomic capability-safe hot-reload via an immutable per-turn lease, no refcount/drain → docs/lessons/engine-graph.md
+- [#190] A scope-less built-in beside spawn_worker is a four-touch graph recipe; plan lives in messages, not graph channels → docs/lessons/engine-graph.md
 
 ### Security & authorization — `docs/lessons/security.md`
 - [P2-11] A second authz gate sits at the CURRENT_AGENT ScopedValue seam, enforce-iff-bound → docs/lessons/security.md
@@ -557,6 +568,8 @@ an area, read that area's topic file.** When you add a lesson: append its verbat
 - [P2-2/#27] A parallel build-agent workflow must not pass -Djacoco.skip; the integrator pays coverage → docs/lessons/testing-ci.md
 - [#181] Scheduling the live layer = property-form excludedGroups sweep + preflight-secret-outputs skip + a skip-guard, not just a cron → docs/lessons/testing-ci.md
 - [#185] In forvum-app a @QuarkusTest turn test must be `*Test` (Surefire), never `*IT` — a `*IT` runs in Failsafe and its port-8081 boot collides with the native-binary ITs → docs/lessons/testing-ci.md
+- [#180] JaCoCo mis-attributes Panache callers to 0%; add seams + unit tests, never exclusions → docs/lessons/testing-ci.md
+- [#182] Pitest runs on Java 25; baseline with thresholds 0, then ratchet just below → docs/lessons/testing-ci.md
 
 ### CLI app & commands — `docs/lessons/cli-app.md`
 - [M20] The cold-start lever skips DB/IO in every startup observer; test both directions → docs/lessons/cli-app.md

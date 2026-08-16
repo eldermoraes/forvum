@@ -18,7 +18,10 @@ import ai.forvum.engine.compress.BoundedCompressor;
 import ai.forvum.engine.compress.CompressionBudget;
 import ai.forvum.engine.compress.CompressionOutcome;
 import ai.forvum.engine.compress.CompressionResult;
+import ai.forvum.engine.compress.MidTurnPruner;
 import ai.forvum.engine.context.CurrentIdentity;
+import ai.forvum.engine.plan.PlanFormat;
+import ai.forvum.engine.plan.PlanStore;
 import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.routing.RetrievedMemory;
 import ai.forvum.engine.session.compaction.Summarizer;
@@ -38,6 +41,7 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 
 import io.opentelemetry.api.trace.Span;
@@ -120,6 +124,31 @@ public class SupervisorGraph {
 
     private static final TypeReference<Map<String, Object>> ARGS = new TypeReference<Map<String, Object>>() {};
 
+    /** The engine-handled built-in the model calls to record/replace its structured work plan (#190). */
+    static final String PLAN_TOOL = "update_plan";
+
+    private static final ToolSpecification PLAN_SPEC = ToolSpecification.builder()
+            .name(PLAN_TOOL)
+            .description("Record or fully replace your structured work plan for this task. Pass the "
+                    + "COMPLETE plan every call (every step with its current status); call it when the "
+                    + "plan changes, not on every step. The current plan is shown back to you on later "
+                    + "steps of this session.")
+            .parameters(JsonObjectSchema.builder()
+                    .addStringProperty("explanation", "an optional short note on what changed and why")
+                    .addProperty("plan", JsonArraySchema.builder()
+                            .description("the full ordered list of plan steps")
+                            .items(JsonObjectSchema.builder()
+                                    .addStringProperty("step", "the step description")
+                                    .addEnumProperty("status",
+                                            List.of("pending", "in_progress", "completed"),
+                                            "the step's current status (at most one in_progress)")
+                                    .required("step", "status")
+                                    .build())
+                            .build())
+                    .required("plan")
+                    .build())
+            .build();
+
     @Inject
     ToolCallBridge toolCallBridge;
 
@@ -128,6 +157,9 @@ public class SupervisorGraph {
 
     @Inject
     MemorySelector memorySelector;
+
+    @Inject
+    PlanStore planStore;
 
     @Inject
     Summarizer summarizer;
@@ -146,7 +178,7 @@ public class SupervisorGraph {
         if (request.cycle() != null) {
             return runCycle(request); // #51: a declared reflection cycle compiles a different graph
         }
-        Turn turn = new Turn(request, retrieveAndFrame(request),
+        Turn turn = new Turn(request, injectPlan(request, retrieveAndFrame(request)),
                 toolCallBridge.specificationsFor(scopeVisibleBelt(request.belt())));
         String finalText;
         try {
@@ -234,7 +266,9 @@ public class SupervisorGraph {
      * The Context-Engineering Select pillar's read step (DR-5): retrieve memory relevant to the turn's
      * user message ONCE at turn entry (not per generate round) and frame it as a {@code <retrieved_memory>}
      * DATA block inserted just before the user's question (DR-6a §9 — never spliced into the
-     * system/instruction region). Returns the seeded messages unchanged — retrieval disabled — when the
+     * system/instruction region). Under {@link RetrievalStrategy#ITERATIVE} (#196) the single-shot
+     * retrieve is replaced by the bounded {@link IterativeRetrieval} loop — same entry point, same
+     * compression + DATA framing on what crosses back. Returns the seeded messages unchanged — retrieval disabled — when the
      * policy is null / {@code NONE}, no selector/provider is available, the session or query text is blank,
      * or retrieval yields nothing. The returned list is always a fresh mutable copy ({@link Turn} mutates
      * it across rounds).
@@ -257,8 +291,14 @@ public class SupervisorGraph {
         if (queryText == null || queryText.isBlank() || sessionId == null || sessionId.isBlank()) {
             return messages;
         }
-        List<MemoryHit> hits = memorySelector.retrieve(
-                new MemoryQuery(request.agentId().value(), sessionId, queryText), policy);
+        List<MemoryHit> hits = policy.strategy() == RetrievalStrategy.ITERATIVE
+                // #196 agentic RAG (OPT-IN): a bounded retrieve → evaluate → re-query loop run as an
+                // isolated memory sub-agent on the turn's model; only the accumulated hits cross back
+                // (then compressed + DATA-framed below, exactly like the single-shot path).
+                ? IterativeRetrieval.retrieve(request.model(), memorySelector,
+                        new MemoryQuery(request.agentId().value(), sessionId, queryText), policy)
+                : memorySelector.retrieve(
+                        new MemoryQuery(request.agentId().value(), sessionId, queryText), policy);
         String block = RetrievedMemory.frame(compressHits(hits, policy.compressThresholdChars()));
         if (block != null) {
             // Insert as a user-role DATA message immediately before the user's question (context → question).
@@ -289,6 +329,36 @@ public class SupervisorGraph {
                     ? hit : new MemoryHit(hit.tier(), result.text(), hit.score(), hit.source()));
         }
         return out;
+    }
+
+    /**
+     * The Write-pillar plan re-injection (#190): when the session holds a live plan, frame it as a
+     * {@code <current_plan>} DATA block (data-framed + close-tag-neutralized — the DR-6a
+     * {@code RetrievedMemory} posture) and insert it just before the user's question, AFTER
+     * {@link #retrieveAndFrame} has inserted its block, so the plan — the more directive, fresher
+     * context — sits nearest the question. Skips under replay (#57, deterministic), when no store is
+     * available (the {@code memorySelector} null-tolerance seam), when there is no user message, or
+     * when no plan is stored (no empty frame). Runs ONCE at turn entry; same-turn visibility comes from
+     * the {@code update_plan} tool RESULT echoing the rendered plan into the conversation.
+     */
+    private List<ChatMessage> injectPlan(GraphTurnRequest request, List<ChatMessage> messages) {
+        if (ReplayContext.CURRENT_REPLAY.isBound() || planStore == null) {
+            return messages;
+        }
+        String sessionId = request.sessionId();
+        if (sessionId == null || sessionId.isBlank()) {
+            return messages;
+        }
+        int lastUser = lastUserIndex(messages);
+        if (lastUser < 0) {
+            return messages;
+        }
+        String block = planStore.latest(sessionId, request.agentId().value())
+                .map(PlanFormat::frame).orElse(null);
+        if (block != null) {
+            messages.add(lastUser, UserMessage.from(block));
+        }
+        return messages;
     }
 
     /** Index of the last {@link UserMessage} in {@code messages}, or {@code -1} if there is none. */
@@ -431,8 +501,17 @@ public class SupervisorGraph {
         if (turn.round++ >= MAX_ROUNDS) {
             return Map.of(GraphState.NEXT, "done", GraphState.FINAL, turn.lastAssistantText());
         }
+        // #197 mid-turn pruning (the Compress pillar WITHIN the turn): before every model call, bound
+        // what this turn has accumulated — oversized tool results, stale images, superseded thinking —
+        // in the region AFTER the seeded prefix, so a long multi-round tool loop cannot blow the window
+        // before the between-turn compactor ever runs. In-place replacement only (never insert/remove),
+        // tail-region-only, so the cached prompt prefix stays byte-stable (the compactor's rule). A pure
+        // in-memory pass — no model call, no IO — governed by the SAME compressThresholdChars knob
+        // (0 disables it, which also keeps replay #57 deterministic via Turn's replay short-circuit).
+        MidTurnPruner.prune(turn.conversation, turn.seedSize, turn.compressThreshold);
         List<ToolSpecification> offered = new ArrayList<>(turn.toolSpecs);
         offered.add(SPAWN_SPEC);
+        offered.add(PLAN_SPEC);
         AiMessage reply = turn.model.chat(ChatRequest.builder()
                 .messages(turn.conversation)
                 .toolSpecifications(offered)
@@ -463,6 +542,12 @@ public class SupervisorGraph {
             // so a substituted-model rerun sees the SAME outputs (deterministic). A miss → synthetic marker.
             return ReplayContext.CURRENT_REPLAY.get().next(request.name());
         }
+        if (PLAN_TOOL.equals(request.name())) {
+            // #190 built-in: handled by the engine like spawn_worker — no belt/RBAC/approval gate, no
+            // tool_invocations audit row (the plan row IS the record), no tool-budget consumption. This
+            // single intercept covers BOTH the tool_loop and the mixed-reply spawnWorker path.
+            return updatePlan(turn, request);
+        }
         try {
             return toolCallBridge.dispatch(turn.sessionId, turn.agentId, turn.belt,
                     request.name(), request.arguments());
@@ -480,6 +565,28 @@ public class SupervisorGraph {
         } catch (RuntimeException failure) {
             return "Tool '" + request.name() + "' failed: " + failure.getMessage();
         }
+    }
+
+    /**
+     * Execute one {@code update_plan} call (#190): parse + validate the model's arguments engine-side
+     * (a violation returns a model-visible error and writes nothing — the {@code prepareSpawn} error
+     * contract), append the rendered plan as the session's new live plan row, and echo the rendered plan
+     * back as the tool result so every later generate round of THIS turn sees the updated plan (the
+     * every-request-answered [M18] guarantee). Null-tolerates an absent store (the unit-test seam).
+     */
+    private String updatePlan(Turn turn, ToolExecutionRequest request) {
+        PlanFormat.Result result = PlanFormat.parse(mapper, request.arguments());
+        if (result.error() != null) {
+            return result.error();
+        }
+        if (planStore != null) {
+            try {
+                planStore.save(turn.sessionId, turn.agentId.value(), result.rendered());
+            } catch (RuntimeException failure) {
+                return "update_plan failed: " + failure.getMessage();
+            }
+        }
+        return "Plan updated:\n" + result.rendered();
     }
 
     private Map<String, Object> spawnWorker(GraphState state, Turn turn) {
@@ -599,6 +706,8 @@ public class SupervisorGraph {
         private final List<ToolSpecification> toolSpecs;
         private final List<ChatMessage> conversation;
         private final int compressThreshold;
+        /** The seeded-prefix size at turn entry — the #197 pruner never touches indexes below it. */
+        private final int seedSize;
         private final List<SpawnRequest> spawns = new ArrayList<>();
         /** Every ephemeral worker id allocated this turn (accumulated across rounds; retired in run()'s finally). */
         private final List<AgentId> spawnedIds = new ArrayList<>();
@@ -614,6 +723,9 @@ public class SupervisorGraph {
             this.toolSpecs = toolSpecs;
             // Already a fresh mutable copy (built by retrieveAndFrame), mutated across rounds.
             this.conversation = conversation;
+            // Everything seeded before the first generate (system + history + retrieval/plan frames +
+            // the user question) is the cached prefix the #197 mid-turn pruner must never disturb.
+            this.seedSize = conversation.size();
             // The §5.5 reduce node compresses worker digests above this; 0 disables it (no memory policy,
             // or a replay #57 where compression must be off for determinism).
             this.compressThreshold = ReplayContext.CURRENT_REPLAY.isBound() ? 0

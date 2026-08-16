@@ -1,0 +1,8 @@
+{
+  "extension_id": "media-gen",
+  "module_name": "forvum-tools-media-gen",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.mediagen.MediaGenToolProvider" },
+    { "type": "generation", "class": "ai.forvum.tools.mediagen.OpenAiImageGenerationProvider" }
+  ]
+}

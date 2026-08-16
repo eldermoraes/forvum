@@ -37,6 +37,14 @@ import java.util.List;
  *       the oldest retained USER message are deleted (their turn has left the window). A
  *       {@code TOOL_EXECUTION} row is conservatively RETAINED when it still belongs to a retained turn
  *       (created at/after that boundary), and dropped only once it is older than the boundary.</li>
+ *   <li><strong>Live plan retained, superseded plans stripped (#190).</strong> Among the region's
+ *       {@code PLAN} rows, the NEWEST (max id — the session's live plan, since the region is everything
+ *       after the frozen prefix) is retained regardless of age; every older {@code PLAN} row is a
+ *       superseded plan and is stripped like an orphan. Plan rows never drive the retain budget and
+ *       never enter the summary. A retained live plan whose id falls below the reclaimed summary id
+ *       simply migrates into the frozen prefix — benign: it is never deleted, its {@code tool} role
+ *       keeps it out of the history rebuild, and injection reads the newest plan by session
+ *       independently of the prefix.</li>
  *   <li><strong>CAPR is archived, never deleted.</strong> A {@code capr_events} row whose {@code turnId}
  *       references a dropped assistant message is marked {@code is_archived = 1}; CAPR history stays
  *       append-only so aggregation can exclude compacted turns without regressing.</li>
@@ -107,6 +115,15 @@ public class SessionCompactor {
         // compaction runs before the new user message is persisted) alone exceeds retainTokens.
         long oldestRetainedMsgCreatedAt = retainBoundary(region, policy.retainTokens());
 
+        // #190: the region's newest PLAN row (max id) is the session's live plan — retained regardless
+        // of age; every older PLAN row is superseded and strippable.
+        long newestPlanId = Long.MIN_VALUE;
+        for (MessageEntity m : region) {
+            if (BlockType.fromDbValue(m.blockType) == BlockType.PLAN && m.id > newestPlanId) {
+                newestPlanId = m.id;
+            }
+        }
+
         // Partition the region into dropped (to summarize/strip) vs retained, by the boundary.
         List<MessageEntity> droppedTurnMessages = new ArrayList<>();
         List<MessageEntity> droppedOrphans = new ArrayList<>();
@@ -117,6 +134,11 @@ public class SessionCompactor {
             switch (BlockType.fromDbValue(m.blockType)) {
                 case TURN_MESSAGE -> droppedTurnMessages.add(m);
                 case TURN_REASONING, TURN_ARTIFACT, TOOL_EXECUTION -> droppedOrphans.add(m);
+                case PLAN -> {
+                    if (m.id != newestPlanId) {
+                        droppedOrphans.add(m); // superseded plan — the live (newest) plan survives
+                    }
+                }
             }
         }
 
@@ -208,9 +230,10 @@ public class SessionCompactor {
      * instead of staying at {@code Long.MAX_VALUE} and being classified as dropped. The natural
      * user-then-assistant persist order means a retained pair still resolves the boundary to its USER
      * message, so the orphan-stripping rule is unchanged in the common case. Returns
-     * {@code Long.MAX_VALUE} only when no TURN_MESSAGE exists in the region.
+     * {@code Long.MAX_VALUE} only when no TURN_MESSAGE exists in the region. Package-private so the
+     * pure retain-budget walk is unit-tested directly (#180).
      */
-    private static long retainBoundary(List<MessageEntity> region, int retainTokens) {
+    static long retainBoundary(List<MessageEntity> region, int retainTokens) {
         long boundary = Long.MAX_VALUE;
         int acc = 0;
         for (int i = region.size() - 1; i >= 0; i--) {

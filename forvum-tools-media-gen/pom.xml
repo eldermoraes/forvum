@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.forvum</groupId>
+        <artifactId>forvum-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>forvum-tools-media-gen</artifactId>
+
+    <properties>
+        <!-- @Tag("live") tests (one real image generation against a configured OpenAI-compatible
+             backend — ImageGenerateLiveTest) are off by default. Excluded via this Surefire user
+             property (so a bare CLI -DexcludedGroups= can clear it — a value hardcoded in the plugin
+             <configuration> could NOT be overridden, the forvum-tools-browser precedent). Run the live
+             test with: -DexcludedGroups= -Dgroups=live -->
+        <excludedGroups>live</excludedGroups>
+    </properties>
+
+    <name>Forvum Tools — Media Generation</name>
+    <description>Layer-3 Forvum extension (#187): contributes image.generate / video.generate /
+        music.generate (MEDIA_GENERATE) — prompt-to-asset generation through the SDK GenerationProvider
+        SPI, with one bundled OpenAI-compatible images backend (POST /v1/images/generations, b64_json)
+        over a blocking REST client. Outputs land under the workspace media/ outbox; inert (an
+        actionable error) when tools/media-gen.json is absent.</description>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Layer-1 plugin SPI: the ONLY ai.forvum dependency a Layer-3 extension carries (enforced
+             below). The providers implement AbstractToolProvider / AbstractGenerationProvider (SDK
+             contracts carrying only forvum-core types plus the SDK generation values) — never the
+             engine. No langchain4j. Versions managed by forvum-bom. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-sdk</artifactId>
+        </dependency>
+        <!-- CDI (ArC): @ApplicationScoped bean discovery. Version via Quarkus platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <!-- Blocking REST client + Jackson binding for the OpenAI-compatible images endpoint (mirrors
+             the Qdrant memory provider / Telegram channel native-clean pattern, [P2-5]). The client
+             BLOCKS the virtual thread, never a reactive return type (Mutiny/Multi is a PR-reject,
+             CLAUDE.md §3.8). Jackson (transitive here) also reads tools/media-gen.json via the
+             JsonNode tree-walk. Version via platform BOM. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-client-jackson</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Quarkus codegen + dev/test bootstrap. No `build` goal: forvum-tools-media-gen is a
+                 Layer-3 library, never a runnable artifact (that is forvum-app). The absent `build`
+                 goal makes Quarkus skip quarkus:dev on this module as a "support library", so the
+                 Dev-UI test runner cannot attach and its @QuarkusTest *IT runs under Surefire in the
+                 reactor build (CLAUDE.md §4 exception). -->
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate-code</goal>
+                            <goal>generate-code-tests</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- A @QuarkusTest *IT here boots Quarkus in-JVM (no HTTP server needed); it also
+                         runs through the reactor build under Surefire (CI `verify`). @Tag("live")
+                         tests (a real image generation) are excluded by default via the
+                         ${excludedGroups} property (above); opt in with -DexcludedGroups= -Dgroups=live. -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-plugin-layering</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <phase>validate</phase>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <!-- Allowlist form (consistent with the channel/provider/tool modules):
+                                         ban every ai.forvum module, re-allow forvum-sdk + forvum-core.
+                                         forvum-core is the Layer-0 contract the SDK SPI re-exposes
+                                         (ToolSpec/PermissionScope in ToolProvider.tools()), so a tool plugin
+                                         unavoidably and legitimately compiles against it; forvum-engine,
+                                         another extension, and the app stay banned. -->
+                                    <includes>
+                                        <include>ai.forvum:forvum-sdk</include>
+                                        <include>ai.forvum:forvum-core</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>ai.forvum:*</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>A Forvum extension (Layer 3) compiles against forvum-sdk + the Layer-0 contracts it re-exposes (forvum-core, e.g. ToolSpec/PermissionScope in the ToolProvider SPI); it must NOT depend on forvum-engine, another extension, or forvum-app. See CLAUDE.md section 12.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -87,4 +87,63 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Mutation testing (#182): the bounded Pitest signal over Layer-0's pure high-risk logic —
+             value/parse validation (ModelRef.parse, PermissionScope.fromName, CostBudget invariants,
+             AgentEvent hierarchy), the exact surfaces ULTRAPLAN section 10 names. Deliberately scoped to
+             forvum-core only: deterministic, Quarkus-free, seconds-fast — never the whole reactor.
+             Run locally / in CI (.github/workflows/mutation.yml) with:
+                 ./mvnw -Pmutation -pl forvum-core test-compile org.pitest:pitest-maven:mutationCoverage
+             The thresholds are the committed RATCHET: mutationThreshold / testStrengthThreshold sit just
+             below the measured baseline (97%/97% over 175 mutants), so a regression fails the run while
+             normal drift does not. Raise
+             them (never lower, .github/coverage-policy.sh guards the direction) as the score improves
+             toward the ULTRAPLAN 70% Phase-2 target. Reports: target/pit-reports (HTML + XML).
+             Surviving-mutant triage: docs/ULTRAPLAN.md section 10; suppress nothing by exclusion —
+             a surviving mutant is either killed by a new assertion or accepted in review. -->
+        <profile>
+            <id>mutation</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                        <version>${pitest-maven.version}</version>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.pitest</groupId>
+                                <artifactId>pitest-junit5-plugin</artifactId>
+                                <version>${pitest-junit5-plugin.version}</version>
+                            </dependency>
+                        </dependencies>
+                        <configuration>
+                            <targetClasses>
+                                <param>ai.forvum.core.*</param>
+                            </targetClasses>
+                            <targetTests>
+                                <param>ai.forvum.core.*</param>
+                            </targetTests>
+                            <mutators>
+                                <mutator>DEFAULTS</mutator>
+                            </mutators>
+                            <!-- Ratchet floor (#182): measured baseline at introduction was 97% killed /
+                                 97% test strength over 175 mutants (0 with no coverage); the thresholds
+                                 sit a hair below so real regressions fail while equivalent-mutant noise
+                                 does not. Never lower (.github/coverage-policy.sh guards the direction). -->
+                            <mutationThreshold>95</mutationThreshold>
+                            <testStrengthThreshold>95</testStrengthThreshold>
+                            <timestampedReports>false</timestampedReports>
+                            <outputFormats>
+                                <outputFormat>HTML</outputFormat>
+                                <outputFormat>XML</outputFormat>
+                            </outputFormats>
+                            <threads>2</threads>
+                            <timeoutConstant>8000</timeoutConstant>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

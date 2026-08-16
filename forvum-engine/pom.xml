@@ -137,8 +137,8 @@
 
     <build>
         <plugins>
-            <!-- Coverage gate (X3 / ULTRAPLAN section 10). The inherited 80% LINE / 75% BRANCH gate
-                 applies, with two structurally-uncoverable categories excluded:
+            <!-- Coverage gate (X3 / ULTRAPLAN section 10, hardened by #180). The inherited 80% LINE /
+                 75% BRANCH gate applies, with ONLY structurally-uncoverable categories excluded:
                  - native-metadata holders (CoreReflectionRegistration, GraphNativeSerializationConfig):
                    classes whose body is solely a @RegisterForReflection target list / private ctor — no
                    executable behavior to test; they exist only to feed the native image (CLAUDE.md
@@ -146,9 +146,14 @@
                  - persistence/*Entity Panache JPA entities: pure field-holder @Entity classes (public
                    fields, no logic) — JaCoCo counts the implicit ctor line, never exercised in a unit
                    run; their behavior is the ORM's, validated by the booted-DB *IT layer.
-                 With these excluded the module measures 80.31% LINE / 76.68% BRANCH and clears the gate.
-                 The IT-only persistence recorders / AgentMemory / SessionManager / SessionReplayer stay
-                 counted (covered by forvum-app's IT suite) — not excluded. -->
+                 #180 removed the former substantive exclusions (SessionCompactor, DefaultSummarizer,
+                 TaskRecorder, LoggingCronDeliverySink, SessionSubstitutionReplayer, MemoryQueryService,
+                 SemanticMemoryStore, EvalRunner): every substantive class is now measured, with the
+                 pure logic unit-tested directly (retain-budget walk, task-row mapping, summarizer
+                 routing, delivery sink) and the Panache-transformed transactional bodies remaining in
+                 the denominator (their behavior stays pinned by the booted *IT layer, whose coverage
+                 JaCoCo cannot attribute to the pre-transformation class — the known Quarkus/Panache
+                 call-site rewrite mismatch). -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -164,35 +169,6 @@
                                 <exclude>ai/forvum/engine/persistence/CoreReflectionRegistration.class</exclude>
                                 <exclude>ai/forvum/engine/graph/GraphNativeSerializationConfig.class</exclude>
                                 <exclude>ai/forvum/engine/persistence/*Entity.class</exclude>
-                                <!-- IT-covered beans (X3 policy: coverage = Surefire only; these are exercised
-                                     end-to-end by @QuarkusTest *IT with real SQLite, not unit Surefire tests):
-                                     SessionCompactor/DefaultSummarizer by SessionCompactorIT (P2-COMPACT),
-                                     TaskRecorder by CronSchedulerFireIT/AgentRegistrySpawnLedgerIT (P2-TASKLEDGER),
-                                     LoggingCronDeliverySink by CronSchedulerFireIT (P2-CRON-DELIVERY),
-                                     SessionSubstitutionReplayer by SessionSubstitutionReplayerIT (#57/PR-8): its
-                                     @ActivateRequestContext replay() is fully exercised by the IT (success /
-                                     partial-failure / unresolvable-model / metadata) but JaCoCo mis-attributes the
-                                     ArC subclass-forward body, like SessionCompactor (the same pattern).
-                                     MemoryQueryService/SemanticMemoryStore by MemoryQueryServiceIT (P3-2 #50): the
-                                     query/search/reindex paths are exercised end-to-end against real SQLite (the
-                                     guard, the linear cosine scan, the embed-outside-tx reindex), but both are
-                                     @ApplicationScoped so JaCoCo attributes every method to the ArC client subclass
-                                     and reports the original classes at 0% — the same mis-attribution. -->
-                                     EvalRunner by forvum-app EvalCommandTest/EvalNativeIT (P3-10 #58): it drives a
-                                     turn through ChannelTurnDriver, so it only runs end-to-end under the app's
-                                     @QuarkusMainTest/native ITs — never engine Surefire. Its pure collaborators
-                                     (EvalSuiteReader, MatcherJudge, LlmJudge, MatchMode, the value records) ARE
-                                     unit-tested here and stay counted. -->
-                                <exclude>ai/forvum/engine/session/compaction/SessionCompactor.class</exclude>
-                                <exclude>ai/forvum/engine/session/compaction/DefaultSummarizer.class</exclude>
-                                <exclude>ai/forvum/engine/persistence/TaskRecorder.class</exclude>
-                                <exclude>ai/forvum/engine/cron/LoggingCronDeliverySink.class</exclude>
-                                <exclude>ai/forvum/engine/replay/SessionSubstitutionReplayer.class</exclude>
-                                <exclude>ai/forvum/engine/memoryquery/MemoryQueryService.class</exclude>
-                                <exclude>ai/forvum/engine/memoryquery/SemanticMemoryStore.class</exclude>
-                                <exclude>ai/forvum/engine/memoryquery/SemanticMemoryStore$*.class</exclude>
-                                <exclude>ai/forvum/engine/eval/EvalRunner.class</exclude>
-                                <exclude>ai/forvum/engine/eval/EvalRunner$TurnCapture.class</exclude>
                             </excludes>
                             <rules>
                                 <rule>

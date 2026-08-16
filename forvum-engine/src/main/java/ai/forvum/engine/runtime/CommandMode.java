@@ -61,10 +61,11 @@ public class CommandMode {
                 // resolves+writes a JAR, 'skill' (P2-7) downloads+writes a .md, 'mcp' (P2-13) reads/writes
                 // mcp-servers/, 'copilot' (#42) device-code logs in + writes a credential file, and
                 // 'provider add' (P2-10) stores a 0600 API key + runs a direct (DB-free) smoke chat, and
-                // 'tools' (#184) lists the registered tools from Instance<ToolProvider> without connecting —
+                // 'tools' (#184) lists the registered tools from Instance<ToolProvider> without connecting, and
+                // 'onboard' (#194) is the interactive first-run wizard (writes config + key smoke, DB-free) —
                 // none needs the DB/watcher.
                 case "--help", "-h", "--version", "-V", "init", "doctor", "plugin", "skill", "mcp",
-                        "copilot", "pair", "devices", "provider", "tools" -> {
+                        "copilot", "pair", "devices", "provider", "tools", "onboard" -> {
                     return true;
                 }
                 default -> {

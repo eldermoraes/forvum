@@ -1,0 +1,88 @@
+name: Mutation
+
+# Bounded mutation-testing signal + ratchet (#182). Line/branch coverage (X3, JaCoCo) proves which
+# bytecode executed; this proves the assertions DETECT faults: Pitest mutates forvum-core's pure
+# high-risk logic (ModelRef.parse, PermissionScope, CostBudget, the AgentEvent hierarchy — the exact
+# ULTRAPLAN section 10 surfaces) and fails the run when the killed-mutant score or test strength drops
+# below the committed ratchet in forvum-core/pom.xml (mutationThreshold / testStrengthThreshold — set a
+# hair below the measured 97%/97% baseline over 175 mutants; raise-only, .github/coverage-policy.sh
+# guards the direction).
+#
+# Deliberately BOUNDED (issue #182's runtime budget): forvum-core only — deterministic, Quarkus-free,
+# a ~1-minute run — never the whole reactor. It triggers on PRs that change forvum-core (the
+# on-change signal: new surviving mutants in changed high-risk code fail the PR), on a weekly cron,
+# and manually. Local command (documented in CONTRIBUTING):
+#     ./mvnw -Pmutation -pl forvum-core test-compile org.pitest:pitest-maven:mutationCoverage
+# Triage: a surviving mutant is either killed by a new assertion or accepted in maintainer review —
+# never hidden by a target/mutator exclusion (the profile carries none).
+
+on:
+  pull_request:
+    paths:
+      - 'forvum-core/**'
+      - '.github/workflows/mutation.yml'
+  schedule:
+    - cron: '30 5 * * 1'   # Mon 05:30 UTC — collision-free with security (Mon 05:00) and codeql (Mon 06:00)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pitest:
+    name: Pitest (forvum-core, ratcheted)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Run Pitest with the committed ratchet
+        run: ./mvnw -B -Pmutation -pl forvum-core test-compile org.pitest:pitest-maven:mutationCoverage
+      - name: Summarize mutation score
+        if: always()
+        run: |
+          XML=forvum-core/target/pit-reports/mutations.xml
+          if [ -f "$XML" ]; then
+            python3 - "$XML" >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          import sys, xml.etree.ElementTree as ET
+          from collections import Counter
+          root = ET.parse(sys.argv[1]).getroot()
+          status = Counter(m.get('status') for m in root.iter('mutation'))
+          total = sum(status.values())
+          killed = status.get('KILLED', 0) + status.get('TIMED_OUT', 0)
+          detected = sum(v for k, v in status.items() if k in ('KILLED', 'TIMED_OUT', 'MEMORY_ERROR', 'RUN_ERROR'))
+          covered = total - status.get('NO_COVERAGE', 0)
+          print('## Mutation report (forvum-core)')
+          print()
+          print(f'- **Mutants:** {total} | **Killed:** {killed} | **Score:** {100 * detected // max(total, 1)}%')
+          print(f'- **Test strength:** {100 * detected // max(covered, 1)}% (detected/covered)')
+          print(f'- **No coverage:** {status.get("NO_COVERAGE", 0)} | **Timed out:** {status.get("TIMED_OUT", 0)} | **Survived:** {status.get("SURVIVED", 0)}')
+          survivors = [m for m in root.iter('mutation') if m.get('status') == 'SURVIVED']
+          if survivors:
+              print()
+              print('### Surviving mutants')
+              for m in survivors[:50]:
+                  cls = m.findtext('mutatedClass')
+                  line = m.findtext('lineNumber')
+                  desc = m.findtext('description')
+                  print(f'- `{cls}:{line}` — {desc}')
+          EOF
+          else
+            echo 'No mutations.xml produced (build failed before Pitest ran).' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload Pitest reports (HTML + XML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pit-reports
+          path: forvum-core/target/pit-reports/
+          if-no-files-found: ignore
+          retention-days: 30

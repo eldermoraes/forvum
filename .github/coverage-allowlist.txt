@@ -1,0 +1,35 @@
+# Ratified JaCoCo coverage-gate deviations (#180). One entry per line; blank lines and #-comments
+# ignored. .github/coverage-policy.sh fails CI when a module pom carries a jacoco exclusion or a
+# lowered threshold that is NOT listed here — so a new exclusion / lowered gate cannot land without
+# an explicit, reviewed edit to this file (the review signal #180 requires).
+#
+# Formats:
+#   exclude|<module-pom-path>|<exclude-pattern>
+#   minimum|<module-pom-path>|<counter LINE/BRANCH>|<literal minimum>|<owner>|<expiry YYYY-MM>|<reason>
+#
+# Policy: an `exclude` entry must be structurally-uncoverable code (native-metadata holders, pure
+# field-holder JPA entities, thin JDK-network shims exercised only by live/IT layers). A `minimum`
+# entry is a TIME-BOUNDED exception: at expiry, either the gap is closed (tests added, entry removed)
+# or the entry is re-ratified with a new expiry in maintainer review.
+
+# --- structural exclusions (no executable behavior in a Surefire unit run) ---
+# native-metadata holders: @RegisterForReflection target lists / private ctors only (ULTRAPLAN §6.3).
+exclude|forvum-engine/pom.xml|ai/forvum/engine/persistence/CoreReflectionRegistration.class
+exclude|forvum-engine/pom.xml|ai/forvum/engine/graph/GraphNativeSerializationConfig.class
+# pure field-holder Panache @Entity classes: only the implicit ctor line is countable.
+exclude|forvum-engine/pom.xml|ai/forvum/engine/persistence/*Entity.class
+# thin JDK-network / socket shims: I/O bound to a booted server or live endpoint, exercised by the
+# booted *IT / live layers (X3: measured coverage is the Surefire unit run).
+exclude|forvum-tools-mcp-bridge/pom.xml|ai/forvum/tools/mcp/DefaultMcpClientFactory*.class
+exclude|forvum-tools-browser/pom.xml|ai/forvum/tools/browser/CdpSession.class
+exclude|forvum-tools-browser/pom.xml|ai/forvum/tools/browser/JdkCdpHttp.class
+exclude|forvum-channel-slack/pom.xml|ai/forvum/channel/slack/SlackSocketEndpoint.class
+exclude|forvum-channel-discord/pom.xml|ai/forvum/channel/discord/DiscordGatewayEndpoint.class
+exclude|forvum-provider-copilot/pom.xml|ai/forvum/provider/copilot/JdkCopilotHttp.class
+exclude|forvum-tools-web/pom.xml|ai/forvum/tools/web/JdkHttpFetcher.class
+# abstract SDK adapter bodies re-measured in the provider module that jars them.
+exclude|forvum-sdk/pom.xml|ai/forvum/sdk/Abstract*.class
+
+# --- ratified threshold exceptions (time-bounded, owner + expiry) ---
+minimum|forvum-app/pom.xml|BRANCH|0.70|eldermoraes|2026-12|picocli command-mode error/missing-arg branches run only under the native-profile Failsafe ITs, which X3 excludes from measured coverage
+minimum|forvum-channel-discord/pom.xml|LINE|0.75|eldermoraes|2026-12|gateway lifecycle lines run only against a live Discord socket (the excluded endpoint's caller); headless Surefire cannot reach them

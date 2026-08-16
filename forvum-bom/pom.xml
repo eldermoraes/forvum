@@ -233,6 +233,21 @@
             </dependency>
             <dependency>
                 <groupId>ai.forvum</groupId>
+                <artifactId>forvum-tools-messaging</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-tools-sessions</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.forvum</groupId>
+                <artifactId>forvum-tools-media-gen</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.forvum</groupId>
                 <artifactId>forvum-channel-web</artifactId>
                 <version>${project.version}</version>
             </dependency>
