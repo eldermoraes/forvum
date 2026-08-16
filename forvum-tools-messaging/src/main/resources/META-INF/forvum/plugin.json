@@ -1,0 +1,7 @@
+{
+  "extension_id": "messaging",
+  "module_name": "forvum-tools-messaging",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.messaging.MessagingToolProvider" }
+  ]
+}

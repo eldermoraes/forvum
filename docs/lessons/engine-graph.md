@@ -78,9 +78,12 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   used the persona model passes green. Give the cron a DISTINCT model id and assert `provider_calls.model`
   reflects the CRON's model (the 6-dim review caught this as green-for-wrong-reason). [M19]
 
-- **There is NO outbound channel-send API — channels are self-driving consumers, not sinks.** The channel SPI
-  (`ChannelProvider`) is a pure build-time discovery marker (M16 Resolution B); a channel pulls turns via
-  `ChannelTurnDriver.dispatch`, the engine never pushes to one. So "deliver a cron's output to a channel"
+- **Historically the engine could not push to a channel — channels were self-driving consumers, not
+  sinks** (superseded by #188: the `forvum-sdk` `ChannelSender` SPI now carries operator-authorized
+  outbound sends — cron delivery and the allowlist-gated `message.send` envelope — while turn intake is
+  still pull-only). The channel SPI (`ChannelProvider`) is a pure build-time discovery marker (M16
+  Resolution B); a channel pulls turns via `ChannelTurnDriver.dispatch`, the engine never pushes a TURN
+  to one. So "deliver a cron's output to a channel"
   cannot target a live session — route it to an isolated-agent result sink (`CronDeliverySink`, default logs)
   keyed by the resolved target, and document the limitation. Validate an `explicit-to` target against the
   CONFIGURED channels (`channels/<id>.json` stems via `ChannelReader.ids()`), not a live registry. Reject the
@@ -403,3 +406,46 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   carve-out — the deterministic event-fire is the tested path on both JVM and native; the reload machinery is
   pure map/`ScopedValue` (no reflection), native-identical. [#178]
 
+
+- **[#190] A scope-less built-in beside `spawn_worker` is a four-touch graph recipe; the plan lives in
+  the messages tier, never in graph channels.** Adding a second engine-built-in tool (`update_plan`)
+  confirmed the `spawn_worker` wiring generalizes to a fixed recipe: (1) a hand-built
+  `ToolSpecification` constant next to `SPAWN_SPEC` (langchain4j `JsonObjectSchema` builders —
+  `addEnumProperty(name, List, desc)` and `JsonArraySchema.builder().items(...)` both exist in 1.16.2);
+  (2) `offered.add(SPEC)` in `generate()` right after `SPAWN_SPEC` — built-ins ride NEXT TO the belt, so
+  an EMPTY belt still offers them (test that case explicitly); (3) interception at the TOP of `runTool`,
+  AFTER the replay short-circuit but BEFORE `toolCallBridge.dispatch` — this single seam covers both the
+  `tool_loop` path and the mixed-reply path, and keeps replay write-free for free (a replayed turn never
+  reaches the handler); (4) a null-tolerant package-private injected collaborator (`PlanStore`, the
+  `memorySelector` seam pattern) so `new SupervisorGraph()` unit fixtures keep working with one line in
+  `graphWith(...)`. Load-bearing choices: the persisted artifact is the RENDERED checklist TEXT, not
+  JSON — zero new reflection surface, human-readable in the ledger, and the model-facing echo
+  ("Plan updated:\n…") IS the same-turn visibility mechanism, so nothing touches `GraphState` (R6
+  serialization-clean by construction). Cross-turn visibility is ONE injection at turn entry (after
+  `retrieveAndFrame`, at `lastUserIndex`, so the frame sits directly before the question) of a
+  closing-tag-neutralized `<current_plan>` data block — the #185/[TOOLS-WEB] untrusted-text framing
+  reused for self-produced-but-model-authored content. Compaction: `BlockType.PLAN` is code-only (V3 has
+  no CHECK constraint — verify before assuming a migration), but the `SessionCompactor` classification
+  switch RETAINS unknown block types silently, so an explicit `case PLAN` (keep the region's newest row
+  by max id, orphan-strip the rest) is mandatory or superseded plans accumulate forever. Validation is
+  engine-side reject-with-model-visible-error (nothing written on violation, over-cap never truncates):
+  the error string names the violated rule, which scripted-model tests can assert verbatim.
+
+## [#197-audit] Mid-turn pruning must never rewrite already-sent messages; guard elision with a recency window + protected tools
+
+The originally shipped `MidTurnPruner` had a thinking()-strip arm that rebuilt every assistant message
+except the newest. Within a multi-round tool loop those assistant messages were ALREADY TRANSMITTED to
+the provider in a prior round: rewriting them invalidates every prompt-cache prefix from the first
+assistant message onward (the exact cost the frozen-prefix rule exists to protect), and a provider that
+requires thinking blocks paired with their `tool_use` (Anthropic extended thinking) rejects the request
+outright. The remediation removed the arm entirely (D7: thinking-stripping is out of v1) and hardened
+the tool-result arm with two bounds: a `KEEP_LAST_ASSISTANTS = 3` recency cutoff (a result is elidable
+only strictly before the index of the 3rd-newest `AiMessage` counted across the WHOLE list — the
+current round's results always reach the model whole, and fewer assistants than the window means
+nothing is prunable) and `PROTECTED_TOOL_NAMES = {"update_plan"}` (the rendered checklist IS the
+same-turn plan surface; eliding it derails the plan-following turn). The generalizable rules: (1) any
+in-place mid-turn mutation must satisfy trim-once monotonicity — a message is mutated at most once, at
+the moment it exits the window, then byte-stable forever; (2) size-based elision needs both a recency
+bound (WHEN) and a semantic protection set (WHAT) — the threshold alone prunes the very output the
+model is about to act on; (3) assert cache stability in tests with `assertSame` on already-sent
+instances across two consecutive prune passes, not just equality.

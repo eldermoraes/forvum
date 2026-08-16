@@ -31,7 +31,7 @@ public record MemoryPolicy(
         if (strategy == null) {
             throw new IllegalStateException(
                 "MemoryPolicy strategy must be non-null. The 'strategy' field in agents/<id>.json "
-              + "must name one of VECTOR, GRAPH, METADATA, HYBRID, NONE.");
+              + "must name one of VECTOR, GRAPH, METADATA, HYBRID, ITERATIVE, NONE.");
         }
         if (tiers == null) {
             throw new IllegalStateException(

@@ -21,6 +21,7 @@ import ai.forvum.engine.approval.ApprovalGate;
 import ai.forvum.engine.compress.BoundedCompressor;
 import ai.forvum.engine.context.CurrentIdentity;
 import ai.forvum.engine.model.InMemoryToolInvocationRecorder;
+import ai.forvum.engine.plan.InMemoryPlanStore;
 import ai.forvum.engine.routing.MemorySelector;
 import ai.forvum.engine.session.compaction.Summarizer;
 import ai.forvum.engine.tools.ToolCallBridge;
@@ -180,6 +181,7 @@ class SupervisorGraphTest {
         graph.toolCallBridge = ToolTestFixtures.bridge(recorder, provider);
         graph.workerRunner = workerRunner;
         graph.mapper = new ObjectMapper();
+        graph.planStore = new InMemoryPlanStore();
         return graph;
     }
 
@@ -189,6 +191,7 @@ class SupervisorGraphTest {
         graph.toolCallBridge = ToolTestFixtures.bridge(recorder, gate, provider);
         graph.workerRunner = workerRunner;
         graph.mapper = new ObjectMapper();
+        graph.planStore = new InMemoryPlanStore();
         return graph;
     }
 
@@ -662,6 +665,120 @@ class SupervisorGraphTest {
         assertTrue(indexOfUserContaining(model.seen.get(0), "<retrieved_memory>") < 0,
                 "strategy NONE must not retrieve, even with an installed provider");
         assertTrue(indexOfUserContaining(model.seen.get(0), "should-not-appear") < 0);
+    }
+
+    // ---- #196 agentic RAG: the ITERATIVE strategy's bounded retrieve → evaluate → re-query loop ----
+
+    /** A selector that answers per query text and counts consultations (query-text insertion order). */
+    private static final class PerQuerySelector extends MemorySelector {
+        private final List<String> queries = new ArrayList<>();
+        private final Map<String, MemoryHit> answers;
+
+        private PerQuerySelector(Map<String, MemoryHit> answers) {
+            this.answers = answers;
+        }
+
+        @Override
+        public List<MemoryHit> retrieve(MemoryQuery query, MemoryPolicy policy) {
+            queries.add(query.text());
+            MemoryHit hit = answers.get(query.text());
+            return hit == null ? List.of() : List.of(hit);
+        }
+    }
+
+    @Test
+    void iterativeStrategyFeedsReQueriedHitsToTheMainModelAsDataOnly() {
+        // The acceptance test for #196: the evaluator is scripted to declare the first retrieval
+        // insufficient and name a refined query; the store returns a DISTINCT hit for that query; the
+        // captured ChatRequest.messages() of the MAIN generate must carry that second hit inside the
+        // framed DATA block — proving the re-queried hits actually reach the main model, not a
+        // green-for-wrong-reason single retrieval.
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        PerQuerySelector selector = new PerQuerySelector(Map.of(
+                "where do we deploy?",
+                new MemoryHit(MemoryTier.SEMANTIC, "first-shot hit: we deploy weekly", 0.9, "m1"),
+                "deploy target details",
+                new MemoryHit(MemoryTier.SEMANTIC, "re-queried hit: the target is eu-west-1", 0.8, "m2")));
+        graph.memorySelector = selector;
+
+        // Scripted call order: evaluator round 1 (insufficient, re-query), evaluator round 2
+        // (sufficient), then the ONE main generate.
+        ScriptedChatModel model = new ScriptedChatModel(
+                AiMessage.from("INSUFFICIENT\ndeploy target details"),
+                AiMessage.from("SUFFICIENT"),
+                AiMessage.from("We deploy weekly to eu-west-1."));
+        List<ChatMessage> seed = List.of(SystemMessage.from("be helpful"),
+                UserMessage.from("where do we deploy?"));
+        MemoryPolicy iterative = new MemoryPolicy(RetrievalStrategy.ITERATIVE,
+                EnumSet.allOf(MemoryTier.class), 8, 0.0, 8000);
+
+        String reply = graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                List.of(), seed, null, iterative));
+
+        assertEquals("We deploy weekly to eu-west-1.", reply);
+        assertEquals(List.of("where do we deploy?", "deploy target details"), selector.queries,
+                "the evaluator's refined query drives a SECOND retrieval");
+        assertEquals(3, model.seen.size(), "two evaluator passes plus one main generate");
+
+        List<ChatMessage> mainGenerate = model.seen.get(2);
+        int memIdx = indexOfUserContaining(mainGenerate, "<retrieved_memory>");
+        int questionIdx = indexOfUserContaining(mainGenerate, "where do we deploy?");
+        assertTrue(memIdx >= 0, "the framed block reaches the main model");
+        String block = ((UserMessage) mainGenerate.get(memIdx)).singleText();
+        assertTrue(block.contains("re-queried hit: the target is eu-west-1"),
+                "the RE-QUERIED hit must appear in the final framed block");
+        assertTrue(block.contains("first-shot hit: we deploy weekly"),
+                "the first-round hit is accumulated, not replaced");
+        assertTrue(memIdx < questionIdx,
+                "the iterative path stays DATA-framed before the user's question, never the instruction region");
+        assertTrue(mainGenerate.stream().noneMatch(m -> m instanceof SystemMessage sys
+                        && sys.text().contains("retrieval-sufficiency evaluator")),
+                "the memory sub-agent's transcript never crosses into the supervisor window (Isolate)");
+    }
+
+    @Test
+    void defaultStrategiesStaySingleShotWithNoEvaluatorPass() {
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        PerQuerySelector selector = new PerQuerySelector(Map.of(
+                "hello", new MemoryHit(MemoryTier.SEMANTIC, "a fact", 0.9, "m1")));
+        graph.memorySelector = selector;
+
+        ScriptedChatModel model = new ScriptedChatModel(AiMessage.from("hi"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("hello"));
+
+        graph.run(new GraphTurnRequest("s1", new AgentId("main"), model,
+                List.of(), seed, null, MemoryPolicy.defaults()));
+
+        assertEquals(List.of("hello"), selector.queries, "the HYBRID default retrieves exactly once");
+        assertEquals(1, model.seen.size(), "no evaluator pass on the single-shot default");
+    }
+
+    @Test
+    void anOversizedReQueriedHitIsStillCompressedBeforeFraming() {
+        // The Isolate/Compress acceptance: what crosses back from the iterative loop is bounded by the
+        // SAME compressThresholdChars + BoundedCompressor machinery as the single-shot path (#176).
+        InMemoryToolInvocationRecorder recorder = new InMemoryToolInvocationRecorder();
+        SupervisorGraph graph = graphWith(recorder, readProvider("unused"));
+        String oversized = "y".repeat(200); // above the 100-char threshold, below maxInput (threshold*4)
+        PerQuerySelector selector = new PerQuerySelector(Map.of(
+                "q?", new MemoryHit(MemoryTier.SEMANTIC, "short", 0.9, "m1"),
+                "refined", new MemoryHit(MemoryTier.SEMANTIC, oversized, 0.8, "m2")));
+        graph.memorySelector = selector;
+        graph.summarizer = contents -> "ITERATIVE_SUMMARY";
+
+        ScriptedChatModel model = new ScriptedChatModel(
+                AiMessage.from("INSUFFICIENT\nrefined"), AiMessage.from("SUFFICIENT"), AiMessage.from("ok"));
+        List<ChatMessage> seed = List.of(SystemMessage.from("sys"), UserMessage.from("q?"));
+        MemoryPolicy policy = new MemoryPolicy(RetrievalStrategy.ITERATIVE,
+                EnumSet.allOf(MemoryTier.class), 8, 0.0, 100);
+
+        graph.run(new GraphTurnRequest("s1", new AgentId("main"), model, List.of(), seed, null, policy));
+
+        String block = framedBlock(model.seen.get(2));
+        assertTrue(block.contains("ITERATIVE_SUMMARY"), "the oversized re-queried hit crosses back compressed");
+        assertFalse(block.contains(oversized), "never the raw oversized content");
     }
 
     // ---- #56 proxy-model Compress pillar: retrieved memory + worker digests above the threshold ----

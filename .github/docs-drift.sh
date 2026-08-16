@@ -118,6 +118,19 @@ ban "live suites (#181) stated as unscheduled / without a CI owner" \
 ban "skill-invocation surface (#191) framed as future / not-yet-in-code" \
     'future .?skillinvokertool|skill\.invoke[^.|]{0,50}(not (yet )?(built|in code|shipped)|is planned)|skillinvokertool[^.|]{0,50}not (yet )?in code'
 
+# 13. The forvum-core Pitest mutation ratchet is an ENFORCED GATE (#182: -Pmutation thresholds 95/95,
+#     mutation.yml per-PR-on-core-change + weekly; direction-guarded by .github/coverage-policy.sh) — no
+#     scanned doc may frame mutation testing as a signal-not-a-gate or as lacking a measured baseline.
+ban "mutation ratchet (#182) stated as a signal / baseline-less" \
+    'mutation (thresholds (remain|are) signals|ramp[^.|]{0,80}stays a signal, not a gate)|mutation[^.|]{0,60}signal, NOT a failing gate|until a (measured )?baseline (exists|is in hand)'
+
+# 14. The outbound channel-send surface SHIPPED (#188: the forvum-sdk ChannelSender SPI + the
+#     allowlist-gated message.send envelope) — no scanned doc may claim the engine has no outbound
+#     channel-send API. (The historical-deferral citation in docs/IMPLEMENTATION-ORDER.md quotes the
+#     phrase inside 'closes the ... deferral' and does not match this pattern.)
+ban "outbound channel-send (#188) stated as nonexistent" \
+    '(is|are) no outbound channel[- ]send'
+
 if [ "$fail" -eq 0 ]; then
     echo "docs-drift: OK (no stale status/version/coverage claims in the status-bearing docs)."
 fi

@@ -99,7 +99,47 @@ public enum PermissionScope {
      * ({@code EnumSet.of(FS_READ)}) and {@code anonymous} ({@code EnumSet.noneOf}) do not — an operator
      * grants it to a restricted role via {@code roles/<name>.json}.
      */
-    SKILL_INVOKE;
+    SKILL_INVOKE,
+    /**
+     * Authority to push an outbound message to a configured channel via {@code message.send} (#188,
+     * {@code forvum-tools-messaging}) — the first engine-to-channel push capability, backed by the
+     * {@code ChannelSender} SPI a channel plugin implements. Distinct from every other scope because its
+     * external effect is a message delivered to a human surface (a Telegram chat, ...), so a restricted
+     * role can withhold it while keeping read/compute tools. The permissive {@code default-user} role
+     * ({@code EnumSet.allOf}) includes it; {@code anonymous} ({@code EnumSet.noneOf}) does not.
+     */
+    CHANNEL_SEND,
+    /**
+     * Authority to introspect sessions and agents via {@code agents.list} / {@code sessions.list} /
+     * {@code sessions.history} (#189, {@code forvum-tools-sessions}) — the read half of the session
+     * introspection surface. Every read is confined to the caller's identity by the engine's
+     * {@code SessionAccess} seam (a session owned by another identity is invisible; an unresolved
+     * identity sees nothing), so this scope gates the tool, not cross-tenant access. Distinct from
+     * {@link #SESSION_WRITE} so a role can grant introspection without cross-session message delivery.
+     */
+    SESSION_READ,
+    /**
+     * Authority to deliver a message into another visible session via {@code sessions.send} (#189,
+     * {@code forvum-tools-sessions}) — the write half of the session introspection surface, dispatching
+     * a full turn into the target session through the engine's turn driver. The target must be visible
+     * to the caller's identity (cross-identity delivery is denied fail-closed). Distinct from
+     * {@link #SESSION_READ} so a role can grant list/history while withholding delivery, and from
+     * {@link #CHANNEL_SEND} because the external effect is a turn in another SESSION, not a raw
+     * channel push. The permissive {@code default-user} role ({@code EnumSet.allOf}) includes it;
+     * {@code anonymous} ({@code EnumSet.noneOf}) does not.
+     */
+    SESSION_WRITE,
+    /**
+     * Authority to generate media via {@code image.generate} / {@code video.generate} /
+     * {@code music.generate} (#187, {@code forvum-tools-media-gen}) — turning a prompt into a media
+     * asset written under the workspace through the {@code GenerationProvider} SPI. ONE scope gates all
+     * three tools: they share the prompt-to-asset shape and their only external effect is a generation
+     * backend spend plus a workspace write. Distinct from {@link #MEDIA_SYNTHESIZE} (local speech
+     * synthesis via an operator-installed subprocess) and {@link #FS_WRITE} so a role can grant
+     * filesystem write without granting a generation-backend call. The permissive {@code default-user}
+     * role ({@code EnumSet.allOf}) includes it; {@code anonymous} ({@code EnumSet.noneOf}) does not.
+     */
+    MEDIA_GENERATE;
 
     /**
      * Parses a string into a {@code PermissionScope}, throwing a contextual

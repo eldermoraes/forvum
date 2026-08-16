@@ -34,6 +34,18 @@ public final class CurrentIdentity {
      */
     public static final ScopedValue<String> CURRENT_IDENTITY_ID = ScopedValue.newInstance();
 
+    /**
+     * The caller's effective scopes CARRIED ACROSS a nested relayed dispatch (#189 audit, overriding the
+     * plan's OQ1): {@code sessions.send} starts a brand-new turn whose scope resolution would otherwise
+     * re-derive from the target session's identity — silently DROPPING the #166 device-scope cap the
+     * calling turn ran under (a paired device approved for {@code SESSION_WRITE} could relay into a
+     * session whose turn then re-resolves wider scopes). The relaying seam binds this to the caller's
+     * {@link #CURRENT_EFFECTIVE_SCOPES} around the nested dispatch, and {@code TurnService} INTERSECTS it
+     * into the nested turn's effective scopes — the cap can only ever restrict, never widen (#167).
+     * Unbound (every non-relayed turn) it is a no-op.
+     */
+    public static final ScopedValue<Set<PermissionScope>> INHERITED_SCOPE_CAP = ScopedValue.newInstance();
+
     /** The single-user / shared team-skill namespace (the migration default). */
     public static final String DEFAULT_IDENTITY = "default";
 

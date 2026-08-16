@@ -206,6 +206,10 @@ public class TurnService implements ChannelTurnDriver {
                 emitError(sink, turnId, "role_unresolved", roleError.getMessage(), roleError);
                 return;
             }
+            // #189 audit: a relayed dispatch (sessions.send) carries the CALLING turn's effective scopes
+            // as an inherited cap — intersect so the nested turn can only ever run NARROWER than its
+            // relayer (the #166 device cap survives the relay; #167: a cap never widens).
+            effectiveScopes = applyInheritedCap(effectiveScopes);
 
             sessions.ensureSession(sessionId, agentId, identityId, message.channelId());
 
@@ -224,6 +228,7 @@ public class TurnService implements ChannelTurnDriver {
             String tenantIdentity = tenantIdentity(identityId);
             String reply = ScopedValue.where(CurrentAgent.CURRENT_AGENT, agentId)
                     .where(CurrentAgent.CURRENT_TURN, turnId)
+                    .where(CurrentAgent.CURRENT_SESSION_ID, sessionId)
                     .where(CurrentAgent.CURRENT_USER_MESSAGE, userMessage)
                     .where(CurrentIdentity.CURRENT_EFFECTIVE_SCOPES, effectiveScopes)
                     .where(CurrentIdentity.CURRENT_IDENTITY_ID, tenantIdentity)
@@ -281,6 +286,28 @@ public class TurnService implements ChannelTurnDriver {
      */
     String tenantIdentity(String resolvedIdentity) {
         return multiUserEnabled ? resolvedIdentity : CurrentIdentity.DEFAULT_IDENTITY;
+    }
+
+    /**
+     * Intersect the turn's already-authorized scopes with a relaying turn's inherited cap (#189 audit):
+     * when {@link CurrentIdentity#INHERITED_SCOPE_CAP} is bound (a {@code sessions.send} nested
+     * dispatch), the nested turn's effective scopes are {@code scopes ∩ cap} — the relayer's own
+     * effective set is a hard ceiling, so a device-capped caller (#166) cannot mint wider scopes by
+     * relaying through another session. Unbound (every direct turn) passes through unchanged.
+     * Package-private + static so the rule is unit-testable without booting a turn.
+     */
+    static Set<PermissionScope> applyInheritedCap(Set<PermissionScope> scopes) {
+        if (!CurrentIdentity.INHERITED_SCOPE_CAP.isBound()) {
+            return scopes;
+        }
+        Set<PermissionScope> cap = CurrentIdentity.INHERITED_SCOPE_CAP.get();
+        EnumSet<PermissionScope> intersection = EnumSet.noneOf(PermissionScope.class);
+        for (PermissionScope scope : scopes) {
+            if (cap.contains(scope)) {
+                intersection.add(scope);
+            }
+        }
+        return Set.copyOf(intersection);
     }
 
     /**

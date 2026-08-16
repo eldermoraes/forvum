@@ -1,0 +1,7 @@
+{
+  "extension_id": "sessions",
+  "module_name": "forvum-tools-sessions",
+  "providers": [
+    { "type": "tool", "class": "ai.forvum.tools.sessions.SessionsToolProvider" }
+  ]
+}

@@ -129,3 +129,31 @@ Extracted verbatim from CLAUDE.md §14. Append-only; when adding a lesson here, 
   in-JVM app shuts down and releases the port before any native IT boots) — deterministic, no sleeps, no
   port-juggling, and it matches the module's own precedent. [#185]
 
+
+- **JaCoCo under Quarkus mis-attributes Panache callers to 0 % — the remedy is direct-instantiation unit
+  tests, NEVER exclusions.** The #180 audit found `forvum-engine`'s ten "substantive" jacoco `<exclude>`s
+  hid classes that ARE exercised by the `@QuarkusTest` layer but record 0 %: Quarkus augmentation rewrites
+  the call sites of Panache entity statics, so a service calling `Entity.count(...)` under the agent
+  records no coverage for the calling class even though its ITs run it (one entry, `MemoryQueryService`,
+  was simply stale — 89 % measured). Parsing `target/site/jacoco/jacoco.xml` per class showed the whole
+  bundle sat at 79.5 % LINE with only structural excludes — ~25 covered lines short. Four small unit tests
+  that instantiate the services directly (`new LoggingCronDeliverySink(...)`, a scripted `LlmSelector`
+  subclass for `DefaultSummarizer`, the extracted `TaskRecorder.toEntity` static mapper, package-private
+  `SessionCompactor.retainBoundary`) closed the gap (80.4 %/76.4 %) and let EVERY substantive exclusion be
+  deleted. LESSON: before excluding a class as "IT-only", parse jacoco.xml and check whether a tiny seam
+  extraction (a static mapper, a package-private helper) makes it unit-coverable; an exclusion is a
+  permanent blind spot, a seam is a one-line change. Guard the result: `.github/coverage-policy.sh` fails
+  any exclusion or lowered literal `<minimum>` not ratified in `.github/coverage-allowlist.txt` — and the
+  pom regex must tolerate XML comments BETWEEN `<value>` and `<minimum>` (the telegram override hid behind
+  one; `(?:\s|<!--(?:(?!-->).)*-->)*` between every pair). [#180]
+
+- **Pitest works on Java 25 out of the box (pitest-maven 1.25.9 + pitest-junit5-plugin 1.2.3); measure the
+  baseline with thresholds at 0, then ratchet just below it.** `forvum-core`'s bounded `-Pmutation` profile
+  ran the full domain in ~1 min (175 mutants, DEFAULTS mutators, 2 threads): 97 % killed / 97 % test
+  strength / 0 no-coverage — far above the 50 % greenfield guess in the original plan, because the
+  property-style parser/record tests (§11) kill mutants by design. So the ratchet went straight to an
+  ENFORCED 95/95 failing gate (headroom of ~4 mutants for legitimate refactors), direction-guarded in
+  coverage-policy.sh so a PR can only raise it. Baseline command: `-Pmutation ... -DmutationThreshold=0
+  -DtestStrengthThreshold=0` then read `target/pit-reports/mutations.xml`. Keep the profile OFF the default
+  `verify` (it re-runs the whole suite per mutant) and give it its own workflow gated on
+  `forvum-core/src/**` path changes + a weekly cron. [#182]

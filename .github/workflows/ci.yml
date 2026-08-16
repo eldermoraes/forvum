@@ -72,6 +72,12 @@ jobs:
       # Phase-2/v0.5 framed as still upcoming, "only M1 shipped", or v0.1-as-current — reappears.
       - name: Docs-drift (doc status/version claims agree with the code)
         run: bash .github/docs-drift.sh
+      # Coverage policy (#180): a jacoco exclusion or a lowered coverage threshold cannot land without
+      # an explicit, reviewed entry in .github/coverage-allowlist.txt (structural exclusions + the
+      # time-bounded, owner-tagged threshold exceptions). Also guards the #182 mutation-ratchet
+      # direction (forvum-core's Pitest thresholds may only go up).
+      - name: Coverage policy (no unratified exclusions / lowered thresholds)
+        run: bash .github/coverage-policy.sh
       # `verify` runs JaCoCo (X3 / ULTRAPLAN section 10): prepare-agent instruments the Surefire unit
       # run, then per-module `report` + `check` enforce the 80% LINE / 75% BRANCH coverage gate (the
       # native-profile Failsafe *IT smoke is deliberately not counted). A module below its threshold
@@ -83,10 +89,61 @@ jobs:
       # ChannelTurnDriver turn (the warm median is ~80-110 ms, DB-bound), so no separate CI step is needed.
       - name: Build + test reactor (JVM) + coverage gate (JaCoCo 80% line / 75% branch)
         run: ./mvnw -B verify
+      # #180: publish the measured per-module LINE/BRANCH ratios so a threshold change in a PR is
+      # reviewable against the real numbers, not just the pom minimums.
+      - name: Coverage summary (per-module JaCoCo ratios)
+        if: always() && runner.os == 'Linux'
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          print("### JaCoCo coverage (per module)\n")
+          print("| Module | LINE | BRANCH |")
+          print("|---|---|---|")
+          for f in sorted(glob.glob('*/target/site/jacoco/jacoco.xml')):
+              module = f.split('/')[0]
+              root = ET.parse(f).getroot()
+              cells = []
+              for kind in ('LINE', 'BRANCH'):
+                  c = next((c for c in root.findall('counter') if c.get('type') == kind), None)
+                  if c is None:
+                      cells.append('n/a')
+                  else:
+                      cov, mis = int(c.get('covered')), int(c.get('missed'))
+                      cells.append(f"{100 * cov / (cov + mis):.2f}% ({cov}/{cov + mis})")
+              print(f"| {module} | {cells[0]} | {cells[1]} |")
+          EOF
       - name: Smoke-test fast-jar (must start and exit 0)
         run: |
           test -f forvum-app/target/quarkus-app/quarkus-run.jar
           java -jar forvum-app/target/quarkus-app/quarkus-run.jar
+
+  # #183: the behavioral security regression suite as a NAMED, BLOCKING check. The same tests already
+  # run inside the `jvm` job's full `verify`, but a dedicated job makes a security regression visible
+  # as its own red X (and branch-protection-selectable) instead of being buried in a 1000-test run.
+  # `-Dtest` filters every reactor module, so dependency modules build but run zero tests.
+  security-suite:
+    name: Security suite (behavioral, blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Run the security regression suite (forvum-app ai.forvum.security.*)
+        run: >
+          ./mvnw -B -pl forvum-app -am test
+          -Dtest='ai.forvum.security.**'
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Djacoco.skip=true
+      - name: Upload security-suite reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-suite-reports
+          path: forvum-app/target/surefire-reports/
+          if-no-files-found: error
 
   native:
     name: Native (${{ matrix.os }})

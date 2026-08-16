@@ -24,6 +24,13 @@ public final class CurrentAgent {
     public static final ScopedValue<UUID> CURRENT_TURN = ScopedValue.newInstance();
 
     /**
+     * The current turn's session id, bound at the channel turn entry alongside {@link #CURRENT_TURN}
+     * (#189 audit). {@code EngineSessionAccess.send} reads it to refuse a self-send — a turn relaying a
+     * message into ITS OWN session would recurse through the very transcript it is appending to.
+     */
+    public static final ScopedValue<String> CURRENT_SESSION_ID = ScopedValue.newInstance();
+
+    /**
      * The originating user message of the turn, bound at the channel turn entry (P2-14 #39). The approval
      * machinery captures it on a parked confirm-required call so an approval orphaned by a process restart
      * can re-dispatch the turn from it (R1). Unbound for entries with no user prompt (cron), where

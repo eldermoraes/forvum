@@ -16,6 +16,7 @@ class BlockTypeTest {
         assertEquals("turn_reasoning", BlockType.TURN_REASONING.dbValue());
         assertEquals("turn_artifact", BlockType.TURN_ARTIFACT.dbValue());
         assertEquals("tool_execution", BlockType.TOOL_EXECUTION.dbValue());
+        assertEquals("plan", BlockType.PLAN.dbValue());
     }
 
     @ParameterizedTest

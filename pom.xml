@@ -41,6 +41,9 @@
         <module>forvum-tools-memory</module>
         <module>forvum-tools-tts</module>
         <module>forvum-tools-multimodal</module>
+        <module>forvum-tools-messaging</module>
+        <module>forvum-tools-sessions</module>
+        <module>forvum-tools-media-gen</module>
         <module>forvum-channel-web</module>
         <module>forvum-channel-tui</module>
         <module>forvum-channel-telegram</module>
@@ -71,6 +74,12 @@
         <!-- CycloneDX aggregate SBOM (#174) — invoked explicitly at release / weekly, never bound to a
              build phase, so `./mvnw verify` pays nothing. Managed here as the single version bump point. -->
         <cyclonedx-maven-plugin.version>2.9.2</cyclonedx-maven-plugin.version>
+
+        <!-- Mutation testing (#182) — the bounded Pitest signal over forvum-core's pure high-risk logic.
+             Invoked only via the `mutation` profile (never bound to `verify`), so the reactor build pays
+             nothing. Single version bump point for the plugin + its JUnit 5 bridge. -->
+        <pitest-maven.version>1.25.9</pitest-maven.version>
+        <pitest-junit5-plugin.version>1.2.3</pitest-junit5-plugin.version>
 
         <!-- Coverage gate (X3 / ULTRAPLAN section 10): 80% LINE + 75% BRANCH, measured from Surefire unit
              tests (coverage runs in `verify`). Module-local overrides relax these where the code is
