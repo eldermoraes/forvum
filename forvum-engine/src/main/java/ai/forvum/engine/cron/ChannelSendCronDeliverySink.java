@@ -98,7 +98,7 @@ public class ChannelSendCronDeliverySink implements CronDeliverySink {
         boolean delivered = switch (delivery.delivery().mode()) {
             case EXPLICIT_TO -> deliverExplicit(delivery, byChannel, egress);
             case LAST -> deliverLast(delivery, byChannel, egress);
-            case NONE -> false; // the scheduler never routes NONE here; fall through to the log
+            case NONE -> false; // the scheduler never routes NONE here; falls back to the log sink
         };
         if (!delivered) {
             fallback.deliver(delivery);
