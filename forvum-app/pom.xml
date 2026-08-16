@@ -162,6 +162,15 @@
             <groupId>ai.forvum</groupId>
             <artifactId>forvum-tools-sessions</artifactId>
         </dependency>
+        <!-- Layer-3 Media-generation tools (#187): contributes image.generate / video.generate /
+             music.generate (MEDIA_GENERATE) to the ToolRegistry — prompt-to-asset generation through the
+             SDK GenerationProvider SPI, with one bundled OpenAI-compatible images backend over a blocking
+             REST client. Outputs land under the workspace media/ outbox; inert (an actionable error)
+             when tools/media-gen.json is absent. -->
+        <dependency>
+            <groupId>ai.forvum</groupId>
+            <artifactId>forvum-tools-media-gen</artifactId>
+        </dependency>
         <!-- Layer-3 Web channel (M16): a WebSockets-Next endpoint driving turns via ChannelTurnDriver.
              Brings quarkus-websockets-next + vertx-http (the app's first HTTP server). -->
         <dependency>
